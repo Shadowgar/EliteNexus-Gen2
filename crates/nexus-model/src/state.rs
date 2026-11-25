@@ -1530,6 +1530,7 @@ fn spoken_body(short: &str) -> String {
 pub struct Model {
     pub commanders: BTreeMap<String, GameState>,
     pub active: Option<String>,
+    active_generation: u64,
     pending_header: Option<ev::Fileheader>,
     pub events_applied: u64,
     pub last_event: Timestamp,
@@ -1563,6 +1564,10 @@ impl Model {
         *kept = (*kept).max(upto);
     }
 
+    pub fn active_generation(&self) -> u64 {
+        self.active_generation
+    }
+
     pub fn active(&self) -> Option<&GameState> {
         self.active.as_ref().and_then(|k| self.commanders.get(k))
     }
@@ -1586,7 +1591,10 @@ impl Model {
         if let Some(h) = self.pending_header.take() {
             gs.apply_header(&h);
         }
-        self.active = Some(key);
+        if self.active.as_ref() != Some(&key) {
+            self.active_generation = self.active_generation.wrapping_add(1);
+            self.active = Some(key);
+        }
     }
 
     pub fn apply(&mut self, ctx: &EventCtx<'_>, event: &Event, alerts: &mut Alerts) {

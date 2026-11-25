@@ -1,7 +1,7 @@
 //! The question → tools → answer loop.
 
 use crate::chat::{Reply, ToolSpec, Turn, Usage};
-use crate::provider::{AiError, ProviderConfig, ProviderKind};
+use crate::provider::{AiError, ProviderConfig, ProviderHttp, ProviderKind};
 use crate::{anthropic, openai};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +25,7 @@ pub trait ToolHost {
 
 /// A model service reached over HTTP.
 pub struct Remote<'a> {
-    pub http: &'a reqwest::Client,
+    pub http: &'a ProviderHttp,
     pub rt: &'a Handle,
     pub cfg: &'a ProviderConfig,
     pub model: String,

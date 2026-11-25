@@ -338,7 +338,7 @@ impl NexusTools {
         };
         let query = arg_str(a, "name").map(|n| name_key(&n)).filter(|k| !k.is_empty());
         let (lists, as_of) = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
             let mats = &gs.inventory.materials;
             let lists: Vec<(&'static str, Vec<Held>)> = [("raw", MaterialCategory::Raw), ("manufactured", MaterialCategory::Manufactured), ("encoded", MaterialCategory::Encoded)]
@@ -386,7 +386,7 @@ impl NexusTools {
     pub(super) fn on_foot(&self) -> Result<Value, String> {
         // Copied under one short read; the shrinking below happens without the lock.
         let (loadouts, current, ship_locker, backpack) = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
             let inv = &gs.inventory;
             let mut loadouts: Vec<SuitLoadoutInfo> = inv.suit_loadouts.values().cloned().collect();
@@ -418,7 +418,7 @@ impl NexusTools {
     pub(super) fn credit_history(&self, a: &Value) -> Result<Value, String> {
         let limit = arg_f64(a, "limit").map_or(25, |l| l.clamp(1.0, 100.0) as usize);
         let now = Timestamp::now();
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
         let since = match arg_f64(a, "since_hours").filter(|h| *h > 0.0) {
             Some(h) => Timestamp(now.0 - (h.min(1.0e6) * 3600.0) as i64),
@@ -477,7 +477,7 @@ impl NexusTools {
         let all_modules = arg_bool(a, "all_modules").unwrap_or(false);
         let query = a.get("ship").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string()))).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         let now = Timestamp::now();
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
         // The ship being flown first, then the most valuable.
         let mut ships: Vec<&Ship> = match &query {
@@ -543,7 +543,7 @@ impl NexusTools {
     }
 
     pub(super) fn progress(&self) -> Result<Value, String> {
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
         let c = &gs.cmdr;
         let mut engineers: Vec<_> = c.engineers.values().collect();
@@ -624,7 +624,7 @@ impl NexusTools {
         // The system being flown comes from the model, and so does when the commander was last in any other: from
         // their own history, not the journal index, which also holds their alts' journals.
         let (here, last) = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
             let loc = &gs.location;
             match &asked {

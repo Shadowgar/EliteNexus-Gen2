@@ -227,7 +227,7 @@ impl Session {
         let Some(name) = params.get("name").and_then(Value::as_str) else {
             return send(out, &error(id, -32602, "Invalid params: name is required", None));
         };
-        let Some(tool) = crate::ai_tools::tool(name).filter(|t| t.offered_to(Caller::Mcp)) else {
+        let Some(tool) = crate::ai_tools::tool(name).filter(|t| t.available_to(Caller::Mcp)) else {
             return send(out, &error(id, -32602, &format!("Unknown tool: {name}"), None));
         };
         let args = match params.get("arguments") {
@@ -295,7 +295,7 @@ fn tool_list(id: Value, params: &Value, modern: bool) -> Value {
     }
     let tools: Vec<Value> = TOOLS
         .iter()
-        .filter(|t| t.offered_to(Caller::Mcp))
+        .filter(|t| t.available_to(Caller::Mcp))
         .map(|t| json!({ "name": t.name, "title": t.title, "description": t.description, "inputSchema": (t.params)(), "annotations": { "readOnlyHint": true, "openWorldHint": t.online } }))
         .collect();
     let mut r = json!({ "tools": tools });

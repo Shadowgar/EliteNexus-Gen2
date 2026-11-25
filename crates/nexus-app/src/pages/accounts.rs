@@ -21,6 +21,8 @@ pub struct StatusView {
 pub struct AccountsUi {
     edsm_key_input: String,
     inara_key_input: String,
+    edsm_key_error: Option<&'static str>,
+    inara_key_error: Option<&'static str>,
     /// "Check again" was clicked (the app asks the uplink).
     pub check_inara: bool,
 }
@@ -62,9 +64,9 @@ fn status_row(g: &mut Group, s: &ServiceStatus) {
 
 /// An API key row: a masked field and Save (and Remove once a key is stored). Returns true when
 /// the stored (sealed) value changed.
-fn key_row(g: &mut Group, stored: &mut String, input: &mut String, hint: &str) -> bool {
+fn key_row(g: &mut Group, stored: &mut String, input: &mut String, error: &mut Option<&'static str>, hint: &str) -> bool {
     let mut changed = false;
-    let detail = if stored.is_empty() { "Not set".to_string() } else { format!("Saved, {}", secrets::KEPT) };
+    let detail = if stored.is_empty() { "Not set".to_string() } else { format!("Saved, {}", secrets::storage_label(stored)) };
     g.row("API key", &detail, |ui| {
         // Right to left: the buttons, then the field.
         if !stored.is_empty() && widgets::button(ui, "Remove").clicked() {
@@ -74,11 +76,20 @@ fn key_row(g: &mut Group, stored: &mut String, input: &mut String, hint: &str) -
         let save = ui.add_enabled_ui(!input.trim().is_empty(), |ui| widgets::button(ui, "Save")).inner;
         let field = ui.add(egui::TextEdit::singleline(input).password(true).hint_text(if stored.is_empty() { hint } else { "Paste a new key to replace it" }).desired_width(200.0).margin(egui::Margin::symmetric(10, 6)));
         if (save.clicked() || field.lost_focus()) && !input.trim().is_empty() {
-            *stored = secrets::seal(input.trim());
-            input.clear();
-            changed = true;
+            match secrets::seal(input.trim()) {
+                Ok(sealed) => {
+                    *stored = sealed;
+                    input.clear();
+                    *error = None;
+                    changed = true;
+                }
+                Err(message) => *error = Some(message),
+            }
         }
     });
+    if let Some(message) = *error {
+        g.content(|ui| footnote(ui, message));
+    }
     changed
 }
 
@@ -155,7 +166,7 @@ pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &st
                 g.row("Commander name", "", |ui| {
                     changed |= ui.add(egui::TextEdit::singleline(&mut acc.edsm_commander).desired_width(200.0).margin(egui::Margin::symmetric(10, 6))).changed();
                 });
-                changed |= key_row(g, &mut acc.edsm_api_key, &mut st.edsm_key_input, "EDSM API key");
+                changed |= key_row(g, &mut acc.edsm_api_key, &mut st.edsm_key_input, &mut st.edsm_key_error, "EDSM API key");
                 link_row(g, "Get your EDSM API key", "https://www.edsm.net/en/settings/api");
                 status_row(g, &status.uplink.edsm);
             });
@@ -169,7 +180,7 @@ pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &st
                         "Send nothing until you resume (also in the toolbar). What happens while paused is dropped, not sent later; when you resume, your profile is brought up to date as it is then.",
                     );
                 }
-                changed |= key_row(g, &mut acc.inara_api_key, &mut st.inara_key_input, "Inara API key");
+                changed |= key_row(g, &mut acc.inara_api_key, &mut st.inara_key_input, &mut st.inara_key_error, "Inara API key");
                 link_row(g, "Get your Inara API key", "https://inara.cz/elite/cmdr-settings-api/");
                 // Proof that it works: who Inara says the key belongs to, with a link to the profile.
                 let s = &status.uplink.inara;

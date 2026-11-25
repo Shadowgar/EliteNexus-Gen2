@@ -34,6 +34,7 @@ mod engineering;
 
 pub struct NexusTools {
     pub model: Arc<RwLock<Model>>,
+    pub commander_scope: Option<CommanderScope>,
     pub db: Option<GalaxyDb>,
     pub index: Arc<RwLock<JournalIndex>>,
     pub spansh: Spansh,
@@ -47,22 +48,45 @@ pub struct NexusTools {
     pub budget: usize,
 }
 
+/// Identity at the time a caller was authorized to read the active model.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CommanderScope {
+    commander: Option<String>,
+    generation: u64,
+}
+
+impl CommanderScope {
+    pub fn capture(model: &Model) -> Self {
+        Self { commander: model.active.clone(), generation: model.active_generation() }
+    }
+
+    pub fn matches(&self, model: &Model) -> bool {
+        self.commander == model.active && self.generation == model.active_generation()
+    }
+}
+
 /// Who calls the tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Caller {
     /// The built-in assistant, the Ask page.
     Ask,
+    /// Ask with a Local model. Tools must keep lookups inside the app.
+    LocalAsk,
     /// An AI agent on this computer, over MCP (`crate::mcp`).
     Mcp,
 }
 
 impl Caller {
+    pub fn for_provider(kind: nexus_ai::ProviderKind) -> Self {
+        if kind == nexus_ai::ProviderKind::Local { Self::LocalAsk } else { Self::Ask }
+    }
+
     /// The longest reply this caller takes. Ask passes the model the first 12,000 characters of a tool result
     /// (`nexus_ai::agent::MAX_RESULT_CHARS`) and cuts the rest mid-JSON; an agent takes more (Claude Code warns above
     /// 10,000 tokens of tool output), so it gets more of a long answer while staying under that.
     pub fn budget(self) -> usize {
         match self {
-            Caller::Ask => nexus_ai::agent::MAX_RESULT_CHARS - 500,
+            Caller::Ask | Caller::LocalAsk => nexus_ai::agent::MAX_RESULT_CHARS - 500,
             Caller::Mcp => 30_000,
         }
     }
@@ -187,12 +211,20 @@ fn schema(props: Value, required: &[&str]) -> Value {
 const NEAR: &str = "Default: the commander's system.";
 
 impl NexusTools {
+    fn model_in_scope(&self) -> Result<parking_lot::RwLockReadGuard<'_, Model>, String> {
+        let model = self.model.read();
+        if self.commander_scope.as_ref().is_some_and(|scope| !scope.matches(&model)) {
+            return Err("The commander changed while reading game data.".into());
+        }
+        Ok(model)
+    }
+
     fn db(&self) -> Result<&GalaxyDb, String> {
         self.db.as_ref().ok_or_else(|| "The market database is unavailable.".to_string())
     }
 
     fn me(&self) -> Result<Me, String> {
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs = model.active().ok_or("No commander loaded yet.")?;
         let ship = gs.fleet.current();
         Ok(Me {
@@ -239,7 +271,7 @@ impl NexusTools {
     }
 
     fn commander(&self) -> Result<Value, String> {
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
         let loc = &gs.location;
         let ship = gs.fleet.current();
@@ -384,7 +416,7 @@ impl NexusTools {
         let me = self.me()?;
         let (origin, near) = self.origin(a, &me)?;
         let hold = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             finder::sellable_hold(model.active().ok_or("No commander loaded yet.")?)
         };
         if hold.is_empty() {
@@ -515,7 +547,7 @@ impl NexusTools {
     }
 
     fn mining_sites(&self, a: &Value) -> Result<Value, String> {
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs: &GameState = model.active().ok_or("No commander loaded yet.")?;
         let want = arg_str(a, "commodity");
         let limit = arg_f64(a, "limit").map(|v| v as usize).unwrap_or(10).clamp(1, 50);
@@ -634,7 +666,7 @@ impl NexusTools {
         } else {
             let profile = ShipProfile::from_loadout_json(me.loadout.as_deref().unwrap_or_default()).map_err(|e| format!("Ship profile: {e:?}"))?;
             let cargo = {
-                let model = self.model.read();
+                let model = self.model_in_scope()?;
                 model.active().map(|g| g.inventory.cargo.total().max(0) as u32).unwrap_or(0)
             };
             let req = GalaxyRouteRequest::new(from.as_str(), to.as_str(), &profile).cargo(cargo);
@@ -715,7 +747,7 @@ impl NexusTools {
     }
 
     fn exobiology_here(&self) -> Result<Value, String> {
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs = model.active().ok_or("No commander loaded yet.")?;
         let Some(sys) = gs.exploration.systems.get(&gs.location.system_address) else {
             return Ok(json!({ "message": "No scans of the current system yet: FSS-scan it first." }));
@@ -859,7 +891,7 @@ impl NexusTools {
         let query = arg_str(a, "system").ok_or("system is required")?;
         let mut filter = arg_str(a, "body");
         let (my_pos, own_systems, codex_region) = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             match model.active() {
                 Some(gs) => (
                     gs.location.star_pos,
@@ -894,7 +926,7 @@ impl NexusTools {
             None => Vec::new(),
         };
         let own: Option<SystemScan> = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             model.active().and_then(|gs| gs.exploration.systems.get(&place.id64).cloned())
         };
         let populated = place.population.unwrap_or(0) > 0;
@@ -1870,9 +1902,17 @@ pub struct Tool {
 impl Tool {
     pub fn offered_to(&self, caller: Caller) -> bool {
         match caller {
-            Caller::Ask => self.ask,
+            Caller::Ask | Caller::LocalAsk => self.ask,
             Caller::Mcp => self.mcp && self.read_only,
         }
+    }
+
+    /// External tool boundary pending verified ownership for historical evidence and route effects.
+    pub fn available_to(&self, caller: Caller) -> bool {
+        self.offered_to(caller)
+            && self.read_only
+            && (caller != Caller::LocalAsk || !self.online)
+            && !matches!(self.name, "journal_search" | "on_foot" | "credit_history" | "system_factions" | "progress")
     }
 
     pub fn spec(&self) -> ToolSpec {
@@ -2546,6 +2586,23 @@ mod tests {
     }
 
     #[test]
+    fn a_commander_switch_back_does_not_restore_a_previous_scope() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut tools = model_tools(commander(), &rt);
+        let scope = CommanderScope::capture(&tools.model.read());
+        tools.commander_scope = Some(scope);
+        assert!(tools.me().is_ok());
+        let now = nexus_journal::Timestamp::now().to_iso();
+        for (fid, name) in [("F2", "Other Fixture"), ("F1", "Tester")] {
+            let line = format!(r#"{{"timestamp":"{now}","event":"Commander","FID":"{fid}","Name":"{name}"}}"#);
+            let (ts, kind) = scan_line(&line).unwrap();
+            let event = Event::parse(kind, &line).unwrap();
+            tools.model.write().apply(&EventCtx { ts, name: kind, line: &line, live: true }, &event, &mut Alerts::disabled());
+        }
+        assert!(tools.me().is_err());
+    }
+
+    #[test]
     fn tools_answer_from_the_commanders_data() {
         let t = TempDb::new("ai-tools");
         let db = t.db();
@@ -2555,6 +2612,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let tools = NexusTools {
             model: Arc::new(RwLock::new(commander())),
+            commander_scope: None,
             db: Some(db.clone()),
             index: Arc::new(RwLock::new(JournalIndex::default())),
             spansh: Spansh::new(),
@@ -2733,6 +2791,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let mut tools = NexusTools {
             model: Arc::new(RwLock::new(Model::default())),
+            commander_scope: None,
             db: None,
             index: Arc::new(RwLock::new(JournalIndex::default())),
             spansh: Spansh::builder().base_url("http://127.0.0.1:9").connect_timeout(Duration::from_millis(200)).build().unwrap(),
@@ -2851,6 +2910,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let tools = NexusTools {
             model: Arc::new(RwLock::new(Model::default())),
+            commander_scope: None,
             db: None,
             index: Arc::new(RwLock::new(index)),
             spansh: Spansh::new(),
@@ -2899,6 +2959,7 @@ mod tests {
     fn model_tools(m: Model, rt: &tokio::runtime::Runtime) -> NexusTools {
         NexusTools {
             model: Arc::new(RwLock::new(m)),
+            commander_scope: None,
             db: None,
             index: Arc::new(RwLock::new(JournalIndex::default())),
             spansh: Spansh::new(),
@@ -3946,6 +4007,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let tools = NexusTools {
             model: Arc::new(RwLock::new(m)),
+            commander_scope: None,
             db: None,
             index: Arc::new(RwLock::new(JournalIndex::default())),
             spansh: Spansh::new(),
@@ -4041,6 +4103,7 @@ mod tests {
         let offline = Spansh::builder().base_url("http://127.0.0.1:9").connect_timeout(Duration::from_millis(500)).build().unwrap();
         let tools = NexusTools {
             model: Arc::new(RwLock::new(commander())),
+            commander_scope: None,
             db: Some(db.clone()),
             index: Arc::new(RwLock::new(JournalIndex::default())),
             spansh: offline,
@@ -4309,6 +4372,7 @@ mod real_data {
         let context = context_line(model.active().unwrap());
         let tools = NexusTools {
             model: Arc::new(RwLock::new(model)),
+            commander_scope: None,
             db: Some(t.db().clone()),
             index: Arc::new(RwLock::new(index)),
             spansh: Spansh::new(),
@@ -4378,6 +4442,7 @@ mod real_data {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         let tools = NexusTools {
             model: Arc::new(RwLock::new(model)),
+            commander_scope: None,
             db: Some(db.clone()),
             index: Arc::new(RwLock::new(JournalIndex::default())),
             spansh: Spansh::new(),

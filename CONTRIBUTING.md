@@ -53,6 +53,11 @@ CI (`.github/workflows/ci.yml`) runs both on `windows-latest`, `ubuntu-latest` a
 `cargo test -p nexus-app untouched -- --ignored --nocapture`. The Spansh planners can be exercised live with
 `cargo run -p nexus-spansh --example smoke -- --only riches,exobio` (all steps without `--only`).
 
+For application verification, run the checks with exactly the intended toolchain and the checked-in lockfile.
+Add `--locked` to Cargo build, Clippy and test commands. Record toolchain incompatibilities separately.
+Use synthetic inputs and a disposable settings directory for model, journal or provider work. Do not run
+ignored live checks as part of a general baseline. Use a disposable account or VM for GUI verification.
+
 ## Developer tools
 
 Each crate ships examples that work on your own journals and database:

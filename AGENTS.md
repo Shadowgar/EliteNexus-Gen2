@@ -67,6 +67,12 @@ still run it.
 * Spansh planners, live: `cargo run -p nexus-spansh --example smoke -- --only riches,exobio` (all steps: no `--only`).
 * More dev tools (journal stats, model summary, replay, EDDN upload validation) are listed in `CONTRIBUTING.md`.
 
+For model or settings changes, use a separate checkout and target directory. Keep the reviewed lockfile and
+record the exact Rust toolchain, locked build, Clippy and test results. Use synthetic journals, isolated settings
+and loopback model fixtures. Keep service uploads and update operations disabled. GUI checks need a disposable
+profile or VM if automatic recovery can reopen ordinary discovery paths. Never use real keys or private data
+in fixtures, logs, PRs or artifacts. Keep credential destinations and observations scoped across async work.
+
 ## Linux
 
 The game runs under Proton or Wine there, so its journals and Options sit in a Wine prefix

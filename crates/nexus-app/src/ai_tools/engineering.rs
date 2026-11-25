@@ -276,7 +276,7 @@ impl NexusTools {
         let module = arg_str(a, "module").map(|m| module_type(&m)).transpose()?;
         let blueprint = arg_str(a, "blueprint").map(|b| find_blueprint(module, &b)).transpose()?;
         let engineer = arg_str(a, "engineer").map(|e| find_engineer(&e)).transpose()?;
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let empty;
         let gs = match model.active() {
             Some(gs) => gs,

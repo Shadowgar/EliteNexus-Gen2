@@ -185,14 +185,14 @@ mod tests {
     fn edsm_needs_name_and_key() {
         let acc = Accounts { edsm_enabled: true, edsm_commander: "Jameson".into(), ..Default::default() };
         assert!(!config(&acc).edsm_enabled(), "no key yet");
-        let acc = Accounts { edsm_api_key: secrets::seal("k"), ..acc };
+        let acc = Accounts { edsm_api_key: secrets::seal("k").expect("synthetic key"), ..acc };
         assert!(config(&acc).edsm_enabled());
     }
 
     /// The header's button pauses every service that's on, and resumes them; one that's off isn't touched.
     #[test]
     fn pause_every_upload_that_is_on() {
-        let mut acc = Accounts { eddn_upload: true, edsm_enabled: true, edsm_commander: "Jameson".into(), edsm_api_key: secrets::seal("k"), edastro_enabled: true, ..Default::default() };
+        let mut acc = Accounts { eddn_upload: true, edsm_enabled: true, edsm_commander: "Jameson".into(), edsm_api_key: secrets::seal("k").expect("synthetic key"), edastro_enabled: true, ..Default::default() };
         assert_eq!(acc.uploads(), [("EDDN", false), ("EDSM", false), ("EDAstro", false)], "Inara is off");
         acc.pause_uploads(true);
         assert_eq!(acc.uploads(), [("EDDN", true), ("EDSM", true), ("EDAstro", true)]);

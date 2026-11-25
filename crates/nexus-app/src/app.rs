@@ -107,8 +107,6 @@ pub struct NexusApp {
     /// The "Ask" assistant and its page state.
     assistant: crate::assistant::AssistantService,
     ask_ui: pages::ask::AskUi,
-    /// Routes the assistant planned, moved to the Navigation page each frame.
-    ai_routes: std::sync::Arc<parking_lot::Mutex<Option<pages::navigation::PlannedRoute>>>,
     /// AI agents on this computer, over MCP (Settings › AI agents; off by default), and their own Spansh client: one
     /// request at a time, so they never hold up the app's own searches.
     mcp: crate::mcp::McpService,
@@ -266,7 +264,6 @@ impl NexusApp {
             colo: Default::default(),
             assistant: if ov.demo && shot.is_some() { crate::assistant::AssistantService::demo() } else { Default::default() },
             ask_ui: pages::ask::AskUi::new(ov.demo && shot.is_some(), shot.is_some() && ov.tab.as_deref() == Some("tools")),
-            ai_routes: Default::default(),
             mcp,
             agents_spansh,
             overrides: ov,
@@ -749,20 +746,28 @@ impl NexusApp {
             Page::Colonisation => settings_changed |= pages::colonisation::show(ui, gs, &self.market, &mut self.colo, &mut self.settings.colonisation),
             Page::Ask => match pages::ask::show(ui, &mut self.assistant, &mut self.ask_ui, &mut self.settings.ai) {
                 pages::ask::AskAction::Ask(question) => {
+                    self.assistant.sync_scope(&self.settings.ai, &model);
+                    let caller = crate::ai_tools::Caller::for_provider(self.settings.ai.provider);
                     let tools = crate::ai_tools::NexusTools {
                         model: self.core.model.clone(),
+                        commander_scope: None,
                         db: self.market.db.clone(),
                         index: self.core.index.clone(),
                         spansh: self.spansh.clone(),
                         rt: self.rt.handle().clone(),
-                        routes: self.ai_routes.clone(),
-                        caller: crate::ai_tools::Caller::Ask,
-                        budget: crate::ai_tools::Caller::Ask.budget(),
+                        routes: Default::default(),
+                        caller,
+                        budget: caller.budget(),
                     };
                     let context = crate::ai_tools::context_line(gs);
                     self.assistant.ask(question, self.settings.ai.provider(), tools, context, ui.ctx());
                 }
-                pages::ask::AskAction::SettingsChanged => settings_changed = true,
+                pages::ask::AskAction::SettingsChanged => {
+                    if self.assistant.sync_scope(&self.settings.ai, &model) {
+                        self.ask_ui.input.clear();
+                    }
+                    settings_changed = true;
+                }
                 pages::ask::AskAction::None => {}
             },
             Page::Carrier => {
@@ -975,6 +980,8 @@ impl NexusApp {
             self.speaker.say("Elite Nexus voice check. All systems nominal, commander.");
         }
         if restart {
+            self.assistant.replace_source();
+            self.ask_ui.input.clear();
             self.core = start_core(ctx, self.overrides.journal_dir.as_ref().or(self.settings.journal_dir.as_ref()), self.market.history_sink(), &self.settings);
             self.sync.attach(&self.core);
             self.shots.attach(&self.core);
@@ -1048,6 +1055,7 @@ impl NexusApp {
 fn agent_tools(core: &Core, db: Option<nexus_galaxy::GalaxyDb>, rt: &tokio::runtime::Handle, spansh: &nexus_spansh::Spansh) -> crate::ai_tools::NexusTools {
     crate::ai_tools::NexusTools {
         model: core.model.clone(),
+        commander_scope: None,
         db,
         index: core.index.clone(),
         spansh: spansh.clone(),
@@ -1297,18 +1305,14 @@ impl eframe::App for NexusApp {
         self.frame_started = Some(Instant::now());
         self.screenshot_tick(ctx);
         self.drain_alerts();
-        self.assistant.poll();
-        self.sync.tick(&self.core);
-        // A route the assistant planned goes to the Navigation page (and the clipboard flow).
-        let planned = self.ai_routes.lock().take();
-        if let Some(route) = planned {
-            let first = route.waypoints.first().map(|w| w.system.clone());
-            self.notify(
-                Alert::new(nexus_journal::Timestamp::now(), nexus_model::AlertKind::Navigation, Priority::Low, format!("{} route ready", route.kind))
-                    .detail(first.map(|s| format!("{} · first stop {s} (see Navigation)", route.summary)).unwrap_or_else(|| route.summary.clone())),
-            );
-            self.nav.planned = Some(route);
+        {
+            let model = self.core.model.read();
+            if self.assistant.sync_scope(&self.settings.ai, &model) {
+                self.ask_ui.input.clear();
+            }
+            self.assistant.poll();
         }
+        self.sync.tick(&self.core);
         self.watch_game();
         // While the game runs, a downloaded update waits for Elite Nexus to close (the banner says so).
         let playing = self.game_process.running() == Some(true);

@@ -3,7 +3,7 @@
 
 use crate::agent::Remote;
 use crate::chat::{Reply, ToolCall, ToolSpec, Turn, Usage};
-use crate::provider::{AiError, auth_headers, send_json};
+use crate::provider::AiError;
 use serde_json::{Value, json};
 
 const MAX_TOKENS: u32 = 2048;
@@ -73,8 +73,7 @@ pub(crate) fn parse_reply(v: &Value) -> Result<Reply, AiError> {
 
 pub(crate) fn complete(remote: &Remote, system: &str, tools: &[ToolSpec], turns: &[Turn]) -> Result<Reply, AiError> {
     let body = request_body(&remote.model, system, tools, turns);
-    let url = format!("{}messages", remote.cfg.base_url());
-    let v = send_json(remote.http, remote.rt, &url, &auth_headers(remote.cfg), Some(&body), remote.stop)?;
+    let v = remote.http.request(remote.rt, remote.cfg, "messages", Some(&body), remote.stop)?;
     parse_reply(&v)
 }
 

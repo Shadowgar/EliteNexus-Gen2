@@ -166,7 +166,7 @@ impl NexusTools {
         let max_age = arg_f64(a, "max_age_days").filter(|d| *d >= 1.0).map(|d| d.round().min(3650.0) as u32);
         // The build, what it needs and where to search from, under one short read.
         let (what, hull, needs, near, from) = {
-            let model = self.model.read();
+            let model = self.model_in_scope()?;
             let gs = model.active().ok_or("No commander loaded yet.")?;
             let (what, hull, mut needs) = match (arg_str(a, "build"), arg_str(a, "ship")) {
                 (Some(text), _) => {

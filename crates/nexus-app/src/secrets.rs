@@ -15,15 +15,27 @@ pub const KEPT: &str = if cfg!(windows) {
     "on this PC, unencrypted but readable only by your user account"
 };
 
-/// Encrypts a secret for storage. Empty input stays empty.
-pub fn seal(plain: &str) -> String {
+/// Describe older Windows values according to their actual protection.
+pub fn storage_label(sealed: &str) -> &'static str {
+    if cfg!(windows) && sealed.starts_with("b64:") { "stored without encryption by an earlier version" } else { KEPT }
+}
+
+#[cfg(any(windows, test))]
+const SAVE_FAILED: &str = "Windows could not protect this key. The saved credential has not changed.";
+
+pub fn seal(plain: &str) -> Result<String, &'static str> {
     if plain.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
-    match platform::protect(plain.as_bytes()) {
-        Some(bytes) => format!("dpapi:{}", B64.encode(bytes)),
-        None => format!("b64:{}", B64.encode(plain.as_bytes())),
-    }
+    #[cfg(windows)]
+    { protect_windows(plain, platform::protect) }
+    #[cfg(not(windows))]
+    { Ok(format!("b64:{}", B64.encode(plain.as_bytes()))) }
+}
+
+#[cfg(any(windows, test))]
+fn protect_windows(plain: &str, protect: impl FnOnce(&[u8]) -> Option<Vec<u8>>) -> Result<String, &'static str> {
+    protect(plain.as_bytes()).map(|bytes| format!("dpapi:{}", B64.encode(bytes))).ok_or(SAVE_FAILED)
 }
 
 /// Decrypts a stored secret; returns an empty string if it cannot be read.
@@ -88,9 +100,6 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    pub fn protect(_: &[u8]) -> Option<Vec<u8>> {
-        None
-    }
     pub fn unprotect(_: &[u8]) -> Option<Vec<u8>> {
         None
     }
@@ -101,11 +110,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn protection_failure_returns_no_storable_value() {
+        assert_eq!(protect_windows("synthetic", |_| None), Err(SAVE_FAILED));
+        assert_eq!(protect_windows("synthetic", |_| Some(vec![1, 2, 3])).unwrap(), "dpapi:AQID");
+    }
+
+    #[test]
     fn roundtrip() {
-        let s = seal("my-secret-api-key-123");
+        let s = seal("my-secret-api-key-123").expect("test credential storage");
         assert!(!s.contains("my-secret"));
         assert_eq!(open(&s), "my-secret-api-key-123");
-        assert_eq!(seal(""), "");
+        assert_eq!(seal(""), Ok(String::new()));
         assert_eq!(open("garbage"), "");
     }
 }

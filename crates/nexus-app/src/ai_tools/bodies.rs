@@ -351,9 +351,9 @@ impl NexusTools {
         let max_ls = arg_f64(a, "max_distance_ls").map_or(0, |d| d.round().clamp(0.0, 1.0e9) as u32);
         let radius = |default: f64| arg_f64(a, "max_distance_ly").unwrap_or(default).clamp(1.0, f64::from(*crate::tours::limits::RADIUS_LY.end()));
         let me = self.me()?;
-        let own_runs = || {
-            let model = self.model.read();
-            model.active().map(sf::own_grounds).unwrap_or_default()
+        let own_runs = || -> Result<_, String> {
+            let model = self.model_in_scope()?;
+            Ok(model.active().map(sf::own_grounds).unwrap_or_default())
         };
         if let Some(to) = arg_str(a, "to_system") {
             let from = arg_str(a, "near_system").unwrap_or_else(|| me.system.clone());
@@ -364,7 +364,7 @@ impl NexusTools {
             let q = Query { around: Around::Route { from: from.clone(), to: to.clone() }, radius_ly: radius(25.0), class, volcanism, min_locations, max_ls, material };
             let found = self.spansh_search(ROUTE_TIMEOUT, sf::along(&self.spansh, &q, asked))?;
             let stops = sf::route_stops(&found, asked, material);
-            return Ok(shape_route(&from, &to, &q, &found, &stops, asked, &own_runs(), self.budget));
+            return Ok(shape_route(&from, &to, &q, &found, &stops, asked, &own_runs()?, self.budget));
         }
         let (origin, near) = self.origin_online(a, &me)?;
         let q = Query { around: Around::Here(origin), radius_ly: radius(100.0), class, volcanism, min_locations, max_ls, material };
@@ -375,7 +375,7 @@ impl NexusTools {
         if most {
             list.sort_by(|x, y| y.likely(material).total_cmp(&x.likely(material)).then(x.distance_ly.total_cmp(&y.distance_ly)));
         }
-        let model = self.model.read();
+        let model = self.model_in_scope()?;
         let gs = model.active();
         let own = gs.map(sf::own_grounds).unwrap_or_default();
         let worked = |c: &Candidate| match (gs, c.system_address, c.body_id) {

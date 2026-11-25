@@ -77,12 +77,23 @@ pub struct HudTheme {
     pub matrix: nexus_hud::HudMatrix,
 }
 
-/// Which model answers "Ask" questions. The key is DPAPI-sealed (see secrets.rs).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+struct SavedCredential {
+    destination: nexus_ai::Destination,
+    sealed: String,
+}
+
+/// Which model answers Ask questions. Credentials are persisted by normalized destination.
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiSettings {
     pub provider: nexus_ai::ProviderKind,
-    pub api_key: String,
+    /// Legacy key with unknown ownership, retained for explicit recovery without activating it.
+    #[serde(rename = "legacy_api_key", alias = "api_key", skip_serializing_if = "String::is_empty")]
+    api_key: String,
+    credentials: Vec<SavedCredential>,
+    #[serde(skip)]
+    credential_generation: u64,
     /// Empty = automatic (the cheapest suitable model the service offers).
     pub model: String,
     /// Empty = the provider's default address (needed only for "Other").
@@ -91,14 +102,123 @@ pub struct AiSettings {
     pub agents: bool,
 }
 
+#[cfg(test)]
+mod ai_credential_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_key_requires_rebinding() {
+        let ai: AiSettings = serde_json::from_str(r#"{"provider":"Custom","base_url":"https://models.example.invalid/v1","api_key":"b64:c3ludGhldGljLWtleQ=="}"#).unwrap();
+        assert!(!ai.provider().has_credential());
+        assert!(!ai.is_ready());
+        assert_eq!(ai.api_key, "b64:c3ludGhldGljLWtleQ==");
+    }
+
+    #[test]
+    fn provider_and_endpoint_keys_are_isolated() {
+        let mut ai = AiSettings::default();
+        ai.bind("gemini-fixture").unwrap();
+        ai.provider = nexus_ai::ProviderKind::Claude;
+        assert!(!ai.is_ready());
+        ai.bind("claude-fixture").unwrap();
+        ai.provider = nexus_ai::ProviderKind::Local;
+        assert!(ai.is_ready());
+        assert!(!ai.provider().has_credential());
+        ai.provider = nexus_ai::ProviderKind::Custom;
+        ai.base_url = "https://models.example.invalid/v1".into();
+        ai.bind("custom-fixture").unwrap();
+        ai.base_url = "https://models.example.invalid/v1/".into();
+        assert!(ai.is_ready());
+        ai.base_url = "https://models.example.invalid/v2".into();
+        assert!(!ai.is_ready());
+        ai.provider = nexus_ai::ProviderKind::Gemini;
+        assert!(ai.is_ready());
+        let serialized = serde_json::to_string(&ai).unwrap();
+        assert!(!serialized.contains("gemini-fixture"));
+        assert!(!format!("{ai:?}").contains("models.example.invalid"));
+    }
+
+    #[test]
+    fn legacy_key_moves_only_when_explicitly_rebound() {
+        let mut ai: AiSettings = serde_json::from_str(r#"{"provider":"Claude","api_key":"b64:c3ludGhldGlj"}"#).unwrap();
+        let migrated = serde_json::to_value(&ai).unwrap();
+        assert!(migrated.get("api_key").is_none());
+        assert!(migrated.get("legacy_api_key").is_some());
+        assert!(!ai.is_ready());
+        ai.rebind_legacy().unwrap();
+        assert!(ai.is_ready());
+        assert!(!ai.has_legacy_key());
+        ai.provider = nexus_ai::ProviderKind::Gemini;
+        assert!(!ai.is_ready());
+    }
+}
+
+impl std::fmt::Debug for AiSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AiSettings").field("provider", &self.provider).field("agents", &self.agents).finish_non_exhaustive()
+    }
+}
+
 impl AiSettings {
-    /// The provider configuration with the key unsealed (for one request; never logged).
+    pub fn destination(&self) -> Result<nexus_ai::Destination, nexus_ai::AiError> {
+        nexus_ai::Destination::new(self.provider, &self.base_url)
+    }
+
+    fn saved_credential(&self, destination: &nexus_ai::Destination) -> Option<&SavedCredential> {
+        self.credentials.iter().find(|c| &c.destination == destination)
+    }
+
     pub fn provider(&self) -> nexus_ai::ProviderConfig {
-        nexus_ai::ProviderConfig { kind: self.provider, api_key: crate::secrets::open(&self.api_key), model: self.model.trim().to_string(), base_url: self.base_url.trim().to_string() }
+        let config = nexus_ai::ProviderConfig::new(self.provider, self.base_url.clone(), self.model.trim().to_string());
+        let Ok(destination) = self.destination() else { return config };
+        let Some(saved) = self.saved_credential(&destination) else { return config };
+        config.with_credential(destination, crate::secrets::open(&saved.sealed))
     }
 
     pub fn is_ready(&self) -> bool {
-        !self.provider.needs_key() || !self.api_key.is_empty()
+        self.provider().is_ready()
+    }
+
+    pub fn credential_generation(&self) -> u64 {
+        self.credential_generation
+    }
+
+    pub fn credential_label(&self) -> Option<&'static str> {
+        self.saved_credential(&self.destination().ok()?).map(|c| crate::secrets::storage_label(&c.sealed))
+    }
+
+    pub fn has_legacy_key(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+
+    pub fn bind(&mut self, input: &str) -> Result<(), String> {
+        let destination = self.destination().map_err(|e| e.to_string())?;
+        let key = input.trim();
+        if key.is_empty() {
+            return Err("Enter a key for this destination.".into());
+        }
+        let sealed = crate::secrets::seal(key).map_err(str::to_owned)?;
+        self.credentials.retain(|c| c.destination != destination);
+        self.credentials.push(SavedCredential { destination, sealed });
+        self.credential_generation = self.credential_generation.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn rebind_legacy(&mut self) -> Result<(), String> {
+        let old = crate::secrets::open(&self.api_key);
+        if old.is_empty() {
+            return Err("The previous key could not be read. Enter a new key for this destination.".into());
+        }
+        self.bind(&old)?;
+        self.api_key.clear();
+        Ok(())
+    }
+
+    pub fn remove_credential(&mut self) {
+        if let Ok(destination) = self.destination() {
+            self.credentials.retain(|c| c.destination != destination);
+            self.credential_generation = self.credential_generation.wrapping_add(1);
+        }
     }
 }
 
@@ -288,29 +408,32 @@ impl Settings {
         let (mut settings, mut what, advice) = match serde_json::from_str::<Settings>(&text) {
             Ok(s) if utf8 => return (s, None),
             Ok(s) => (s, "settings.json isn't UTF-8 text (an editor saved it in another encoding), so letters outside English in it may have been replaced.".to_string(), ""),
-            Err(e) => match serde_json::from_str::<serde_json::Value>(&text) {
-                // Valid JSON, but some settings have the wrong type: keep all the others.
-                Ok(v) => {
-                    let (s, dropped) = salvage(v);
-                    let names: Vec<&str> = dropped.iter().map(String::as_str).collect();
-                    let what = match names.len() {
-                        0 => format!("settings.json couldn't be read ({e}), so Elite Nexus started with the default settings."),
-                        n => format!("Some settings in settings.json couldn't be read ({e}): {} {} back at the default. Every other setting was kept.", and_list(&names), if n == 1 { "is" } else { "are" }),
-                    };
-                    (s, what, "")
-                }
-                // Not JSON at all, typically a folder typed in by hand with single backslashes.
-                Err(_) => {
-                    let (s, recovered) = recover_keys(&text);
-                    let mut what = format!("settings.json isn't valid JSON ({e}), so Elite Nexus started with the default settings.");
-                    if !recovered.is_empty() {
-                        let keys = if recovered.len() == 1 { "key was" } else { "keys were" };
-                        what += &format!(" Your {} {keys} recovered from it; uploads stay off until you switch them on again under Accounts & sync.", and_list(&recovered));
+            Err(e) => {
+                let location = format!("line {}, column {}", e.line(), e.column());
+                match serde_json::from_str::<serde_json::Value>(&text) {
+                    // Valid JSON, but some settings have the wrong type: keep all the others.
+                    Ok(v) => {
+                        let (s, dropped) = salvage(v);
+                        let names: Vec<&str> = dropped.iter().map(String::as_str).collect();
+                        let what = match names.len() {
+                            0 => format!("settings.json couldn't be read ({location}), so Elite Nexus started with the default settings."),
+                            n => format!("Some settings in settings.json couldn't be read ({location}): {} {} back at the default. Every other setting was kept.", and_list(&names), if n == 1 { "is" } else { "are" }),
+                        };
+                        (s, what, "")
                     }
-                    let advice = r" If you edited it by hand: JSON needs every backslash written twice, so \\PC\Elite Dangerous is written \\\\PC\\Elite Dangerous. Settings › Journal › Browse… sets folders without editing the file.";
-                    (s, what, advice)
+                    // Not JSON at all, typically a folder typed in by hand with single backslashes.
+                    Err(_) => {
+                        let (s, recovered) = recover_keys(&text);
+                        let mut what = format!("settings.json isn't valid JSON ({location}), so Elite Nexus started with the default settings.");
+                        if !recovered.is_empty() {
+                            let keys = if recovered.len() == 1 { "key was" } else { "keys were" };
+                            what += &format!(" Your {} {keys} recovered from it; uploads stay off until you switch them on again under Accounts & sync.", and_list(&recovered));
+                        }
+                        let advice = r" If you edited it by hand: JSON needs every backslash written twice, so \\PC\Elite Dangerous is written \\\\PC\\Elite Dangerous. Settings › Journal › Browse… sets folders without editing the file.";
+                        (s, what, advice)
+                    }
                 }
-            },
+            }
         };
         if !utf8 && !what.contains("UTF-8") {
             what += " It isn't UTF-8 text either (an editor saved it in another encoding), so letters outside English in it may have been replaced.";
@@ -431,7 +554,7 @@ fn recover_keys(text: &str) -> (Settings, Vec<&'static str>) {
     // The Ask key only with its service: paired with the default service instead, it would be sent to another company.
     let provider = string_value(text, "provider").and_then(|p| serde_json::from_value::<nexus_ai::ProviderKind>(serde_json::Value::String(p)).ok());
     let base_url = string_value(text, "base_url").unwrap_or_default();
-    if let (Some(api_key), Some(provider)) = (sealed("api_key"), provider)
+    if let (Some(api_key), Some(provider)) = (sealed("legacy_api_key").or_else(|| sealed("api_key")), provider)
         && (provider != nexus_ai::ProviderKind::Custom || !base_url.is_empty())
     {
         // AI agents stay off, as uploads do: the commander switches them back on.
@@ -616,6 +739,16 @@ mod tests {
         s.save(&d.0);
         assert_eq!(std::fs::read_to_string(&kept[0]).expect("copy"), HAND_EDITED);
         assert!(Settings::load(&d.0).1.is_none(), "the saved file reads");
+    }
+
+    #[test]
+    fn settings_diagnostics_contain_locations_not_credential_values() {
+        let d = Dir::new("redact");
+        std::fs::write(d.0.join("settings.json"), r#"{"ai":{"provider":"private-diagnostic-marker"}}"#).unwrap();
+        let (_, problem) = Settings::load(&d.0);
+        let message = problem.expect("invalid setting").what;
+        assert!(message.contains("line 1"));
+        assert!(!message.contains("private-diagnostic-marker"));
     }
 
     #[test]

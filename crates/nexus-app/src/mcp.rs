@@ -260,7 +260,7 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
             let _ = reply.send(WireReply::Error("Elite Nexus stopped answering AI agents (Settings › AI agents was switched off).".into()));
             continue;
         }
-        let answer = match crate::ai_tools::tool(&name).filter(|t| t.offered_to(Caller::Mcp)) {
+        let answer = match crate::ai_tools::tool(&name).filter(|t| t.available_to(Caller::Mcp)) {
             None => WireReply::Error(format!("Unknown tool \"{name}\".")),
             Some(t) => match limiter.admit(t.online, Instant::now()) {
                 Err(e) => {
@@ -269,7 +269,13 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
                 }
                 Ok(()) => {
                     // A tool that panics answers with an error; the worker keeps answering.
+                    let scope = crate::ai_tools::CommanderScope::capture(&tools.model.read());
+                    tools.commander_scope = Some(scope.clone());
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tools.call(t.name, &args)));
+                    if !scope.matches(&tools.model.read()) || !swaps.is_empty() || off.load(Ordering::Acquire) {
+                        let _ = reply.send(WireReply::Error("Elite Nexus changed data scope while answering.".into()));
+                        continue;
+                    }
                     let mut s = status.lock();
                     s.answered += 1;
                     s.last = Some((t.name, Instant::now()));
@@ -421,6 +427,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let tools = NexusTools {
             model: Arc::new(parking_lot::RwLock::new(nexus_model::Model::default())),
+            commander_scope: None,
             db: None,
             index: Default::default(),
             spansh: nexus_spansh::Spansh::new(),

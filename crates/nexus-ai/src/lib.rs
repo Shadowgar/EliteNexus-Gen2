@@ -15,7 +15,7 @@ pub mod provider;
 
 pub use agent::{Answer, Backend, Remote, Step, ToolHost, ask, trim_history};
 pub use chat::{Reply, ToolCall, ToolSpec, Turn, Usage};
-pub use provider::{AiError, ProviderConfig, ProviderKind, list_models, resolve_model};
+pub use provider::{AiError, Destination, ProviderConfig, ProviderHttp, ProviderKind, list_models, resolve_model};
 
 /// Instructions for the model. Static, so providers can cache it; the commander's situation is
 /// added to each question instead.

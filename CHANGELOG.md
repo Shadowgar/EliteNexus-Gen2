@@ -5,6 +5,11 @@ release time that section becomes the new version and the release workflow publi
 
 ## Unreleased
 
+- **Ask:** Save credentials for each model service address. Earlier keys need explicit confirmation before use.
+  Ask starts a fresh conversation when its model connection, key, commander or journal source changes.
+  Ask and AI agents offer current-state tools while historical and route-writing tools are unavailable.
+- **Credential storage:** Windows keeps the existing credential when it cannot protect a new key.
+
 ## [0.8.2] - 2026-11-25
 
 Elite Nexus now says when a new version is out and installs it with a click, and sold exobiology data no longer stays

@@ -15,6 +15,7 @@ use nexus_ai::ProviderKind;
 pub struct AskUi {
     pub input: String,
     key_input: String,
+    key_error: Option<String>,
     show_setup: bool,
     show_other: bool,
     /// Screenshot runs (`--demo`): show the conversation without a configured provider.
@@ -41,7 +42,6 @@ const SUGGESTIONS: &[&str] = &[
     "Where can I make the most money in the next hour?",
     "Where should I sell my cargo?",
     "What's the best deal near me right now?",
-    "Plan an exobiology trip near me worth a billion credits",
     "Where's the nearest raw material trader for my ship?",
 ];
 
@@ -52,7 +52,7 @@ pub fn show(ui: &mut Ui, svc: &mut AssistantService, st: &mut AskUi, ai: &mut Ai
     if (!ai.is_ready() && !st.preview) || st.show_setup {
         return setup(ui, st, ai);
     }
-    chat(ui, svc, st)
+    chat(ui, svc, st, crate::ai_tools::Caller::for_provider(ai.provider))
 }
 
 fn short_name(k: ProviderKind) -> &'static str {
@@ -96,59 +96,70 @@ fn setup(ui: &mut Ui, st: &mut AskUi, ai: &mut AiSettings) -> AskAction {
     ScrollArea::vertical().id_salt("ask-setup").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(36.0);
         centered(ui, 520.0, |ui| {
-            hero(ui, "Ask Elite Nexus", "An AI co-pilot that knows your ship, cargo, journal and the live galaxy market. Ask things like “Where can I make the most money in the next hour?”");
+            hero(ui, "Ask Elite Nexus", "Ask about your current commander and available galaxy data. Questions go to the model service you choose.");
             ui.add_space(22.0);
             widgets::card_frame().show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let kind = ai.provider;
-                if kind.needs_key() {
-                    ui.label(RichText::new("Connect once").font(display(15.5)).color(pal::TEXT));
-                    ui.add_space(4.0);
-                    if let Some(url) = kind.key_url() {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("1").font(display(13.0)).color(pal::ACCENT));
-                            ui.hyperlink_to(format!("Get a free {} key {}", short_name(kind), icon::ARROW_SQUARE_OUT), url);
-                        });
-                    }
+                if kind == ProviderKind::Local {
+                    widgets::footnote(ui, "Start your model server. An API key is optional for Local.");
+                }
+                if let Some(url) = kind.key_url() {
+                    ui.hyperlink_to(format!("Get a {} key {}", short_name(kind), icon::ARROW_SQUARE_OUT), url);
+                }
+                if let Ok(destination) = ai.destination() {
+                    widgets::footnote(ui, &format!("{} at {}", kind.label(), destination.base_url()));
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("2").font(display(13.0)).color(pal::ACCENT));
-                        ui.label(RichText::new("Paste it here").color(pal::TEXT));
-                    });
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        let w = ui.available_width() - 110.0;
-                        let field = ui.add_sized([w, 34.0], TextEdit::singleline(&mut st.key_input).password(true).hint_text("API key").vertical_align(Align::Center));
-                        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if (widgets::primary_button(ui, "Connect").clicked() || enter) && !st.key_input.trim().is_empty() {
-                            ai.api_key = secrets::seal(st.key_input.trim());
-                            st.key_input.clear();
-                            st.show_setup = false;
-                            action = AskAction::SettingsChanged;
+                        let width = (ui.available_width() - 110.0).max(80.0);
+                        ui.add_sized([width, 34.0], TextEdit::singleline(&mut st.key_input).password(true).hint_text("API key"));
+                        let button = ui.add_enabled_ui(!st.key_input.trim().is_empty(), |ui| widgets::primary_button(ui, "Save key")).inner;
+                        if button.clicked() {
+                            match ai.bind(&st.key_input) {
+                                Ok(()) => {
+                                    st.key_input.clear();
+                                    st.key_error = None;
+                                    st.show_setup = false;
+                                    action = AskAction::SettingsChanged;
+                                }
+                                Err(error) => st.key_error = Some(error),
+                            }
                         }
                     });
-                    if !ai.api_key.is_empty() {
+                    if let Some(kept) = ai.credential_label() {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{} A key is saved, {}", icon::LOCK_KEY, secrets::KEPT)).size(13.0).color(pal::GOOD));
+                            widgets::footnote(ui, &format!("Saved key, {kept}."));
                             if ui.small_button("Remove").clicked() {
-                                ai.api_key.clear();
+                                ai.remove_credential();
+                                st.key_error = None;
                                 action = AskAction::SettingsChanged;
                             }
                         });
                     }
-                } else {
-                    ui.add(Label::new(RichText::new("Uses a model running on this computer: start Ollama or LM Studio with a model that supports tools.").color(pal::DIM)).wrap());
-                    ui.add_space(6.0);
-                    if widgets::primary_button(ui, "Connect").clicked() {
-                        st.show_setup = false;
-                        action = AskAction::SettingsChanged;
+                    if ai.has_legacy_key() {
+                        widgets::footnote(ui, "A previously saved key is inactive. Use it here only if it belongs to this model address.");
+                        if widgets::button(ui, "Use previous key for this address").clicked() {
+                            match ai.rebind_legacy() {
+                                Ok(()) => {
+                                    st.key_input.clear();
+                                    st.key_error = None;
+                                    action = AskAction::SettingsChanged;
+                                }
+                                Err(error) => st.key_error = Some(error),
+                            }
+                        }
                     }
+                } else {
+                    widgets::footnote(ui, "Set a valid model address below before saving a key. Remote addresses require HTTPS.");
+                }
+                if let Some(error) = &st.key_error {
+                    ui.add(Label::new(RichText::new(error).color(pal::BAD)).wrap());
                 }
                 ui.add_space(8.0);
-                let kept = format!("Your key stays {}.", secrets::KEPT);
+                let kept = format!("New keys are saved {}.", secrets::KEPT);
                 let note = match kind {
                     ProviderKind::Gemini => format!("{kept} On Google's free tier, questions may be used to improve Google's models; paid use is not."),
                     ProviderKind::Claude => format!("{kept} Claude Haiku costs about a tenth of a cent per question."),
-                    ProviderKind::Local => "Nothing leaves this computer.".to_string(),
+                    ProviderKind::Local => "Questions go to the configured model address. Online lookup tools are disabled for Local.".to_string(),
                     ProviderKind::Custom => kept,
                 };
                 ui.add(Label::new(RichText::new(note).size(12.5).color(pal::FAINT)).wrap());
@@ -166,6 +177,8 @@ fn setup(ui: &mut Ui, st: &mut AskUi, ai: &mut AiSettings) -> AskAction {
                                     // The address and model belonged to the previous provider.
                                     ai.base_url.clear();
                                     ai.model.clear();
+                                    st.key_input.clear();
+                                    st.key_error = None;
                                     action = AskAction::SettingsChanged;
                                 }
                             }
@@ -184,6 +197,8 @@ fn setup(ui: &mut Ui, st: &mut AskUi, ai: &mut AiSettings) -> AskAction {
                                 u => u,
                             };
                             if ui.add(TextEdit::singleline(&mut ai.base_url).hint_text(hint).desired_width(300.0)).changed() {
+                                st.key_input.clear();
+                                st.key_error = None;
                                 action = AskAction::SettingsChanged;
                             }
                             ui.end_row();
@@ -202,7 +217,7 @@ fn setup(ui: &mut Ui, st: &mut AskUi, ai: &mut AiSettings) -> AskAction {
     action
 }
 
-fn chat(ui: &mut Ui, svc: &mut AssistantService, st: &mut AskUi) -> AskAction {
+fn chat(ui: &mut Ui, svc: &mut AssistantService, st: &mut AskUi, caller: crate::ai_tools::Caller) -> AskAction {
     let mut action = AskAction::None;
     // Toolbar: the model in use, a new conversation, settings.
     ui.horizontal(|ui| {
@@ -226,7 +241,7 @@ fn chat(ui: &mut Ui, svc: &mut AssistantService, st: &mut AskUi) -> AskAction {
         ui.add_space(6.0);
         ScrollArea::vertical().id_salt("ask-tools").max_height(ui.available_height() * 0.6).auto_shrink([false, true]).show(ui, |ui| {
             centered(ui, COLUMN, |ui| {
-                if capabilities(ui) {
+                if capabilities(ui, caller) {
                     st.show_tools = false;
                 }
             });
@@ -243,7 +258,7 @@ fn chat(ui: &mut Ui, svc: &mut AssistantService, st: &mut AskUi) -> AskAction {
             centered(ui, COLUMN, |ui| {
                 if svc.exchanges.is_empty() {
                     ui.add_space(40.0);
-                    hero(ui, "What do you want to do, Commander?", "I can see your ship, cargo and journal, the live market and Spansh's route planners.");
+                    hero(ui, "What do you want to do, Commander?", "I can see your current ship, cargo and available market observations.");
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
                         for s in SUGGESTIONS {
@@ -373,12 +388,11 @@ fn lower_first(s: &str) -> String {
 
 /// What Ask can see and do, from the tool registry (`ai_tools::TOOLS`), so it is always the list the model gets: what
 /// it reads, what it asks online services, what it changes, and what AI agents may read besides. True when closed.
-fn capabilities(ui: &mut Ui) -> bool {
+fn capabilities(ui: &mut Ui, caller: crate::ai_tools::Caller) -> bool {
     use crate::ai_tools::{Caller, TOOLS, Tool};
-    let groups: [(&str, Pick, &str); 3] = [
-        ("Reads your game and Elite Nexus' own database", |t| t.read_only && !t.online, "A system the galaxy database doesn't know is looked up on Spansh."),
+    let groups: [(&str, Pick, &str); 2] = [
+        ("Reads your game and Elite Nexus' own database", |t| t.read_only && !t.online, "Searches cover available local observations."),
         ("Asks Spansh and EDGalaxyData", |t| t.read_only && t.online, ""),
-        ("Changes something in Elite Nexus", |t| !t.read_only, ""),
     ];
     let mut closed = false;
     widgets::card_frame().show(ui, |ui| {
@@ -390,7 +404,7 @@ fn capabilities(ui: &mut Ui) -> bool {
         ui.add(Label::new(RichText::new("Every answer comes from these tools, and the line under it names the ones it used. Hover over one for what the model is told about it.").size(size::FOOTNOTE).color(pal::DIM)).wrap());
         let cols = if ui.available_width() > 620.0 { 2 } else { 1 };
         for (heading, pick, note) in groups {
-            let tools: Vec<&Tool> = TOOLS.iter().filter(|t| t.offered_to(Caller::Ask) && pick(t)).collect();
+            let tools: Vec<&Tool> = TOOLS.iter().filter(|t| t.available_to(caller) && pick(t)).collect();
             if tools.is_empty() {
                 continue;
             }
@@ -411,7 +425,7 @@ fn capabilities(ui: &mut Ui) -> bool {
                 widgets::footnote(ui, note);
             }
         }
-        let agents: Vec<String> = TOOLS.iter().filter(|t| t.offered_to(Caller::Mcp) && !t.offered_to(Caller::Ask)).map(|t| lower_first(t.title)).collect();
+        let agents: Vec<String> = TOOLS.iter().filter(|t| t.available_to(Caller::Mcp) && !t.available_to(caller)).map(|t| lower_first(t.title)).collect();
         if !agents.is_empty() {
             ui.add_space(12.0);
             widgets::footnote(ui, &format!("AI agents (Settings › AI agents) may also read {}. They can't change anything.", agents.join(", ")));

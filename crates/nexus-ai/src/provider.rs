@@ -69,46 +69,128 @@ impl ProviderKind {
     }
 }
 
-/// The user's model service. `api_key` is plain text in memory only (the app stores it sealed).
-#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+/// The complete normalized API base, including its path. The provider is part of the credential identity.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Destination {
+    kind: ProviderKind,
+    base: String,
+}
+
+impl fmt::Debug for Destination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Destination").field("kind", &self.kind).finish_non_exhaustive()
+    }
+}
+
+impl Destination {
+    pub fn new(kind: ProviderKind, address: &str) -> Result<Self, AiError> {
+        let address = address.trim();
+        let raw = if kind.takes_address() && !address.is_empty() { address } else { kind.default_base_url() };
+        let mut base = reqwest::Url::parse(raw).map_err(|_| AiError::Destination)?;
+        let loopback = base.host_str().is_some_and(|host| {
+            host == "localhost" || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        });
+        if !(base.scheme() == "https" && base.has_host() || base.scheme() == "http" && loopback)
+            || !base.username().is_empty() || base.password().is_some() || base.query().is_some() || base.fragment().is_some()
+        {
+            return Err(AiError::Destination);
+        }
+        if !base.path().ends_with('/') {
+            let path = format!("{}/", base.path());
+            base.set_path(&path);
+        }
+        Ok(Self { kind, base: base.into() })
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base
+    }
+}
+
+#[derive(Clone)]
+struct Credential {
+    destination: Destination,
+    key: String,
+}
+
+/// An immutable model connection for one request. Keys are attached only to their exact destination.
+#[derive(Clone, Default)]
 pub struct ProviderConfig {
     pub kind: ProviderKind,
-    pub api_key: String,
-    /// Empty = choose automatically.
     pub model: String,
-    /// Empty = the provider's default address. Only used where [`ProviderKind::takes_address`].
     pub base_url: String,
+    credential: Option<Credential>,
 }
 
 impl fmt::Debug for ProviderConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ProviderConfig")
-            .field("kind", &self.kind)
-            .field("api_key", &if self.api_key.is_empty() { "<empty>" } else { "<redacted>" })
-            .field("model", &self.model)
-            .field("base_url", &self.base_url)
-            .finish()
+        f.debug_struct("ProviderConfig").field("kind", &self.kind).finish_non_exhaustive()
     }
 }
 
 impl ProviderConfig {
-    /// Service address ending in `/`. Gemini and Claude ignore a stored address: one left over from a custom or
-    /// local service would send their requests, and their key, there.
-    pub fn base_url(&self) -> String {
-        let u = self.base_url.trim();
-        let u = if u.is_empty() || !self.kind.takes_address() { self.kind.default_base_url() } else { u };
-        if u.is_empty() || u.ends_with('/') { u.to_string() } else { format!("{u}/") }
+    pub fn new(kind: ProviderKind, base_url: String, model: String) -> Self {
+        Self { kind, base_url, model, credential: None }
     }
 
-    /// Enough is configured to try a request.
+    pub fn destination(&self) -> Result<Destination, AiError> {
+        Destination::new(self.kind, &self.base_url)
+    }
+
+    pub fn with_credential(mut self, destination: Destination, key: String) -> Self {
+        self.credential = Some(Credential { destination, key });
+        self
+    }
+
+    fn key_for(&self, destination: &Destination) -> Option<&str> {
+        self.credential.as_ref().filter(|c| c.destination == *destination).map(|c| c.key.trim()).filter(|key| !key.is_empty())
+    }
+
+    pub fn has_credential(&self) -> bool {
+        self.destination().is_ok_and(|destination| self.key_for(&destination).is_some())
+    }
+
     pub fn is_ready(&self) -> bool {
-        (!self.kind.needs_key() || !self.api_key.trim().is_empty()) && !self.base_url().is_empty()
+        self.destination().is_ok() && (!self.kind.needs_key() || self.has_credential())
+    }
+}
+
+/// Model-only transport. Redirects are never followed. There is no fallback to a caller's ambient client.
+#[derive(Clone)]
+pub struct ProviderHttp {
+    remote: Result<reqwest::Client, AiError>,
+    loopback: Result<reqwest::Client, AiError>,
+}
+
+impl Default for ProviderHttp {
+    fn default() -> Self {
+        let client = |direct| {
+            let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).user_agent("EliteNexus");
+            let builder = if direct { builder.no_proxy() } else { builder };
+            builder.build().map_err(|_| AiError::Http("could not initialize the model connection".into()))
+        };
+        Self { remote: client(false), loopback: client(true) }
+    }
+}
+
+impl ProviderHttp {
+    pub(crate) fn request(&self, rt: &Handle, cfg: &ProviderConfig, path: &str, body: Option<&Value>, stop: Option<&AtomicBool>) -> Result<Value, AiError> {
+        let destination = cfg.destination()?;
+        // Only loopback is allowed to use HTTP. Keep cleartext loopback requests out of ambient proxies.
+        let connection = if destination.base_url().starts_with("http://") { &self.loopback } else { &self.remote };
+        let client = connection.as_ref().map_err(Clone::clone)?;
+        let headers = auth_headers(cfg, &destination)?;
+        let url = format!("{}{path}", destination.base_url());
+        send_json(client, rt, &url, &headers, body, stop)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum AiError {
+    #[error("enter an HTTPS model address or a loopback HTTP address without embedded credentials, query or fragment")]
+    Destination,
+    #[error("connect a credential for this model service first")]
+    Credential,
     #[error("network error: {0}")]
     Http(String),
     #[error("{message} (HTTP {code})")]
@@ -142,13 +224,15 @@ pub(crate) fn send_json(http: &reqwest::Client, rt: &Handle, url: &str, headers:
             None => http.get(url),
         };
         for (k, v) in headers {
-            req = req.header(*k, v);
+            let mut value = reqwest::header::HeaderValue::from_str(v).map_err(|_| AiError::Credential)?;
+            value.set_sensitive(matches!(*k, "authorization" | "x-api-key"));
+            req = req.header(*k, value);
         }
         let request = async move {
             let r = req.timeout(Duration::from_secs(120)).send().await?;
             let status = r.status().as_u16();
             let retry_after = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse::<u64>().ok());
-            let text = r.text().await?;
+            let text = if r.status().is_success() { r.text().await? } else { String::new() };
             Ok::<_, reqwest::Error>((status, retry_after, text))
         };
         // Losing the race to `stop` drops the request, which cancels it.
@@ -163,18 +247,24 @@ pub(crate) fn send_json(http: &reqwest::Client, rt: &Handle, url: &str, headers:
             Ok((status, _, text)) if (200..300).contains(&status) => {
                 return serde_json::from_str(&text).map_err(|e| AiError::Parse(e.to_string()));
             }
-            Ok((status, retry_after, text)) => {
+            Ok((status, retry_after, _)) => {
                 let retryable = status >= 500 || (status == 429 && retry_after.is_some());
                 if retryable && attempt < 2 {
                     pause(Duration::from_secs(retry_after.unwrap_or(2 << attempt).min(20)), stop);
                     continue;
                 }
-                return Err(AiError::Status { code: status, message: error_message(&text) });
+                let message = match status {
+                    300..=399 => "The model service redirected the request. Check its configured address.",
+                    401 | 403 => "The model service rejected authorization.",
+                    404 => "The model or service path was not found.",
+                    _ => "The model service rejected the request.",
+                };
+                return Err(AiError::Status { code: status, message: message.into() });
             }
             Err(e) if attempt < 2 && (e.is_timeout() || e.is_connect()) => {
                 pause(Duration::from_secs(1 + u64::from(attempt)), stop);
             }
-            Err(e) => return Err(AiError::Http(e.to_string())),
+            Err(_) => return Err(AiError::Http("request could not be sent or read".into())),
         }
     }
     Err(AiError::Http("gave up after retries".into()))
@@ -208,21 +298,9 @@ fn pause(d: Duration, stop: Option<&AtomicBool>) {
     }
 }
 
-/// The human-readable part of an error body (OpenAI, Gemini and Anthropic shapes).
-fn error_message(body: &str) -> String {
-    let v: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-    let v = if let Value::Array(a) = &v { a.first().cloned().unwrap_or(Value::Null) } else { v };
-    v.pointer("/error/message")
-        .or_else(|| v.get("message"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| body.chars().take(300).collect())
-}
-
-/// The provider's model IDs (`models/` prefixes removed).
-pub fn list_models(http: &reqwest::Client, rt: &Handle, cfg: &ProviderConfig) -> Result<Vec<String>, AiError> {
-    let url = format!("{}models", cfg.base_url());
-    let v = send_json(http, rt, &url, &auth_headers(cfg), None, None)?;
+/// The provider's model IDs. Discovery and completion use the same destination and stop flag.
+pub fn list_models(http: &ProviderHttp, rt: &Handle, cfg: &ProviderConfig, stop: &AtomicBool) -> Result<Vec<String>, AiError> {
+    let v = http.request(rt, cfg, "models", None, Some(stop))?;
     let ids = v
         .get("data")
         .and_then(Value::as_array)
@@ -245,13 +323,16 @@ pub fn resolve_model(cfg: &ProviderConfig, available: &[String]) -> Option<Strin
         .or_else(|| available.first().cloned())
 }
 
-pub(crate) fn auth_headers(cfg: &ProviderConfig) -> Vec<(&'static str, String)> {
-    let key = cfg.api_key.trim();
-    match cfg.kind {
-        ProviderKind::Claude => vec![("x-api-key", key.to_string()), ("anthropic-version", "2023-06-01".to_string())],
-        _ if key.is_empty() => Vec::new(),
-        _ => vec![("authorization", format!("Bearer {key}"))],
+fn auth_headers(cfg: &ProviderConfig, destination: &Destination) -> Result<Vec<(&'static str, String)>, AiError> {
+    let key = cfg.key_for(destination);
+    if cfg.kind.needs_key() && key.is_none() {
+        return Err(AiError::Credential);
     }
+    Ok(match (cfg.kind, key) {
+        (ProviderKind::Claude, Some(key)) => vec![("x-api-key", key.to_string()), ("anthropic-version", "2023-06-01".to_string())],
+        (_, Some(key)) => vec![("authorization", format!("Bearer {key}"))],
+        (_, None) => Vec::new(),
+    })
 }
 
 #[cfg(test)]
@@ -273,14 +354,14 @@ mod tests {
     #[test]
     fn urls_keys_and_errors() {
         let c = ProviderConfig { kind: ProviderKind::Custom, base_url: "https://example.org/v1".into(), ..Default::default() };
-        assert_eq!(c.base_url(), "https://example.org/v1/");
+        assert_eq!(c.destination().unwrap().base_url(), "https://example.org/v1/");
         assert!(!c.is_ready(), "custom services need a key");
         assert!(ProviderConfig { kind: ProviderKind::Local, ..Default::default() }.is_ready());
-        let k = ProviderConfig { api_key: "secret-123".into(), ..Default::default() };
-        assert!(!format!("{k:?}").contains("secret-123"));
-        assert_eq!(auth_headers(&k)[0].1, "Bearer secret-123");
-        assert_eq!(error_message(r#"[{"error":{"code":400,"message":"API key not valid."}}]"#), "API key not valid.");
-        assert_eq!(error_message(r#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#), "slow down");
+        let k = ProviderConfig::default();
+        let destination = k.destination().unwrap();
+        let k = k.with_credential(destination.clone(), "synthetic".into());
+        assert!(!format!("{k:?}").contains("synthetic"));
+        assert_eq!(auth_headers(&k, &destination).unwrap()[0].1, "Bearer synthetic");
         assert!(AiError::Status { code: 400, message: "API key not valid. Please pass a valid API key.".into() }.is_auth());
     }
 
@@ -289,10 +370,83 @@ mod tests {
         // Switching from a custom service back to Gemini used to keep sending Gemini's key to the custom address.
         for kind in [ProviderKind::Gemini, ProviderKind::Claude] {
             let c = ProviderConfig { kind, base_url: "https://agentrouter.org/v1".into(), ..Default::default() };
-            assert_eq!(c.base_url(), kind.default_base_url(), "{kind:?}");
+            assert_eq!(c.destination().unwrap().base_url(), kind.default_base_url(), "{kind:?}");
         }
         let local = ProviderConfig { kind: ProviderKind::Local, base_url: "http://localhost:1234/v1".into(), ..Default::default() };
-        assert_eq!(local.base_url(), "http://localhost:1234/v1/", "LM Studio's port is kept");
+        assert_eq!(local.destination().unwrap().base_url(), "http://localhost:1234/v1/", "LM Studio's port is kept");
+    }
+
+    #[test]
+    fn endpoint_must_be_transport_safe() {
+        for base_url in ["http://example.invalid/v1", "https://user:pass@example.invalid/v1", "https://example.invalid/v1?token=synthetic", "https://example.invalid/v1#api"] {
+            let cfg = ProviderConfig { kind: ProviderKind::Custom, base_url: base_url.into(), ..Default::default() };
+            assert_eq!(cfg.destination(), Err(AiError::Destination));
+        }
+        let cfg = ProviderConfig { kind: ProviderKind::Local, base_url: "http://example.invalid/v1".into(), ..Default::default() };
+        assert!(!cfg.is_ready(), "remote model addresses require HTTPS even in Local");
+    }
+
+    #[test]
+    fn one_key_is_valid_for_one_destination() {
+        let custom = ProviderConfig::new(ProviderKind::Custom, "https://example.invalid/api".into(), String::new());
+        let destination = custom.destination().unwrap();
+        let mut config = custom.with_credential(destination.clone(), "fixture-token".into());
+        assert_eq!(auth_headers(&config, &destination).unwrap()[0].1, "Bearer fixture-token");
+        config.base_url = "https://example.invalid/other".into();
+        assert_eq!(auth_headers(&config, &config.destination().unwrap()), Err(AiError::Credential));
+        config.kind = ProviderKind::Local;
+        assert!(auth_headers(&config, &config.destination().unwrap()).unwrap().is_empty());
+        config.kind = ProviderKind::Claude;
+        let dest = config.destination().unwrap();
+        assert_eq!(auth_headers(&config, &dest), Err(AiError::Credential));
+        let config = config.with_credential(dest.clone(), "claude-fixture".into());
+        assert_eq!(auth_headers(&config, &dest).unwrap()[0], ("x-api-key", "claude-fixture".into()));
+    }
+
+    #[test]
+    fn discovery_is_bound_and_redirects_stay_unfollowed() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let origin = TcpListener::bind("127.0.0.1:0").unwrap();
+        let other = TcpListener::bind("127.0.0.1:0").unwrap();
+        other.set_nonblocking(true).unwrap();
+        let address = origin.local_addr().unwrap();
+        let target = other.local_addr().unwrap();
+        origin.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut conn = loop {
+                match origin.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+                    Err(error) => panic!("synthetic model server did not receive a request: {error}"),
+                }
+            };
+            conn.set_nonblocking(false).unwrap();
+            conn.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut reader = BufReader::new(&mut conn);
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" { break; }
+                head.push_str(&line);
+            }
+            let body = "private-fixture-response";
+            write!(conn, "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{target}/models\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            head
+        });
+        let cfg = ProviderConfig::new(ProviderKind::Custom, format!("http://{address}/v1"), String::new());
+        let cfg = cfg.clone().with_credential(cfg.destination().unwrap(), "synthetic-auth".into());
+        let stop = AtomicBool::new(false);
+        let err = list_models(&ProviderHttp::default(), runtime.handle(), &cfg, &stop).unwrap_err();
+        assert!(matches!(err, AiError::Status { code: 307, .. }));
+        assert!(!err.to_string().contains("private-fixture-response"));
+        let request = server.join().unwrap();
+        assert!(request.starts_with("GET /v1/models "));
+        assert!(request.contains("authorization: Bearer synthetic-auth"));
+        assert_eq!(other.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
 use crate::agent::Remote;
 use crate::chat::{Reply, ToolCall, ToolSpec, Turn, Usage};
-use crate::provider::{AiError, ProviderConfig, ProviderKind, auth_headers, send_json};
+use crate::provider::{AiError, ProviderConfig, ProviderKind};
 use serde_json::{Value, json};
 
 pub(crate) fn request_body(cfg: &ProviderConfig, model: &str, system: &str, tools: &[ToolSpec], turns: &[Turn]) -> Value {
@@ -78,8 +78,7 @@ pub(crate) fn parse_reply(v: &Value) -> Result<Reply, AiError> {
 pub(crate) fn complete(remote: &Remote, system: &str, tools: &[ToolSpec], turns: &[Turn]) -> Result<Reply, AiError> {
     let cfg = remote.cfg;
     let body = request_body(cfg, &remote.model, system, tools, turns);
-    let url = format!("{}chat/completions", cfg.base_url());
-    let v = send_json(remote.http, remote.rt, &url, &auth_headers(cfg), Some(&body), remote.stop)?;
+    let v = remote.http.request(remote.rt, cfg, "chat/completions", Some(&body), remote.stop)?;
     parse_reply(&v)
 }
 
@@ -93,7 +92,7 @@ mod tests {
 
     #[test]
     fn request_carries_history_and_tools() {
-        let cfg = ProviderConfig { kind: ProviderKind::Gemini, api_key: "k".into(), ..Default::default() };
+        let cfg = ProviderConfig::new(ProviderKind::Gemini, String::new(), String::new());
         let turns = vec![
             Turn::User("Where am I?".into()),
             Turn::Assistant {
@@ -110,7 +109,7 @@ mod tests {
         assert_eq!(b["messages"][3]["tool_call_id"], "c1");
         assert_eq!(b["tools"][0]["function"]["name"], "commander");
         assert_eq!(b["reasoning_effort"], "low");
-        let local = ProviderConfig { kind: ProviderKind::Local, ..Default::default() };
+        let local = ProviderConfig::new(ProviderKind::Local, String::new(), String::new());
         assert!(request_body(&local, "m", "s", &[], &[]).get("reasoning_effort").is_none());
     }
 
