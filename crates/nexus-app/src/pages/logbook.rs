@@ -33,16 +33,6 @@ pub struct LogbookUi {
 }
 
 pub fn show(ui: &mut Ui, gs: &GameState, st: &mut LogbookUi, index: &Arc<RwLock<JournalIndex>>) {
-    let generation = index.read().source_generation;
-    if st.source_generation != Some(generation) {
-        st.source_generation = Some(generation);
-        st.selected = None;
-        st.detail = None;
-        st.event = None;
-        st.search.clear();
-        st.search_hits = Slot::default();
-    }
-    st.search_hits.tick();
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(12.0, 10.0);
         if let Some(t) = crate::widgets::tabs(ui, st.tab, &[(Tab::Activity, "Activity"), (Tab::Journal, "All commanders"), (Tab::Jumps, "Travel"), (Tab::Docks, "Docking"), (Tab::Ledger, "Credits ledger")]) {
@@ -123,7 +113,26 @@ pub fn show(ui: &mut Ui, gs: &GameState, st: &mut LogbookUi, index: &Arc<RwLock<
     }
 }
 
+pub fn show_without_commander(ui: &mut Ui, st: &mut LogbookUi, index: &Arc<RwLock<JournalIndex>>) {
+    if st.tab != Tab::Journal && crate::widgets::button(ui, "All commanders").clicked() {
+        st.tab = Tab::Journal;
+    }
+    if st.tab == Tab::Journal {
+        journal(ui, st, index);
+    }
+}
+
 fn journal(ui: &mut Ui, st: &mut LogbookUi, index: &Arc<RwLock<JournalIndex>>) {
+    let generation = index.read().source_generation;
+    if st.source_generation != Some(generation) {
+        st.source_generation = Some(generation);
+        st.selected = None;
+        st.detail = None;
+        st.event = None;
+        st.search.clear();
+        st.search_hits = Slot::default();
+    }
+    st.search_hits.tick();
     let idx = index.read();
     ui.horizontal(|ui| {
         let current = st.event.map(|id| idx.name(id).to_string()).unwrap_or_else(|| "All events".into());

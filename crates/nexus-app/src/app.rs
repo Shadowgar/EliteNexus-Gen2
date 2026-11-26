@@ -697,6 +697,11 @@ impl NexusApp {
         let model = self.core.model.read();
         let Some(gs) = model.active() else {
             drop(model);
+            if self.page == Page::Logbook && !self.core.index.read().is_empty() {
+                self.page_header(ui, "Logbook", "No current commander");
+                pages::logbook::show_without_commander(ui, &mut self.log, &self.core.index);
+                return;
+            }
             let hint = "Start Elite Dangerous: Elite Nexus picks everything up live. If the game runs on another computer, share its journal folder and pick it here.";
             self.before_commander(ui, &status, icon::USER, "No commander found", hint);
             return;
