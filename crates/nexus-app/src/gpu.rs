@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// The command-line flag of a copy started after the last one lost its graphics device.
-pub const RESTART_FLAG: &str = "--gpu-reset";
+pub use crate::launch::GPU_RESET as RESTART_FLAG;
 
 /// A run shorter than this doesn't restart itself: the device failing again at once would only loop.
 const MIN_RUN: Duration = Duration::from_secs(60);
@@ -37,12 +37,12 @@ pub fn is_loss(panic_message: &str) -> bool {
 }
 
 /// Starts a new copy after a lost device, when this one has run long enough. True when it started.
-pub fn restart(started: Instant) -> bool {
+pub fn restart(started: Instant, recovery: &crate::launch::Recovery) -> bool {
     if started.elapsed() < MIN_RUN {
         tracing::warn!("graphics device lost {}s after start: not restarting", started.elapsed().as_secs());
         return false;
     }
-    let launched = std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg(RESTART_FLAG).spawn());
+    let launched = recovery.command().spawn();
     match launched {
         Ok(_) => {
             tracing::info!("graphics device lost: started a new copy");
@@ -67,6 +67,7 @@ mod tests {
 
     #[test]
     fn a_short_run_doesnt_restart() {
-        assert!(!restart(Instant::now()));
+        let Some(recovery) = crate::launch::Recovery::capture(&[], std::path::Path::new(".")) else { return };
+        assert!(!restart(Instant::now(), &recovery));
     }
 }

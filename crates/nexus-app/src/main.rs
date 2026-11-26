@@ -17,6 +17,7 @@ mod game_process;
 mod gpu;
 mod icon;
 mod jobs;
+mod launch;
 mod market;
 mod mcp;
 mod notices;
@@ -160,6 +161,7 @@ fn main() -> eframe::Result {
     // A panic is written straight to crash.log (nexus.log may not be open, and a release build has no console), with
     // where it happened: the next start says so, and the commander can send the file. Nothing is uploaded.
     let crash_log = data_dir.join("crash.log");
+    let recovery = launch::Recovery::capture(&std::env::args_os().skip(1).collect::<Vec<_>>(), &data_dir);
     static REPORTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
@@ -185,8 +187,12 @@ fn main() -> eframe::Result {
         }
         // The window's graphics device was lost and egui-wgpu can't draw on a new one: a new copy takes over, once.
         static RESTARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if name == "main" && !screenshot_run && gpu::is_loss(&info.to_string()) && !RESTARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            gpu::restart(started);
+        if name == "main"
+            && let Some(recovery) = &recovery
+            && gpu::is_loss(&info.to_string())
+            && !RESTARTED.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            gpu::restart(started, recovery);
         }
     }));
 
