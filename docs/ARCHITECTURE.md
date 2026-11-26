@@ -1,6 +1,6 @@
 # Elite Nexus — Architecture
 
-Native Rust (edition 2024, rustc 1.99, MSVC) desktop companion for Elite Dangerous that replaces
+Native Rust (edition 2024, Rust 1.100.0 for development, 1.95.0 minimum verified on Windows MSVC) desktop companion for Elite Dangerous that replaces
 EDDiscovery, ED Market Connector, Odyssey Materials Helper, Observatory, Exploration Buddy, EDCoPilot-style
 alerts, OD Elite Tracker and the website tools (INARA/Spansh/EDSM/EDSY/Coriolis/EDAstro/ED Tools/EDRefCard)
 with one fast app.

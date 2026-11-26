@@ -46,12 +46,12 @@ file is for anyone changing the code. Read it before your first change; several 
 
 ## Build, test, check
 
-The locked workspace requires Rust **1.95.0** or newer. CI checks the minimum and stable toolchains.
+Develop with exact Rust **1.100.0**. The verified Windows minimum remains **1.95.0**. CI checks the pinned development toolchain, the minimum, and floating stable. Record the actual toolchain for each result.
 
 ```powershell
-cargo build --locked -p nexus-app
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo test --locked --workspace
+cargo +1.100.0 build --locked -p nexus-app
+cargo +1.100.0 clippy --locked --workspace --all-targets -- -D warnings
+cargo +1.100.0 test --locked --workspace
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same clippy and tests on `windows-latest`, `ubuntu-latest` and
@@ -68,6 +68,8 @@ still run it.
 * Tests that need the internet are `#[ignore]`d, e.g. `cargo test -p nexus-app untouched -- --ignored --nocapture`.
 * Spansh planners, live: `cargo run -p nexus-spansh --example smoke -- --only riches,exobio` (all steps: no `--only`).
 * More dev tools (journal stats, model summary, replay, EDDN upload validation) are listed in `CONTRIBUTING.md`.
+
+Use focused checks on the development toolchain during iteration. At milestone completion, repeat the locked build, strict Clippy and workspace tests with `+1.95.0`. Review compiler-floor changes explicitly and keep the dependency graph locked.
 
 For model or settings changes, use a separate checkout and target directory. Keep the reviewed lockfile and
 record the exact Rust toolchain, locked build, Clippy and test results. Use synthetic journals, isolated settings

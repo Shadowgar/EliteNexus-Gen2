@@ -5,9 +5,9 @@ just want to use the app, the [README](README.md) and the [user guide](docs/USER
 
 ## Building from source
 
-The locked workspace requires Rust **1.95.0** or newer. CI checks the minimum and stable toolchains.
+Use exact Rust **1.100.0** for Gen2 development and initial verification. Rust **1.95.0** remains the verified Windows minimum. The CI matrix tracks exact development and compatibility toolchains as well as floating stable.
 
-Elite Nexus is a Rust workspace. A stable toolchain from [rustup.rs](https://rustup.rs) is all it needs on Windows,
+Elite Nexus is a Rust workspace. Install the pinned toolchain from [rustup.rs](https://rustup.rs). On Windows the build also uses the MSVC linker,
 Linux and macOS: CI builds on all three with nothing else installed.
 
 ```sh
@@ -46,8 +46,8 @@ narrow (1000 px) and a wide window whenever a layout changes.
 ## Checks
 
 ```sh
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo test --locked --workspace
+cargo +1.100.0 clippy --locked --workspace --all-targets -- -D warnings
+cargo +1.100.0 test --locked --workspace
 ```
 
 CI (`.github/workflows/ci.yml`) runs both on `windows-latest`, `ubuntu-latest` and `macos-latest` for every push to
