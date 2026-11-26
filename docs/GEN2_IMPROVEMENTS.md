@@ -162,31 +162,31 @@ These entries describe the stacked diff from [the reviewed 01A head][a-head] thr
 - **Regression evidence.** A focused synthetic recording-transport test passed, covering held Market retirement and quiet events. The standalone uplink command passed 89 tests including a doctest. [Transient retirement][b-snapshot] · [Focused ownership fixtures][b-uplink] · [Stacked head][b-head]
 - **Upstream applicability.** Depends on ENX-011 for generation and FID. Review the forwarding attachment and translator reset independently of persistent queue policy.
 
-## Phase 01C ? Independent application identity and trust
+## Phase 01C — Independent application identity and trust
 
-Phase 01C changes are implemented in draft. The verification record below distinguishes automated results from platform runtime and distribution. See the phase draft for its current status.
+Phase 01C changes are implemented in draft. The verification record below distinguishes automated results from platform runtime and distribution. See [the stacked Phase 01C draft](https://github.com/Shadowgar/EliteNexus-Gen2/pull/3) for its current status.
 
-### ENX-017 ? Exact development toolchain and retained compatibility
+### ENX-017 — Exact development toolchain and retained compatibility
 
 **Class and subsystem:** Development infrastructure improvement, compatibility improvement. The workspace now directs ordinary work to Rust 1.100.0, with exact 1.95.0 compatibility and floating stable in CI. The earlier policy tracked only minimum and stable, which left the normal compiler subject to updates. The lockfile and declared minimum are unchanged. See [development policy](../CONTRIBUTING.md) and [matrix](../.github/workflows/ci.yml). [Policy commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/067d3bd). The project-local compiler choice is fork-specific. The three-lane verification pattern adapts to upstream.
 
-### ENX-018 ? Preserve launch scope during GPU recovery
+### ENX-018 — Preserve launch scope during GPU recovery
 
 **Class and subsystem:** Reliability improvement, privacy improvement. The original restart kept the reset flag. Gen2 preserves the original options, working directory and resolved profile. Screenshot runs suppress automatic restart. Fixture runs use an explicit or empty journal source and keep speech, protected game files, MCP, updates and services disabled. The [launch fixtures](../crates/nexus-app/src/launch.rs) cover arguments with spaces, repeated recovery, profile pinning and policy flags. The original argument fixture failed and the corrected fixture passed on Windows. Related guard wiring lives in [app.rs](../crates/nexus-app/src/app.rs) and [settings UI](../crates/nexus-app/src/pages/settings.rs). [Recovery commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/03694ba). The generic restart fix is independently reviewable upstream. Gen2-specific startup and service flags require adaptation. Native device-loss recovery is outstanding.
 
-### ENX-019 ? Separate executable, profiles and local endpoints
+### ENX-019 — Separate executable, profiles and local endpoints
 
 **Class and subsystem:** Fork-specific change, architecture improvement. The original identity targeted its own executable, settings path and local endpoint. Gen2 gives those same surfaces dedicated names so both applications can coexist. The [profile resolver](../crates/nexus-app/src/settings.rs), [app identity](../crates/nexus-app/src/identity.rs), [MCP](../crates/nexus-app/src/mcp.rs) and [packaging](../tools/build-release.ps1) carry the new identity. The profile fixture preserves an upstream marker and the export fixture verifies the app header and shared format. Journal reads remain shareable. Profile migration is manual, copy-based and reversible. [Identity commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/c04dc49) ? [Export fixture](https://github.com/Shadowgar/EliteNexus-Gen2/commit/244a1f7). Names and paths are fork-specific. The profile collision checks adapt to downstream builds. Native coexistence on each OS is outstanding.
 
-### ENX-020 ? Bind updates to the Gen2 product and signing identity
+### ENX-020 — Bind updates to the Gen2 product and signing identity
 
 **Class and subsystem:** Security improvement, compatibility improvement, fork-specific change. Upstream trusts its own signed artifacts and release workflow. Gen2 uses its own signed product and repository fields, canonical version and assets, authenticated archive size and digest, and a staged executable digest recheck. The [verification and install code](../crates/nexus-update/src) keeps the Windows rollback path and app data isolation. The [app gate](../crates/nexus-app/src/update.rs) stays closed until a production Gen2 trust root is approved. Synthetic fixtures cover upstream and valid Gen2 signatures, tampering, version eligibility, interrupted staging and rollback. [Update commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/d045b32). Signed product binding and staged validation adapt upstream. Gen2 keys and release policy are fork-specific. Signing, packaging acceptance and production distribution remain outstanding.
 
-### ENX-021 ? Authorize external operations by service and scope
+### ENX-021 — Authorize external operations by service and scope
 
 **Class and subsystem:** Privacy improvement, security improvement, fork-specific change. Upstream service identities apply to the original app. Gen2 retains local Ask on loopback, opted-in public EDDN receive and documented public Spansh data reads. Gen2 keeps outbound telemetry, hosted providers and unapproved search and planner calls gated. The [assistant policy](../crates/nexus-app/src/assistant.rs), [Spansh request boundary](../crates/nexus-spansh/src/client.rs) and [outbound startup gate](../crates/nexus-app/src/sync.rs) enforce that distinction. Fixtures check client denial before transport and Local host eligibility. [Service commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/e334dda). Service policy is fork-specific. Upstream could adapt the explicit transport boundary. Live authorization and production service acceptance are outstanding.
 
-### ENX-022 ? Require separate Inara current-session snapshot consent
+### ENX-022 — Require separate Inara current-session snapshot consent
 
 **Class and subsystem:** Privacy improvement, user experience improvement. The original live-sync disclosure omitted that current state can come from earlier in the game session. Gen2 describes the data, timing and withdrawal controls in [Accounts](../crates/nexus-app/src/pages/accounts.rs) and requires separate consent. The [uplink](../crates/nexus-uplink/src/service.rs) checks consent, key and pause state for snapshot admission and queueing. Recording-transport tests cover startup state, rekeying, pause, resume and revocation. [Consent commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/e334dda). The disclosure and opt-in design adapt upstream. Current-session sourcing uses ENX-011 ownership. Live Inara and broader persisted queue decisions remain open.
 

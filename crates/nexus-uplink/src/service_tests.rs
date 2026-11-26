@@ -776,6 +776,7 @@ fn current_session_snapshot_needs_consent_and_a_current_unpaused_key() {
     let ts = Timestamp(Timestamp::now().0 - 3 * 3600);
     let rows = || [FILEHEADER, LOADGAME,
         r#""event":"Rank", "Combat":1, "Trade":4, "Explore":6, "Soldier":0, "Exobiologist":2, "Empire":7, "Federation":1, "CQC":0"#,
+        r#""event":"Progress", "Combat":30, "Trade":46, "Explore":78, "Soldier":0, "Exobiologist":35, "Empire":37, "Federation":100, "CQC":0"#,
     ].into_iter().map(|body| live_event(body, ts).raw).collect();
     let sent_rank = |r: &[HttpRequest]| inara_events(r).iter().filter(|name| *name == "setCommanderRankPilot").count();
     let before = sent_rank(&h.transport.requests());
