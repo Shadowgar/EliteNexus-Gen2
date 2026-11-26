@@ -200,7 +200,9 @@ The owner accepted Phase 01C as an automated development milestone. A local Wind
 
 The Windows executable rendered Dashboard, Navigation and Settings through its native DirectX 12 screenshot mode with synthetic journals, an explicit journal directory and a separate profile. A newly appended synthetic jump updated the displayed system and live event count. Subsequent runs retained the seeded preference and restored the saved screenshot page. Each screenshot run closed through the application's normal viewport exit path. Isolated MCP exited with status 2 before creating a profile. Process endpoint samples showed no TCP connections or UDP endpoints during the walkthrough. Four focused recovery argument tests passed, including scope preservation and suppression of restart in screenshot mode.
 
-Settings About identifies Gen2. The sidebar retains the upstream product label, and Navigation displays a clipboard preference whose action is disabled in isolated mode. Interactive Windows navigation and visible-window shutdown, a native graphics device-loss restart, owner gameplay, independent review, Linux and macOS runtime acceptance, live services, signing, packaging and distribution remain open.
+Settings About identifies Gen2. The sidebar retains the upstream product label, and Navigation displays a clipboard preference whose action is disabled in isolated mode.
+
+On November 26, 2026, the owner accepted the first Windows gameplay milestone after 21 of 21 manual checks passed alongside the game. This covers startup and interface (5), commander data (5), live journal updates (6), and responsiveness, shutdown and restart (5). Preliminary observations were 0.1% CPU and 225 MB RAM. GPU use and comparative FPS were unmeasured. Native graphics device-loss recovery, independent review, Linux and macOS runtime, live services, signing, packaging and distribution remain open.
 
 ## Upstream review opportunities
 
