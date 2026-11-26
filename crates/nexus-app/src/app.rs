@@ -604,7 +604,7 @@ impl NexusApp {
                 let tip = match (ov.enabled, wayland) {
                     (true, _) => "Overlay on: the island at the top of the game's screen. Click to switch it off.",
                     (false, true) => {
-                        "Overlay: a small island at the top of the game's screen that says what's going on. Wayland doesn't let apps stay on top: to keep it above the game, start Elite Nexus as WAYLAND_DISPLAY= ./EliteNexus (it then runs through XWayland)."
+                        "Overlay: a small island at the top of the game's screen that says what's going on. Wayland doesn't let apps stay on top: to keep it above the game, start Elite Nexus as WAYLAND_DISPLAY= ./EliteNexus-Gen2 (it then runs through XWayland)."
                     }
                     (false, false) => "Overlay: a small island at the top of the game's screen that says what's going on",
                 };

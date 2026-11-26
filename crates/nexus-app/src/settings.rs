@@ -591,32 +591,56 @@ fn string_value(text: &str, name: &str) -> Option<String> {
     None
 }
 
-/// Where Elite Nexus keeps its data.
-///
-/// Portable by default: a `nexus-data` folder next to the executable (keeps everything on the
-/// drive the app lives on). Falls back to `%LOCALAPPDATA%\EliteNexus` if that isn't writable (on Linux
-/// `$XDG_DATA_HOME/EliteNexus`, usually `~/.local/share/EliteNexus`). `ELITE_NEXUS_HOME` overrides both.
-///
-/// macOS: the app inside `Elite Nexus.app` keeps its data in `~/Library/Application Support/EliteNexus`, never in
-/// the bundle (a signed bundle must not change, and an update replaces it whole). A bare `EliteNexus` binary
-/// outside a bundle stays portable, as on Linux.
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 pub fn data_dir() -> PathBuf {
-    if let Some(p) = std::env::var_os("ELITE_NEXUS_HOME") {
-        let p = PathBuf::from(p);
-        let _ = std::fs::create_dir_all(&p);
-        return p;
-    }
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf))
-        && !(cfg!(target_os = "macos") && in_app_bundle(&exe_dir))
-    {
-        let p = exe_dir.join("nexus-data");
-        if std::fs::create_dir_all(&p).is_ok() && is_writable(&p) {
-            return p;
+    DATA_DIR.get().expect("data directory initialized before app startup").clone()
+}
+
+/// Select the profile before any settings, database or lock can be opened.
+pub fn initialize_data_dir(isolated: bool) -> std::io::Result<PathBuf> {
+    let dir = if let Some(path) = std::env::var_os(crate::launch::DATA_HOME) {
+        checked_data_dir(PathBuf::from(path), false)?
+    } else if isolated {
+        let parent = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        checked_data_dir(parent.join(format!("elite-nexus-gen2-{}-{nonce}", std::process::id())), true)?
+    } else {
+        let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+        let portable = exe_dir.filter(|dir| !(cfg!(target_os = "macos") && in_app_bundle(dir)))
+            .and_then(|dir| checked_data_dir(dir.join(crate::identity::PORTABLE_DATA), false).ok());
+        match portable {
+            Some(dir) => dir,
+            None => checked_data_dir(user_data_base().unwrap_or_else(|| PathBuf::from(".")).join(crate::identity::NAME), false)?,
         }
+    };
+    let _ = DATA_DIR.set(dir.clone());
+    Ok(dir)
+}
+
+fn checked_data_dir(path: PathBuf, scratch: bool) -> std::io::Result<PathBuf> {
+    // Refuse the upstream names even under an explicit override or a Gen2 path redirected there.
+    let validate = |dir: &Path| {
+        if dir.components().any(|part| {
+            let name = part.as_os_str().to_string_lossy();
+            name.eq_ignore_ascii_case("nexus-data") || name.eq_ignore_ascii_case("EliteNexus")
+        }) {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "the upstream profile is reserved"))
+        } else {
+            Ok(())
+        }
+    };
+    if path.as_os_str().is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty application data directory"));
     }
-    let p = user_data_base().unwrap_or_else(|| PathBuf::from(".")).join("EliteNexus");
-    let _ = std::fs::create_dir_all(&p);
-    p
+    validate(&path)?;
+    if scratch { std::fs::create_dir(&path)?; } else { std::fs::create_dir_all(&path)?; }
+    let resolved = path.canonicalize()?;
+    validate(&resolved)?;
+    if !is_writable(&resolved) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the Gen2 profile is read-only"));
+    }
+    Ok(resolved)
 }
 
 /// macOS: this program is the one inside an app bundle (`Elite Nexus.app`), not a bare binary.
@@ -661,15 +685,31 @@ pub fn inside_zip(exe: &Path) -> bool {
 }
 
 fn is_writable(dir: &Path) -> bool {
-    let probe = dir.join(".write-test");
-    let ok = std::fs::write(&probe, b"ok").is_ok();
+    let probe = dir.join(format!(".write-test-{}", std::process::id()));
+    let Ok(file) = std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) else { return false };
+    drop(file);
     let _ = std::fs::remove_file(probe);
-    ok
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gen2_profile_resolver_refuses_reserved_upstream_folders() {
+        let scratch = std::env::temp_dir().join(format!("gen2-profile-test-{}", std::process::id()));
+        let upstream = scratch.join("nexus-data");
+        std::fs::create_dir_all(&upstream).unwrap();
+        let marker = upstream.join("settings.json");
+        std::fs::write(&marker, "upstream fixture").unwrap();
+        assert!(checked_data_dir(upstream.clone(), false).is_err());
+        let gen2 = checked_data_dir(scratch.join(crate::identity::PORTABLE_DATA), false).unwrap();
+        assert_ne!(upstream.canonicalize().unwrap(), gen2);
+        assert!(!gen2.join("settings.json").exists());
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "upstream fixture");
+        let _ = std::fs::remove_dir_all(scratch);
+    }
 
     /// A folder in the temp directory, deleted on drop.
     struct Dir(PathBuf);

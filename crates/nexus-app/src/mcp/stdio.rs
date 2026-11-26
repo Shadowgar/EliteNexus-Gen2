@@ -1,4 +1,4 @@
-//! `EliteNexus --mcp`: the Model Context Protocol on stdin and stdout, for an AI agent on this computer that starts it
+//! `EliteNexus-Gen2 --mcp`: the Model Context Protocol on stdin and stdout, for an AI agent on this computer that starts it
 //! (Claude Code, Claude Desktop, any MCP client). It opens no window, takes no lock, writes no file and prints nothing
 //! but MCP messages, one a line: it lists the tools offered to agents and passes each call to the running Elite Nexus
 //! over [`super::endpoint`].
@@ -278,7 +278,7 @@ fn meta_version(params: &Value) -> Option<&str> {
 }
 
 fn server_info() -> Value {
-    json!({ "name": "elite-nexus", "title": "Elite Nexus", "version": env!("CARGO_PKG_VERSION") })
+    json!({ "name": crate::identity::APP_ID, "title": crate::identity::NAME, "version": env!("CARGO_PKG_VERSION") })
 }
 
 /// `{"io.modelcontextprotocol/serverInfo": …}`, which 2026-07-28 asks to go on every result.
@@ -451,7 +451,7 @@ mod tests {
         let mut h = Harness::nowhere();
         let init = h.send(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } } }));
         let r = &init[0]["result"];
-        assert_eq!((&r["protocolVersion"], &r["serverInfo"]["name"], &r["capabilities"]["tools"]["listChanged"]), (&json!("2025-06-18"), &json!("elite-nexus"), &json!(false)), "{r}");
+        assert_eq!((&r["protocolVersion"], &r["serverInfo"]["name"], &r["capabilities"]["tools"]["listChanged"]), (&json!("2025-06-18"), &json!(crate::identity::APP_ID), &json!(false)), "{r}");
         assert!(h.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).is_empty(), "notifications get no answer");
         let list = h.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
         let tools = list[0]["result"]["tools"].as_array().unwrap();
@@ -472,7 +472,7 @@ mod tests {
         let mut h = Harness::nowhere();
         let d = &h.send(modern("server/discover", 1, json!({})))[0]["result"];
         assert_eq!((&d["resultType"], &d["supportedVersions"], &d["cacheScope"]), (&json!("complete"), &json!([MODERN]), &json!("public")), "{d}");
-        assert!(d["ttlMs"].is_u64() && d["capabilities"]["tools"].is_object() && d["_meta"][SERVER_INFO_KEY]["name"] == "elite-nexus", "{d}");
+        assert!(d["ttlMs"].is_u64() && d["capabilities"]["tools"].is_object() && d["_meta"][SERVER_INFO_KEY]["name"] == crate::identity::APP_ID, "{d}");
         let list = &h.send(modern("tools/list", 2, json!({})))[0]["result"];
         assert_eq!((&list["resultType"], &list["cacheScope"]), (&json!("complete"), &json!("public")), "{list}");
         assert!(list["ttlMs"].is_u64() && list["_meta"][SERVER_INFO_KEY].is_object());

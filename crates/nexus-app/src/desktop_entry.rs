@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 /// The window's app id (main.rs), and so the entry's file name and the icons' name.
-pub const APP_ID: &str = "elite-nexus";
+use crate::identity::APP_ID;
 const ICON_SIZES: [u32; 5] = [32, 48, 64, 128, 256];
 
 /// What the app menu holds for Elite Nexus.
@@ -62,7 +62,7 @@ pub fn uninstall(data_home: &Path) -> std::io::Result<()> {
 
 fn desktop_file(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Elite Nexus\nGenericName=Elite Dangerous companion\n\
+        "[Desktop Entry]\nType=Application\nName=EliteNexus-Gen2\nGenericName=Elite Dangerous companion\n\
          Comment=Exploration, exobiology, trading, engineering and HUD colours for Elite Dangerous\n\
          Exec={exec}\nIcon={APP_ID}\nTerminal=false\nCategories=Game;\n\
          Keywords=Elite;Dangerous;Odyssey;EDDN;Spansh;Inara;Exobiology;\nStartupWMClass={APP_ID}\n",
@@ -116,7 +116,7 @@ mod tests {
         let icon = image::open(icon_path(&home, 128)).unwrap();
         assert_eq!((icon.width(), icon.height()), (128, 128));
         let text = std::fs::read_to_string(entry_path(&home)).unwrap();
-        assert!(text.starts_with("[Desktop Entry]\n") && text.contains("\nIcon=elite-nexus\n") && text.contains("\nStartupWMClass=elite-nexus\n"));
+        assert!(text.starts_with("[Desktop Entry]\n") && text.contains("\nIcon=io.github.shadowgar.elitenexus-gen2\n") && text.contains("\nStartupWMClass=io.github.shadowgar.elitenexus-gen2\n"));
         // Someone else's file in the same folders stays.
         std::fs::write(home.join("applications").join("other.desktop"), "x").unwrap();
         uninstall(&home).unwrap();

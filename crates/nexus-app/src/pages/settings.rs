@@ -224,7 +224,7 @@ pub fn show(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
                 #[cfg(target_os = "linux")]
                 app_menu(g);
             });
-            footnote(ui, "Elite Nexus is free software under the GNU GPL, version 3 or later, and comes with no warranty. Source: github.com/uruskan/EliteNexus. Elite Dangerous is a trademark of Frontier Developments plc; Elite Nexus is an unofficial community tool.");
+            footnote(ui, "Elite Nexus is free software under the GNU GPL, version 3 or later, and comes with no warranty. Gen2 source: github.com/Shadowgar/EliteNexus-Gen2. Based on Elite Nexus by CMDR Alka Uruskan and contributors. Elite Dangerous is a trademark of Frontier Developments plc; Elite Nexus is an unofficial community tool.");
         });
     });
 }
@@ -233,7 +233,7 @@ pub fn show(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
 /// read-only. Off until switched on.
 fn agents(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
     section(ui, "AI agents");
-    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "EliteNexus".into());
+    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| crate::identity::NAME.into());
     let state = agents_state(&cx.agents);
     let ai = &mut cx.settings.ai;
     group(ui, |g| {
@@ -277,13 +277,13 @@ fn agents_state(s: &crate::mcp::Status) -> (Color32, String) {
 
 /// Claude Code's command that adds Elite Nexus for every project of this user.
 fn claude_code_command(exe: &str) -> String {
-    format!("claude mcp add --scope user elite-nexus -- \"{exe}\" --mcp")
+    format!("claude mcp add --scope user elite-nexus-gen2 -- \"{exe}\" --mcp")
 }
 
 /// Claude Desktop's `mcpServers` entry: only the entry, so it goes beside the commander's other servers.
 fn claude_desktop_entry(exe: &str) -> String {
     let entry = serde_json::json!({ "command": exe, "args": ["--mcp"] });
-    format!("\"elite-nexus\": {}", serde_json::to_string_pretty(&entry).unwrap_or_default())
+    format!("\"elite-nexus-gen2\": {}", serde_json::to_string_pretty(&entry).unwrap_or_default())
 }
 
 /// A button that puts `text` on the clipboard and says so for a moment; the text shows on hover.

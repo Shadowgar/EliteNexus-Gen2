@@ -41,7 +41,7 @@
 # -Demo: a sample Ask conversation, an alert banner and sample alerts in the alert history; with
 #        -Tab bell the history (the list under the toolbar's bell) is open.
 # -Exe: another build (e.g. one from your own CARGO_TARGET_DIR). The data folder is the build's own
-#        (target\debug\nexus-data).
+#        (target\debug\nexus-gen2-data).
 param(
     [string]$Page = "Dashboard",
     [string]$Out = "shot",
@@ -57,7 +57,7 @@ param(
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ($Exe -eq "") {
     $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root 'target' }
-    $Exe = Join-Path $target 'debug\EliteNexus.exe'
+    $Exe = Join-Path $target 'debug\EliteNexus-Gen2.exe'
 }
 [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = 'BelowNormal'
 $shots = Join-Path $root 'target\shots'

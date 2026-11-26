@@ -1,5 +1,5 @@
 //! AI agents over MCP (the Model Context Protocol). An agent on this computer (Claude Code, Claude Desktop, any MCP
-//! client) starts `EliteNexus --mcp`, which speaks MCP on its stdin and stdout ([`stdio`]) and passes each tool call to
+//! client) starts `EliteNexus-Gen2 --mcp`, which speaks MCP on its stdin and stdout ([`stdio`]) and passes each tool call to
 //! the running app over a named pipe (Windows) or a Unix socket: no network port, nothing another computer can reach.
 //!
 //! The app answers ([`McpService`]) only while Settings › AI agents is on, which it is not until the commander switches
@@ -39,7 +39,7 @@ const QUEUE: usize = 4;
 #[cfg(windows)]
 pub fn endpoint() -> Result<String, String> {
     let user = win::user_sid().ok_or("Windows didn't say which account this is.")?;
-    Ok(format!(r"\\.\pipe\elite-nexus-mcp-{}", user.text))
+    Ok(format!(r"\\.\pipe\elite-nexus-gen2-mcp-{}", user.text))
 }
 
 /// Where the app listens and `--mcp` connects: a socket in a folder only this user can enter ([`unix`]), where both
@@ -47,7 +47,7 @@ pub fn endpoint() -> Result<String, String> {
 #[cfg(not(windows))]
 pub fn endpoint() -> Result<String, String> {
     // /run/user/<uid> holds other programs' sockets too: a name that's plainly Elite Nexus'.
-    Ok(unix::socket_dir()?.join("elite-nexus-mcp.sock").to_string_lossy().into_owned())
+    Ok(unix::socket_dir()?.join("elite-nexus-gen2-mcp.sock").to_string_lossy().into_owned())
 }
 
 /// A pipe or socket of a test's own, which no Elite Nexus answers on.
@@ -55,7 +55,7 @@ pub fn endpoint() -> Result<String, String> {
 pub(crate) fn test_endpoint(tag: &str) -> String {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() % 1_000_000_000);
     if cfg!(windows) {
-        format!(r"\\.\pipe\elite-nexus-mcp-test-{tag}-{}-{n}", std::process::id())
+        format!(r"\\.\pipe\elite-nexus-gen2-mcp-test-{tag}-{}-{n}", std::process::id())
     } else {
         std::env::temp_dir().join(format!("enx-{tag}-{}-{n}.sock", std::process::id())).to_string_lossy().into_owned()
     }
@@ -514,9 +514,9 @@ mod tests {
     #[test]
     fn the_endpoint_is_this_users_and_local() {
         let e = endpoint().unwrap();
-        assert!(e.contains("elite-nexus-mcp"), "{e}");
+        assert!(e.contains("elite-nexus-gen2-mcp"), "{e}");
         if cfg!(windows) {
-            assert!(e.starts_with(r"\\.\pipe\elite-nexus-mcp-S-1-"), "a local named pipe named by the user's SID: {e}");
+            assert!(e.starts_with(r"\\.\pipe\elite-nexus-gen2-mcp-S-1-"), "a local named pipe named by the user's SID: {e}");
         }
     }
 }

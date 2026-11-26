@@ -1,5 +1,5 @@
 //! Windows: embeds the app icon (the same procedural diamond as the window icon, no asset files)
-//! and the version information into EliteNexus.exe, so Explorer, the taskbar and installers show them.
+//! and the version information into EliteNexus-Gen2.exe, so Explorer, the taskbar and installers show them.
 
 use std::path::PathBuf;
 
@@ -35,12 +35,12 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "CompanyName", "Elite Nexus"
-      VALUE "FileDescription", "Elite Nexus - Elite Dangerous companion"
+      VALUE "FileDescription", "EliteNexus-Gen2 - Elite Dangerous companion"
       VALUE "FileVersion", "{version}"
-      VALUE "InternalName", "EliteNexus"
+      VALUE "InternalName", "EliteNexus-Gen2"
       VALUE "LegalCopyright", "CMDR Alka Uruskan"
-      VALUE "OriginalFilename", "EliteNexus.exe"
-      VALUE "ProductName", "Elite Nexus"
+      VALUE "OriginalFilename", "EliteNexus-Gen2.exe"
+      VALUE "ProductName", "EliteNexus-Gen2"
       VALUE "ProductVersion", "{version}"
     END
   END

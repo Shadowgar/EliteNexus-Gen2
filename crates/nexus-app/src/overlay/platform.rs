@@ -284,7 +284,7 @@ mod win {
     }
 
     /// Where a see-through window keeps the window procedure it had (winit's) while [`clear_proc`] stands in front.
-    const PREVIOUS: windows_sys::core::PCWSTR = windows_sys::w!("EliteNexus.SeeThrough");
+    const PREVIOUS: windows_sys::core::PCWSTR = windows_sys::w!("EliteNexusGen2.SeeThrough");
 
     /// See-through: the window shows nothing of its own, so only what the overlay draws is there.
     ///

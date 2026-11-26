@@ -43,7 +43,7 @@ pub fn coriolis_url(loadout: &str) -> Option<String> {
 /// `Loadout` as its data.
 pub fn slef(loadout: &str) -> Option<String> {
     let data = loadout_event(loadout)?;
-    let header = serde_json::json!({ "appName": "Elite Nexus", "appVersion": env!("CARGO_PKG_VERSION"), "appURL": "https://github.com/uruskan/EliteNexus" });
+    let header = serde_json::json!({ "appName": crate::identity::NAME, "appVersion": env!("CARGO_PKG_VERSION"), "appURL": crate::identity::REPOSITORY });
     serde_json::to_string(&serde_json::json!([{ "header": header, "data": data }])).ok()
 }
 

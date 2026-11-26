@@ -3,6 +3,23 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const GPU_RESET: &str = "--gpu-reset";
+pub const DATA_HOME: &str = "ELITE_NEXUS_GEN2_HOME";
+
+static ISOLATED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+pub fn initialize(args: &[OsString]) -> bool {
+    let isolated = is_isolated(args);
+    let _ = ISOLATED.set(isolated);
+    isolated
+}
+
+pub fn isolated() -> bool {
+    ISOLATED.get().copied().unwrap_or(false)
+}
+
+fn is_isolated(args: &[OsString]) -> bool {
+    args.iter().any(|arg| arg == "--isolated" || arg == "--journal-dir" || arg == "--screenshot")
+}
 
 pub fn recovery_arguments(original: &[OsString]) -> Vec<OsString> {
     let mut args = original.to_vec();
@@ -35,7 +52,7 @@ impl Recovery {
 
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.exe);
-        command.current_dir(&self.cwd).args(&self.args).env("ELITE_NEXUS_HOME", &self.data_dir);
+        command.current_dir(&self.cwd).args(&self.args).env(DATA_HOME, &self.data_dir);
         command
     }
 }
@@ -52,8 +69,17 @@ mod tests {
         let command = plan.command();
         assert_eq!(command.get_current_dir(), Some(cwd.as_path()));
         let expected = cwd.join("fixture profile");
-        assert_eq!(command.get_envs().find(|(name, _)| *name == "ELITE_NEXUS_HOME").and_then(|(_, value)| value), Some(expected.as_os_str()));
+        assert_eq!(command.get_envs().find(|(name, _)| *name == DATA_HOME).and_then(|(_, value)| value), Some(expected.as_os_str()));
         assert!(Recovery::prepare(cwd.join("fixture.exe"), cwd, Path::new("fixture profile"), &[OsString::from("--screenshot")]).is_none());
+    }
+
+    #[test]
+    fn fixture_switches_preserve_isolation_under_recovery() {
+        assert!(!is_isolated(&[OsString::from("--mute")]));
+        for fixture in ["--journal-dir", "--screenshot", "--isolated"] {
+            let args = recovery_arguments(&[OsString::from(fixture)]);
+            assert!(is_isolated(&args), "{fixture}");
+        }
     }
 
     #[test]

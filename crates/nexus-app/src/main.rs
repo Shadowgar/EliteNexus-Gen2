@@ -1,4 +1,4 @@
-//! Elite Nexus — the native Elite Dangerous companion.
+//! EliteNexus-Gen2 — the native Elite Dangerous companion.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -16,6 +16,7 @@ mod follow;
 mod game_process;
 mod gpu;
 mod icon;
+mod identity;
 mod jobs;
 mod launch;
 mod market;
@@ -39,6 +40,8 @@ mod tts;
 mod untouched;
 mod update;
 mod widgets;
+
+use std::path::PathBuf;
 
 fn app_icon() -> egui::IconData {
     // macOS: an app bundle's own icon (Contents/Resources/EliteNexus.icns) is the one in the Dock. An empty icon
@@ -87,18 +90,18 @@ fn already_running_message() {
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
-        let text: Vec<u16> = "Elite Nexus is already running.\0".encode_utf16().collect();
-        let title: Vec<u16> = "Elite Nexus\0".encode_utf16().collect();
+        let text: Vec<u16> = "EliteNexus-Gen2 is already running.\0".encode_utf16().collect();
+        let title: Vec<u16> = "EliteNexus-Gen2\0".encode_utf16().collect();
         // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call.
         unsafe {
             MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
         }
     }
     #[cfg(not(windows))]
-    eprintln!("Elite Nexus is already running.");
+    eprintln!("EliteNexus-Gen2 is already running.");
 }
 
-/// Linux: `--install-desktop` / `--uninstall-desktop` put Elite Nexus in the app menu, or take it out, from a
+/// Linux: `--install-desktop` / `--uninstall-desktop` put EliteNexus-Gen2 in the app menu, or take it out, from a
 /// terminal. Returns the exit code when one of them was given.
 #[cfg(target_os = "linux")]
 fn desktop_entry_cli() -> Option<i32> {
@@ -111,9 +114,9 @@ fn desktop_entry_cli() -> Option<i32> {
         return Some(1);
     };
     let done = if install {
-        std::env::current_exe().and_then(|exe| desktop_entry::install(&home, &exe)).map(|()| format!("Added Elite Nexus to the app menu: {}", desktop_entry::entry_path(&home).display()))
+        std::env::current_exe().and_then(|exe| desktop_entry::install(&home, &exe)).map(|()| format!("Added EliteNexus-Gen2 to the app menu: {}", desktop_entry::entry_path(&home).display()))
     } else {
-        desktop_entry::uninstall(&home).map(|()| "Removed Elite Nexus from the app menu.".to_string())
+        desktop_entry::uninstall(&home).map(|()| "Removed EliteNexus-Gen2 from the app menu.".to_string())
     };
     match done {
         Ok(msg) => {
@@ -128,17 +131,29 @@ fn desktop_entry_cli() -> Option<i32> {
 }
 
 fn main() -> eframe::Result {
+    let launch_args: Vec<_> = std::env::args_os().skip(1).collect();
+    let isolated = launch::initialize(&launch_args);
     // An AI agent started this copy to talk MCP on stdin and stdout (Settings › AI agents): no window, no lock, no log,
     // nothing but MCP on stdout. The running app does the work.
-    if std::env::args().skip(1).any(|a| a == "--mcp") {
+    if launch_args.iter().any(|a| a == "--mcp") {
+        if isolated {
+            eprintln!("MCP is unavailable in an isolated run.");
+            std::process::exit(2);
+        }
         std::process::exit(mcp::stdio::run());
     }
     #[cfg(target_os = "linux")]
-    if let Some(code) = desktop_entry_cli() {
+    if !isolated && let Some(code) = desktop_entry_cli() {
         std::process::exit(code);
     }
     let started = std::time::Instant::now();
-    let data_dir = settings::data_dir();
+    let data_dir = match settings::initialize_data_dir(isolated) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("EliteNexus-Gen2 could not open its data directory: {e}");
+            std::process::exit(2);
+        }
+    };
     let screenshot_run = std::env::args().any(|a| a == "--screenshot");
     // `--updated <version>`: an update's Restart now started this copy, from that version.
     let restarted_from = std::env::args().skip_while(|a| a != "--updated").nth(1);
@@ -157,11 +172,11 @@ fn main() -> eframe::Result {
         Some(f) => tracing_subscriber::fmt().with_env_filter(filter).with_ansi(false).with_writer(std::sync::Mutex::new(f)).init(),
         None => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), data = %data_dir.display(), "Elite Nexus starting");
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), data = %data_dir.display(), "EliteNexus-Gen2 starting");
     // A panic is written straight to crash.log (nexus.log may not be open, and a release build has no console), with
     // where it happened: the next start says so, and the commander can send the file. Nothing is uploaded.
     let crash_log = data_dir.join("crash.log");
-    let recovery = launch::Recovery::capture(&std::env::args_os().skip(1).collect::<Vec<_>>(), &data_dir);
+    let recovery = launch::Recovery::capture(&launch_args, &data_dir);
     static REPORTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
@@ -169,14 +184,14 @@ fn main() -> eframe::Result {
         tracing::error!("panic in {name}: {info}");
         // The first ones matter: a panic the core survives can repeat with every update of a file, and the backtraces
         // would bury the first report (and slow the thread down). The window's own thread always gets in: its panic
-        // is the one that closes Elite Nexus.
+        // is the one that closes EliteNexus-Gen2.
         let n = REPORTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if n >= 10 && name != "main" {
             return;
         }
         let more = if n == 9 { "Further panics this run are only in nexus.log.\n\n" } else { "" };
         let when = nexus_journal::Timestamp::now().to_local_string("%Y-%m-%d %H:%M:%S");
-        let text = format!("{when} Elite Nexus {} panicked in thread '{name}': {info}\n{}\n\n{more}", env!("CARGO_PKG_VERSION"), std::backtrace::Backtrace::force_capture());
+        let text = format!("{when} EliteNexus-Gen2 {} panicked in thread '{name}': {info}\n{}\n\n{more}", env!("CARGO_PKG_VERSION"), std::backtrace::Backtrace::force_capture());
         // Kept to about a megabyte: the previous one moves aside.
         if std::fs::metadata(&crash_log).is_ok_and(|m| m.len() > 1_000_000) {
             let _ = std::fs::rename(&crash_log, crash_log.with_extension("old.log"));
@@ -197,7 +212,7 @@ fn main() -> eframe::Result {
     }));
 
     // Optional: --page <name>  --screenshot <file.png>
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = launch_args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let arg = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     let start_page = arg("--page").and_then(|p| {
         pages::Page::GROUPS
@@ -211,9 +226,18 @@ fn main() -> eframe::Result {
     let screenshot_mode = shot.is_some();
     // The overlay's see-through window needs the renderer set up for it now (Settings › Overlay, after a restart).
     let see_through = !screenshot_mode && settings::Settings::overlay_see_through(&data_dir);
+    let mut journal_dir = launch_args.iter().position(|a| a == "--journal-dir").and_then(|i| launch_args.get(i + 1)).filter(|path| !path.to_string_lossy().starts_with("--")).map(PathBuf::from);
+    if isolated && journal_dir.is_none() {
+        let empty = data_dir.join("fixture-journals");
+        if let Err(e) = std::fs::create_dir_all(&empty) {
+            eprintln!("Could not create the isolated journal folder: {e}");
+            std::process::exit(2);
+        }
+        journal_dir = Some(empty);
+    }
     let overrides = app::Overrides {
-        journal_dir: arg("--journal-dir").map(Into::into),
-        mute: args.iter().any(|a| a == "--mute"),
+        journal_dir,
+        mute: isolated || args.iter().any(|a| a == "--mute"),
         tab: arg("--tab"),
         demo: args.iter().any(|a| a == "--demo"),
         overlay_demo: arg("--overlay"),
@@ -228,8 +252,8 @@ fn main() -> eframe::Result {
         Some([w.parse::<f32>().ok()?, h.parse::<f32>().ok()?])
     });
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Elite Nexus")
-        .with_app_id("elite-nexus")
+        .with_title(identity::NAME)
+        .with_app_id(identity::APP_ID)
         .with_inner_size(size.unwrap_or([1480.0, 920.0]))
         .with_min_inner_size([880.0, 600.0])
         .with_icon(app_icon());
@@ -302,7 +326,7 @@ fn main() -> eframe::Result {
     }
     let data_dir_at_exit = data_dir.clone();
     let result = eframe::run_native(
-        "Elite Nexus",
+        identity::NAME,
         options,
         Box::new(move |cc| Ok(Box::new(app::NexusApp::new(cc, data_dir, start_page, shot, overrides)))),
     );
