@@ -58,6 +58,7 @@ fn main() {
             WatchMsg::FileOpened(f, _) => {
                 let _ = writeln!(out, "-- new journal file {}", f.file_name);
             }
+            WatchMsg::CompanionUnavailable(..) => {}
             WatchMsg::Rebuild => break,
             WatchMsg::Error(e) => {
                 let _ = writeln!(out, "!! watcher error: {e}");

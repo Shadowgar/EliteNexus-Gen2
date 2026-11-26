@@ -1607,14 +1607,14 @@ impl Model {
     }
 
     fn switch_to(&mut self, fid: &str, name: &str) {
-        if fid.is_empty() && name.is_empty() {
+        if fid.contains('\0') || fid.is_empty() && name.is_empty() {
             self.begin_journal_session(self.session_start);
             return;
         }
         if self.active().is_some_and(|gs| fid.is_empty() && gs.cmdr.name.eq_ignore_ascii_case(name) && !gs.cmdr.fid.is_empty()) {
             return;
         }
-        let key = if fid.is_empty() { format!("{}:{name}", self.session_start.0) } else { fid.to_owned() };
+        let key = if fid.is_empty() { format!("\0{}:{name}", self.session_start.0) } else { fid.to_owned() };
         if !fid.is_empty()
             && let Some(provisional) = self.tentative_owner.take()
             && self.active.as_deref() == Some(&provisional)
@@ -1653,6 +1653,9 @@ impl Model {
                 self.switch_to(&l.fid, &l.commander);
                 self.session_start = ctx.ts;
                 self.active_generation = self.active_generation.wrapping_add(1);
+            }
+            Event::Other if matches!(ctx.name, "Commander" | "NewCommander" | "LoadGame") => {
+                self.begin_journal_session(self.session_start);
             }
             _ => {}
         }

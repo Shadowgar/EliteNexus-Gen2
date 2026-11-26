@@ -31,6 +31,7 @@ pub struct LiveEvent {
 pub enum WatchMsg {
     Event(LiveEvent),
     Companion(Companion, bool),
+    CompanionUnavailable(CompanionKind, CompanionUnavailable),
     /// The watcher started tailing a (new) journal file.
     FileOpened(JournalFile, FileIdentity),
     /// A consumed file was replaced, shortened, removed or arrived out of order. Replay the source quietly.
@@ -190,24 +191,50 @@ impl Tail {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompanionUnavailable {
+    Missing,
+    Incomplete,
+}
+
 #[derive(Default)]
 struct CompanionTracker {
     seen: HashMap<CompanionKind, (SystemTime, u64, FileIdentity)>,
+    unavailable: HashMap<CompanionKind, CompanionUnavailable>,
 }
 
 impl CompanionTracker {
-    fn check(&mut self, dir: &Path, kind: CompanionKind, force: bool) -> Option<Companion> {
-        let mut file = File::open(dir.join(kind.file_name())).ok()?;
-        let meta = file.metadata().ok()?;
-        let stamp = (meta.modified().ok()?, meta.len(), file_identity(&file).ok()?);
+    fn read(&mut self, dir: &Path, kind: CompanionKind, force: bool) -> std::io::Result<Option<Companion>> {
+        let mut file = File::open(dir.join(kind.file_name()))?;
+        let meta = file.metadata()?;
+        let stamp = (meta.modified()?, meta.len(), file_identity(&file)?);
         if !force && self.seen.get(&kind) == Some(&stamp) {
-            return None;
+            return Ok(None);
         }
         let mut text = String::new();
-        file.read_to_string(&mut text).ok()?;
-        let parsed = Companion::parse(kind, &text)?;
+        file.read_to_string(&mut text)?;
+        let parsed = Companion::parse(kind, &text).ok_or(std::io::ErrorKind::InvalidData)?;
         self.seen.insert(kind, stamp);
-        Some(parsed)
+        Ok(Some(parsed))
+    }
+
+    fn observe(&mut self, dir: &Path, kind: CompanionKind, force: bool, live: bool) -> Option<WatchMsg> {
+        match self.read(dir, kind, force) {
+            Ok(Some(value)) => {
+                self.unavailable.remove(&kind);
+                Some(WatchMsg::Companion(value, live))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                let reason = if e.kind() == std::io::ErrorKind::NotFound {
+                    CompanionUnavailable::Missing
+                } else {
+                    CompanionUnavailable::Incomplete
+                };
+                self.seen.remove(&kind);
+                (self.unavailable.insert(kind, reason) != Some(reason)).then_some(WatchMsg::CompanionUnavailable(kind, reason))
+            }
+        }
     }
 }
 
@@ -304,8 +331,8 @@ fn run(cfg: WatcherConfig, tx: Sender<WatchMsg>, stop: Arc<AtomicBool>) {
             newest = Some(newest.map_or(order, |n| n.max(order)));
         }
         for kind in CompanionKind::ALL {
-            if let Some(c) = companions.check(&cfg.dir, kind, false)
-                && tx.send(WatchMsg::Companion(c, !initial_pass)).is_err() {
+            if let Some(message) = companions.observe(&cfg.dir, kind, false, !initial_pass)
+                && tx.send(message).is_err() {
                 return;
             }
         }
@@ -331,8 +358,8 @@ fn emit_lines(t: &mut Tail, tx: &Sender<WatchMsg>, dir: &Path, companions: &mut 
             return false;
         }
         if let Some(kind) = kind
-            && let Some(c) = companions.check(dir, kind, true)
-            && tx.send(WatchMsg::Companion(c, live)).is_err()
+            && let Some(message) = companions.observe(dir, kind, true, live)
+            && tx.send(message).is_err()
         {
             return false;
         }
@@ -401,6 +428,22 @@ mod tests {
     }
 
     #[test]
+    fn companion_availability_reports_partial_then_safe_recovery() {
+        let dir = Fixture::new();
+        let mut tracker = CompanionTracker::default();
+        let kind = CompanionKind::Cargo;
+        assert!(matches!(tracker.observe(&dir.0, kind, false, false), Some(WatchMsg::CompanionUnavailable(_, CompanionUnavailable::Missing))));
+        assert!(tracker.observe(&dir.0, kind, false, false).is_none());
+        let file = dir.0.join(kind.file_name());
+        std::fs::write(&file, r#"{"timestamp":"#).unwrap();
+        assert!(matches!(tracker.observe(&dir.0, kind, false, false), Some(WatchMsg::CompanionUnavailable(_, CompanionUnavailable::Incomplete))));
+        std::fs::write(&file, r#"{"timestamp":"2026-09-05T00:13:31Z","event":"Cargo","Vessel":"Ship","Count":0,"Inventory":[]}"#).unwrap();
+        assert!(matches!(tracker.observe(&dir.0, kind, false, false), Some(WatchMsg::Companion(Companion::Cargo(..), false))));
+        std::fs::remove_file(file).unwrap();
+        assert!(matches!(tracker.observe(&dir.0, kind, false, false), Some(WatchMsg::CompanionUnavailable(_, CompanionUnavailable::Missing))));
+    }
+
+    #[test]
     fn historical_handoff_keeps_partial_bytes_and_one_cursor() {
         let dir = Fixture::new();
         let file = dir.file(1);
@@ -415,7 +458,9 @@ mod tests {
         assert_eq!(&*event.raw.line, TWO);
         assert_eq!(event.raw.source.offset, (ONE.len() + 1) as u64);
         assert!(!event.live);
-        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+        while let Ok(message) = rx.recv_timeout(Duration::from_millis(100)) {
+            assert!(!matches!(message, WatchMsg::Event(_)));
+        }
     }
 
     #[test]

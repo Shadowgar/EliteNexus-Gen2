@@ -3,6 +3,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use nexus_journal::index::IndexedObservation;
+use nexus_journal::watcher::CompanionUnavailable;
 use nexus_journal::{JournalFile, JournalIndex, LineSource, Timestamp};
 use nexus_journal::{
     list_journal_files, load_history, Companion, CompanionKind, EventCtx, LiveEvent, WatchMsg, Watcher, WatcherConfig,
@@ -23,6 +24,22 @@ pub enum Phase {
     Error(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotStatus {
+    Missing,
+    Incomplete,
+    Unknown,
+    Stale,
+    Empty,
+    Current,
+}
+
+impl SnapshotStatus {
+    fn accepted(self) -> bool {
+        matches!(self, Self::Empty | Self::Current)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CoreStatus {
     pub journal_dir: Option<PathBuf>,
@@ -34,6 +51,7 @@ pub struct CoreStatus {
     pub live_events: u64,
     pub last_live: Option<Instant>,
     pub errors: Vec<String>,
+    pub snapshots: HashMap<CompanionKind, SnapshotStatus>,
 }
 
 impl Default for CoreStatus {
@@ -48,6 +66,7 @@ impl Default for CoreStatus {
             live_events: 0,
             last_live: None,
             errors: Vec::new(),
+            snapshots: HashMap::new(),
         }
     }
 }
@@ -194,9 +213,8 @@ fn run(
     #[cfg(not(test))]
     nexus_journal::set_journal_dir_in_use(Some(&dir));
     status.write().journal_dir = Some(dir.clone());
-    static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
     while !stop.load(Ordering::Acquire) {
-        let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
+        let generation = next_source_generation();
         let live_from = Timestamp::now();
         let found = replay_and_follow(
             &dir, &model, &index, &status, &subscribers, &alert_tx, &stop, &repaint,
@@ -205,14 +223,18 @@ fn run(
         if !found {
             break;
         }
-        // Retire scoped readers before replaying a changed generation.
-        let mut retired = Model::default();
-        retired.set_source_generation(NEXT_GENERATION.fetch_add(1, Ordering::Relaxed));
-        *model.write() = retired;
-        *index.write() = JournalIndex::default();
-        status.write().phase = Phase::Starting;
+        {
+            let mut status = status.write();
+            status.phase = Phase::Starting;
+            status.snapshots.clear();
+        }
         repaint();
     }
+}
+
+fn next_source_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -356,10 +378,14 @@ fn replay_and_follow(
                             continue;
                         }
                         let ctx = EventCtx { ts: le.raw.ts, name: &le.raw.name, line: &le.raw.line, live };
+                        let commander_generation = m.active_generation();
                         let target = if live { &mut alerts } else { &mut quiet };
                         if !guarded(|| m.apply(&ctx, &le.event, target)) {
                             failed.push(format!("A {} event couldn't be handled and was skipped.", le.raw.name));
                             continue;
+                        }
+                        if m.active_generation() != commander_generation {
+                            status.write().snapshots.clear();
                         }
                         snapshots.announce(&m, ctx.name, ctx.ts);
                         index_observation(&mut index.write(), &m, live_file_id, le.raw.source.offset, &ctx);
@@ -369,7 +395,11 @@ fn replay_and_follow(
                         }
                     }
                     WatchMsg::Companion(c, observed_live) => {
-                        if !snapshots.admit(&m, &c) { continue; }
+                        let decision = snapshots.admit(&m, &c);
+                        status.write().snapshots.insert(c.kind(), decision);
+                        if !decision.accepted() {
+                            continue;
+                        }
                         let live = observed_live && c.timestamp() >= live_from;
                         let target = if live { &mut alerts } else { &mut quiet };
                         if !guarded(|| m.apply_companion(&c, live, target)) {
@@ -383,15 +413,33 @@ fn replay_and_follow(
                             forward.push(LiveMsg::Companion(c, EventContext::capture(&m)));
                         }
                     }
+                    WatchMsg::CompanionUnavailable(kind, reason) => {
+                        let observation = match reason {
+                            CompanionUnavailable::Missing => SnapshotStatus::Missing,
+                            CompanionUnavailable::Incomplete => SnapshotStatus::Incomplete,
+                        };
+                        status.write().snapshots.insert(kind, observation);
+                    }
                     WatchMsg::FileOpened(f, identity) => {
                         duplicate_file = !identities.insert(identity);
                         if !duplicate_file {
+                            let previous = m.active_generation();
                             begin_file(&mut m, &mut current, &f);
+                            if m.active_generation() != previous {
+                                status.write().snapshots.clear();
+                            }
                             live_file_id = index.write().bind_file(f.path.clone(), identity);
                             status.write().current_file = Some(f.file_name);
                         }
                     }
-                    WatchMsg::Rebuild => return true,
+                    WatchMsg::Rebuild => {
+                        let mut retired = Model::default();
+                        retired.set_source_generation(next_source_generation());
+                        *m = retired;
+                        *index.write() = JournalIndex::default();
+                        return true;
+                    }
+
                     WatchMsg::Error(e) => {
                         tracing::warn!("{e}");
                         let mut st = status.write();
@@ -475,44 +523,57 @@ impl SnapshotScope {
     }
 
     /// An unowned or older snapshot may be retried after a qualifying journal line.
-    fn admit(&mut self, model: &Model, companion: &Companion) -> bool {
+    fn admit(&mut self, model: &Model, companion: &Companion) -> SnapshotStatus {
         self.refresh(model);
-        if model.verified_fid().is_none() { return false; }
+        if model.verified_fid().is_none() { return SnapshotStatus::Unknown; }
         let ts = companion.timestamp();
         let kind = companion.kind();
-        if ts.is_zero() || ts < model.journal_session_start() || ts > Timestamp(Timestamp::now().0 + 5 * 60)
-            || self.accepted.get(&kind).is_some_and(|previous| ts < *previous)
-        {
-            return false;
+        if ts.is_zero() || ts > Timestamp(Timestamp::now().0 + 5 * 60) {
+            return SnapshotStatus::Unknown;
+        }
+        if ts < model.journal_session_start() || self.accepted.get(&kind).is_some_and(|previous| ts < *previous) {
+            return SnapshotStatus::Stale;
         }
         if kind == CompanionKind::Status {
             // Status has no announcement or FID. Only use it with current, dated session evidence.
-            if !self.local_profile || ts < model.last_event || !model.active().is_some_and(|gs| !gs.game_stopped()) {
-                return false;
+            if !self.local_profile || !model.active().is_some_and(|gs| !gs.game_stopped()) {
+                return SnapshotStatus::Unknown;
+            }
+            if ts < model.last_event {
+                return SnapshotStatus::Stale;
             }
         } else {
-            let Some((announced, cleared)) = self.announced.get(&kind).copied() else { return false };
-            if cleared || ts != announced {
-                return false;
+            let Some((announced, cleared)) = self.announced.get(&kind).copied() else { return SnapshotStatus::Unknown };
+            if cleared || ts < announced {
+                return SnapshotStatus::Stale;
+            }
+            if ts != announced {
+                return SnapshotStatus::Unknown;
             }
             if let Companion::Market(market, _) = companion {
-                let Some(gs) = model.active() else { return false };
+                let Some(gs) = model.active() else { return SnapshotStatus::Unknown };
                 let loc = &gs.location;
                 if !loc.docked || !market.star_system.eq_ignore_ascii_case(&loc.system)
                     || !loc.station.as_ref().is_some_and(|station| station.market_id == market.market_id)
                 {
-                    return false;
+                    return SnapshotStatus::Unknown;
                 }
             }
             // A newer typed event may already have mutated the same projection.
             if matches!(kind, CompanionKind::Cargo | CompanionKind::ShipLocker | CompanionKind::Backpack | CompanionKind::NavRoute)
                 && ts < model.last_event
             {
-                return false;
+                return SnapshotStatus::Stale;
             }
         }
         self.accepted.insert(kind, ts);
-        true
+        let empty = match companion {
+            Companion::NavRoute(route, _) => route.route.is_empty(),
+            Companion::Cargo(cargo, _) => cargo.cargo.inventory.as_ref().is_some_and(Vec::is_empty),
+            Companion::Market(market, _) => market.items.is_empty(),
+            _ => false,
+        };
+        if empty { SnapshotStatus::Empty } else { SnapshotStatus::Current }
     }
 }
 
@@ -620,12 +681,12 @@ mod tests {
         apply(&mut model, &mut snapshots, OWNER_A);
         apply(&mut model, &mut snapshots, r#"{"timestamp":"2026-09-05T00:13:31Z","event":"Cargo","Vessel":"Ship","Count":0}"#);
         let cargo = Companion::parse(CompanionKind::Cargo, r#"{"timestamp":"2026-09-05T00:13:31Z","event":"Cargo","Vessel":"Ship","Count":0,"Inventory":[]}"#).unwrap();
-        assert!(snapshots.admit(&model, &cargo));
+        assert_eq!(snapshots.admit(&model, &cargo), SnapshotStatus::Empty);
         let initial = Companion::parse(CompanionKind::Status, r#"{"timestamp":"2026-09-05T00:13:29Z","event":"Status","Flags":1}"#).unwrap();
-        assert!(!snapshots.admit(&model, &initial));
+        assert_eq!(snapshots.admit(&model, &initial), SnapshotStatus::Unknown);
         apply(&mut model, &mut snapshots, r#"{"timestamp":"2026-09-05T00:13:32Z","event":"NavRouteClear"}"#);
-        assert!(!snapshots.admit(&model, &cargo));
+        assert!(!snapshots.admit(&model, &cargo).accepted());
         apply(&mut model, &mut snapshots, OWNER_B);
-        assert!(!snapshots.admit(&model, &cargo));
+        assert!(!snapshots.admit(&model, &cargo).accepted());
     }
 }
