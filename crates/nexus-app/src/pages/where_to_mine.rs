@@ -367,8 +367,9 @@ fn near_you(ui: &mut Ui, gs: &GameState, st: &mut WhereUi, spansh: &nexus_spansh
         label(ui, "Within");
         widgets::segmented(ui, &mut st.radius, &[(25, "25 ly"), (50, "50 ly"), (100, "100 ly"), (250, "250 ly"), (500, "500 ly"), (1000, "1,000 ly")]);
         let busy = st.near.busy();
-        if (search_button(ui, busy, origin.is_some()) || (!busy && std::mem::take(&mut st.autorun)))
-            && !busy
+        let clicked = search_button(ui, busy, origin.is_some());
+        if !busy
+            && (clicked || std::mem::take(&mut st.autorun))
             && let Some(origin) = origin
         {
             let q = Query {
@@ -620,8 +621,9 @@ fn along_route(
         widgets::segmented(ui, &mut st.stops, &[(5, "5"), (10, "10"), (25, "25"), (50, "50")]);
         let busy = st.route.busy();
         let ready = !from.is_empty() && to.as_deref().is_some_and(|t| !t.eq_ignore_ascii_case(&from));
-        if (search_button(ui, busy, ready) || (!busy && std::mem::take(&mut st.autorun)))
-            && !busy
+        let clicked = search_button(ui, busy, ready);
+        if !busy
+            && (clicked || std::mem::take(&mut st.autorun))
             && ready
             && let Some(to) = to.clone()
         {

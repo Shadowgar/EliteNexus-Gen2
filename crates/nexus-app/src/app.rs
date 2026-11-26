@@ -1191,7 +1191,7 @@ fn jumped(last: &mut Option<(String, usize)>, fid: &str, jumps: usize) -> bool {
 /// last two minutes (`last_live`). A game found gone after a crash isn't live, however recent its last line.
 fn game_live(phase_live: bool, last_live: Option<Instant>, gs: Option<&nexus_model::GameState>) -> bool {
     let fresh = last_live.is_some_and(|t| t.elapsed() < Duration::from_secs(120));
-    phase_live && !gs.is_some_and(|g| g.game_gone.is_some()) && (fresh || gs.is_some_and(|g| g.game_running()))
+    phase_live && gs.is_none_or(|g| g.game_gone.is_none()) && (fresh || gs.is_some_and(|g| g.game_running()))
 }
 
 /// The number of alerts that came in since the alert history was last open, as a pill on the bell's top-right corner.

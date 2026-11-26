@@ -296,10 +296,8 @@ impl GameState {
                 // Its carrier isn't the commander's any more.
                 self.squadron_carrier = Carrier::default();
             }
-            Event::AppliedToSquadron(s) => {
-                if !self.cmdr.squadron_applications.contains(&s.squadron_name) {
-                    self.cmdr.squadron_applications.push(s.squadron_name.clone());
-                }
+            Event::AppliedToSquadron(s) if !self.cmdr.squadron_applications.contains(&s.squadron_name) => {
+                self.cmdr.squadron_applications.push(s.squadron_name.clone());
             }
             Event::SquadronPromotion(s) | Event::SquadronDemotion(s) => {
                 if let Some(sq) = self.cmdr.squadron.as_mut() {
@@ -378,13 +376,11 @@ impl GameState {
                 self.mining.leave_body();
                 self.feed(ts, "CarrierJump", format!("Carrier jumped to {}", a.star_system));
             }
-            Event::StartJump(s) => {
-                if s.jump_type == "Hyperspace" {
-                    self.location.hyperspace = true;
-                    if let (Some(sys), Some(class)) = (&s.star_system, &s.star_class) {
-                        self.pending_star_class = Some((sys.clone(), class.clone()));
-                        self.star_class_alert(ts, sys, class, alerts);
-                    }
+            Event::StartJump(s) if s.jump_type == "Hyperspace" => {
+                self.location.hyperspace = true;
+                if let (Some(sys), Some(class)) = (&s.star_system, &s.star_class) {
+                    self.pending_star_class = Some((sys.clone(), class.clone()));
+                    self.star_class_alert(ts, sys, class, alerts);
                 }
             }
             Event::FSDTarget(t) => {
@@ -882,15 +878,11 @@ impl GameState {
             Event::ScientificResearch(s) => self.inventory.materials.adjust(&s.name, None, -s.count, None),
 
             // ---------------------------------------------------------------- odyssey
-            Event::ShipLocker(s) => {
-                if s.has_content() {
-                    self.inventory.ship_locker.snapshot(s, ts);
-                }
+            Event::ShipLocker(s) if s.has_content() => {
+                self.inventory.ship_locker.snapshot(s, ts);
             }
-            Event::Backpack(b) => {
-                if b.has_content() {
-                    self.inventory.backpack.snapshot(b, ts);
-                }
+            Event::Backpack(b) if b.has_content() => {
+                self.inventory.backpack.snapshot(b, ts);
             }
             Event::BackpackChange(c) => {
                 for a in &c.added {

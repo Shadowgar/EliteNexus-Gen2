@@ -3963,7 +3963,8 @@ fn here_list(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, dock
     for (name, s) in &carriers {
         match s {
             Some(s) if all || has_market(s) => {
-                if list_row(ui, name, true, Some(s.carrier_docking_access.as_deref()), &market_line("", s), tiles.contains(&s.market_id), has_market(s)).clicked() {
+                let row = list_row(ui, name, true, Some(s.carrier_docking_access.as_deref()), &market_line("", s), tiles.contains(&s.market_id), has_market(s));
+                if row.clicked() {
                     open.push(s.market_id);
                 }
             }

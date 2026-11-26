@@ -851,7 +851,7 @@ impl Exploration {
         body.recompute_value(odyssey);
         // Mapping a body is new data, also where its scan was sold; not where its mapping was sold already. Probing a ring
         // isn't: the model gives rings no value (the research has none for them), so it leaves the system as it was.
-        if !body.map_sold && !(s.body_name.ends_with(" Ring") || matches!(body.kind, BodyKind::Ring | BodyKind::BeltCluster)) {
+        if !(body.map_sold || s.body_name.ends_with(" Ring") || matches!(body.kind, BodyKind::Ring | BodyKind::BeltCluster)) {
             body.unsold = true;
             sys.sold = false;
         }

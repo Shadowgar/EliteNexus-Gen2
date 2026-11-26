@@ -290,7 +290,7 @@ fn pad_rank(p: char) -> u8 {
 fn check_rule(w: &PriceWatch, symbol: &str, u: &MarketUpdate, m: &StationMarket, dist: Option<f64>) -> Option<Alert> {
     // Every station has a small pad: S asks for nothing, as in the market searches (M and L need the pad reported).
     if let Some(p) = w.min_pad.filter(|p| pad_rank(*p) > 1)
-        && !m.station.max_pad.is_some_and(|have| pad_rank(have) >= pad_rank(p))
+        && m.station.max_pad.is_none_or(|have| pad_rank(have) < pad_rank(p))
     {
         return None;
     }
