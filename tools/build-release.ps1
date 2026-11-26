@@ -1,42 +1,32 @@
-# Builds an optimised Elite Nexus, assembles the portable folder .\dist\EliteNexus and the release
-# zip .\dist\EliteNexus-v<version>-windows-x64.zip.
+# Builds and packages a local EliteNexus-Gen2 development copy, without publication or update signing.
 #   powershell -ExecutionPolicy Bypass -File .\tools\build-release.ps1
-# Your data (nexus-data next to the exe) is kept. If Elite Nexus is running from dist, the new exe is
-# staged as EliteNexus.new.exe and swapped in by Update-EliteNexus.cmd once you close the app.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'env.ps1')
 Set-Location $root
 
-cargo build --release -p nexus-app
-if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+$name = 'EliteNexus-Gen2'
+$exe = "$name.exe"
+$dist = Join-Path $root "dist\$name"
+$target = Join-Path $dist $exe
+$running = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $target }
+if ($running) { throw "Close $name before replacing this local copy." }
 
-$version = (Select-String -Path (Join-Path $root 'Cargo.toml') -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-$built = Join-Path $root 'target\release\EliteNexus.exe'
-$dist = Join-Path $root 'dist\EliteNexus'
+cargo +1.100.0 build --locked --release -p nexus-app
+if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+
+$version = (Select-String -LiteralPath (Join-Path $root 'Cargo.toml') -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+$targetDir = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR) } else { Join-Path $root 'target' }
+$built = Join-Path $targetDir "release\$exe"
+$docSources = @('LICENSE', 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md')
+$docFiles = @('LICENSE', 'README.md', 'NOTICE.md', 'USER_GUIDE.md', 'Inter-LICENSE.txt')
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
-foreach ($f in 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md') { Copy-Item (Join-Path $root $f) $dist -Force }
-# The bundled Inter font's licence (SIL OFL) travels with the program.
-Copy-Item (Join-Path $root 'data\fonts\inter\LICENSE.txt') (Join-Path $dist 'Inter-LICENSE.txt') -Force
+foreach ($f in $docSources) { Copy-Item -LiteralPath (Join-Path $root $f) -Destination $dist -Force }
+Copy-Item -LiteralPath (Join-Path $root 'data\fonts\inter\LICENSE.txt') -Destination (Join-Path $dist 'Inter-LICENSE.txt') -Force
+Copy-Item -LiteralPath $built -Destination $target -Force
 
-$target = Join-Path $dist 'EliteNexus.exe'
-$running = Get-Process -Name EliteNexus -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $target }
-if ($running) {
-    Copy-Item $built (Join-Path $dist 'EliteNexus.new.exe') -Force
-    "Elite Nexus is running, so the new version is staged as dist\EliteNexus\EliteNexus.new.exe."
-    "Close Elite Nexus, then run Update-EliteNexus.cmd (or start it with Start-EliteNexus.cmd, which swaps it in)."
-} else {
-    Copy-Item $built $target -Force
-}
-
-# Release zip: the exe and documents, never your data.
-$zip = Join-Path $root "dist\EliteNexus-v$version-windows-x64.zip"
-$stage = Join-Path $root 'target\release-zip\EliteNexus'
-Remove-Item (Split-Path $stage) -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item $built $stage
-foreach ($f in 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md') { Copy-Item (Join-Path $root $f) $stage }
-Copy-Item (Join-Path $root 'data\fonts\inter\LICENSE.txt') (Join-Path $stage 'Inter-LICENSE.txt')
-Compress-Archive -Path $stage -DestinationPath $zip -Force
-$exe = Get-Item $built
-"Built Elite Nexus {0}: {1:N1} MB exe, zip {2:N1} MB -> {3}" -f $version, ($exe.Length / 1MB), ((Get-Item $zip).Length / 1MB), $zip
+# Package only the executable and named documents. Both application profiles are outside the archive.
+$zip = Join-Path $root "dist\$name-v$version-windows-x64.zip"
+$files = @($target) + @($docFiles | ForEach-Object { Join-Path $dist $_ })
+Compress-Archive -LiteralPath $files -DestinationPath $zip -Force
+"Built local $name $version -> $zip"

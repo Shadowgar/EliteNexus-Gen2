@@ -63,6 +63,11 @@ impl Version {
     pub fn is_pre(&self) -> bool {
         !self.pre.is_empty()
     }
+
+    /// Stable builds stay on stable releases. Prerelease builds may move to a newer prerelease or stable release.
+    pub fn accepts_update(&self, candidate: &Version) -> bool {
+        candidate > self && (self.is_pre() || !candidate.is_pre())
+    }
 }
 
 impl Ord for Version {
@@ -148,5 +153,20 @@ mod tests {
     #[test]
     fn this_build_has_a_version() {
         assert_eq!(Version::current().to_string(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn update_eligibility_requires_a_newer_version_on_the_allowed_channel() {
+        for (current, candidate, expected) in [
+            ("0.8.3", "0.8.2", false),
+            ("0.8.3", "0.8.3", false),
+            ("0.8.3", "0.9.0-beta.1", false),
+            ("0.8.3", "0.9.0", true),
+            ("0.9.0-beta.2", "0.9.0-beta.1", false),
+            ("0.9.0-beta.2", "0.9.0-beta.3", true),
+            ("0.9.0-beta.2", "0.9.0", true),
+        ] {
+            assert_eq!(v(current).accepts_update(&v(candidate)), expected, "{current} → {candidate}");
+        }
     }
 }

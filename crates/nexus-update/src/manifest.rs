@@ -1,26 +1,25 @@
-//! The release manifest, `update.json`: the version and, for each platform, the archive's name, address, size and
-//! SHA-256. Signed (`update.json.minisig`) with the key whose public half is compiled in, so the archive's checksum
-//! comes from Elite Nexus' releases and not just from the server that sends the archive.
-//!
-//! Every version that has shipped reads this format: fields are only ever added (unknown ones are ignored), and a
-//! format this version can't read (`schema` above [`SCHEMA`]) is reported, not guessed at.
+//! Gen2's signed product, repository, version and archive metadata.
 
 use crate::version::Version;
+use crate::{PRODUCT, REPO, release_file};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 /// The manifest format this version reads and writes.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
-/// The most a manifest or its signature may weigh: anything larger isn't one.
+/// The most a manifest may weigh.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
+pub const MAX_ARCHIVE_BYTES: usize = 600 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Manifest {
     /// The format, [`SCHEMA`].
     pub schema: u32,
+    pub product: String,
+    pub repository: String,
     /// The release's version, without the `v` (`0.8.3`).
     pub version: String,
     /// Its tag (`v0.8.3`).
@@ -36,7 +35,7 @@ pub struct Manifest {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Asset {
-    /// The file's name on the release page (`EliteNexus-v0.8.3-windows-x64.zip`).
+    /// The file's name on the release page (`EliteNexus-Gen2-v0.8.3-windows-x64.zip`).
     pub name: String,
     /// Where it downloads from.
     pub url: String,
@@ -50,29 +49,40 @@ pub struct Asset {
 pub enum ManifestError {
     #[error("it doesn't match its signature: it was changed or damaged on the way")]
     BadSignature,
-    #[error("it's signed with another key than the one Elite Nexus releases are signed with")]
+    #[error("its signing key does not match the trusted Gen2 key")]
     WrongKey,
     #[error("its signature can't be read ({0})")]
     Signature(String),
-    #[error("the key compiled into Elite Nexus can't be read ({0})")]
+    #[error("the Gen2 public key can't be read ({0})")]
     Key(String),
     #[error("it can't be read ({0})")]
     Format(String),
     #[error("it's in a newer format ({0}) than this version reads")]
     NewerFormat(u32),
-    #[error("it names no version Elite Nexus can read")]
+    #[error("format {0} is ineligible for Gen2 updates")]
+    UnsupportedFormat(u32),
+    #[error("its product or repository does not match EliteNexus-Gen2")]
+    WrongIdentity,
+    #[error("it names no canonical release version and tag")]
     NoVersion,
+    #[error("its archive metadata is ineligible for platform {0}")]
+    InvalidAsset(String),
+    #[error("it names no Gen2 release archives")]
+    NoAssets,
 }
 
 impl Manifest {
     /// Checks `bytes` against `signature` (the text of `update.json.minisig`) with `public_key` (a minisign public key
     /// file, or its base64 line), then reads them. Nothing is read from a manifest whose signature doesn't hold.
     pub fn verified(bytes: &[u8], signature: &str, public_key: &str) -> Result<Manifest, ManifestError> {
+        if bytes.len() > MAX_MANIFEST_BYTES || signature.len() > 4096 {
+            return Err(ManifestError::Format("manifest or signature exceeds its size limit".into()));
+        }
         let key = public_key.trim();
         let key = if key.lines().count() > 1 { minisign_verify::PublicKey::decode(key) } else { minisign_verify::PublicKey::from_base64(key) };
         let key = key.map_err(|e| ManifestError::Key(e.to_string()))?;
         let signature = minisign_verify::Signature::decode(signature.trim()).map_err(|e| ManifestError::Signature(e.to_string()))?;
-        // Legacy (unhashed) signatures are refused: every release is signed by update_sign, which prehashes.
+        // Require prehashed Minisign signatures.
         key.verify(bytes, &signature, false).map_err(|e| match e {
             minisign_verify::Error::InvalidSignature => ManifestError::BadSignature,
             minisign_verify::Error::UnexpectedKeyId => ManifestError::WrongKey,
@@ -84,13 +94,32 @@ impl Manifest {
     /// Reads a manifest without checking a signature (the signer, tests).
     pub fn read(bytes: &[u8]) -> Result<Manifest, ManifestError> {
         let m: Manifest = serde_json::from_slice(bytes).map_err(|e| ManifestError::Format(e.to_string()))?;
-        if m.schema > SCHEMA {
-            return Err(ManifestError::NewerFormat(m.schema));
+        m.validate()?;
+        Ok(m)
+    }
+
+    fn validate(&self) -> Result<(), ManifestError> {
+        if self.schema > SCHEMA {
+            return Err(ManifestError::NewerFormat(self.schema));
         }
-        if m.version().is_none() {
+        if self.schema != SCHEMA {
+            return Err(ManifestError::UnsupportedFormat(self.schema));
+        }
+        if self.product != PRODUCT || self.repository != REPO {
+            return Err(ManifestError::WrongIdentity);
+        }
+        if self.version().is_none_or(|v| v.to_string() != self.version) || self.tag != format!("v{}", self.version) {
             return Err(ManifestError::NoVersion);
         }
-        Ok(m)
+        if self.assets.is_empty() {
+            return Err(ManifestError::NoAssets);
+        }
+        for (platform, asset) in &self.assets {
+            if !self.valid_asset(platform, asset) {
+                return Err(ManifestError::InvalidAsset(platform.clone()));
+            }
+        }
+        Ok(())
     }
 
     pub fn version(&self) -> Option<Version> {
@@ -99,23 +128,41 @@ impl Manifest {
 
     /// The archive for `platform`, if the release has one with what it takes to download and check it.
     pub fn asset(&self, platform: &str) -> Option<&Asset> {
-        self.assets.get(platform).filter(|a| !a.name.is_empty() && a.url.starts_with("https://") && a.size > 0 && a.sha256.len() == 64)
+        self.assets.get(platform).filter(|a| self.valid_asset(platform, a))
     }
 
-    /// The manifest of the release archives in `dir` (`EliteNexus-v<version>-<platform>.zip` or `.tar.gz`, as the
-    /// release workflow names them), to download from `<repository>/releases/download/<tag>/`.
-    pub fn from_release_files(dir: &Path, tag: &str, date: &str, repo: &str) -> std::io::Result<Manifest> {
-        let version = tag.strip_prefix(['v', 'V']).unwrap_or(tag).to_string();
-        let mut assets = BTreeMap::new();
-        let mut names: Vec<String> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-        names.sort();
-        for name in names {
-            let Some(platform) = platform_of(&name, &version).map(str::to_string) else { continue };
-            let bytes = std::fs::read(dir.join(&name))?;
-            let asset = Asset { url: format!("https://github.com/{repo}/releases/download/{tag}/{name}"), size: bytes.len() as u64, sha256: crate::sha256_hex(&bytes), name };
-            assets.insert(platform, asset);
+    fn valid_asset(&self, platform: &str, asset: &Asset) -> bool {
+        platform_of(&asset.name, &self.version) == Some(platform)
+            && asset.url == release_file(&self.tag, &asset.name)
+            && (1..=MAX_ARCHIVE_BYTES as u64).contains(&asset.size)
+            && asset.sha256.len() == 64
+            && asset.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+
+    /// Writes the unsigned metadata for the canonical Gen2 archives found in `dir`.
+    pub fn from_release_files(dir: &Path, tag: &str, date: &str) -> std::io::Result<Manifest> {
+        let version = tag.strip_prefix('v').unwrap_or(tag).to_string();
+        let mut m = Manifest {
+            schema: SCHEMA, product: PRODUCT.into(), repository: REPO.into(), version,
+            tag: tag.into(), date: date.into(), assets: BTreeMap::new(),
+        };
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(platform) = platform_of(name, &m.version) else { continue };
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            if entry.metadata()?.len() > MAX_ARCHIVE_BYTES as u64 {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("oversized archive: {name}")));
+            }
+            let bytes = std::fs::read(entry.path())?;
+            let asset = Asset { url: release_file(tag, name), size: bytes.len() as u64, sha256: crate::sha256_hex(&bytes), name: name.into() };
+            m.assets.insert(platform.into(), asset);
         }
-        Ok(Manifest { schema: SCHEMA, version, tag: tag.to_string(), date: date.to_string(), assets })
+        m.validate().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Ok(m)
     }
 
     pub fn to_json(&self) -> String {
@@ -125,12 +172,14 @@ impl Manifest {
     }
 }
 
-/// The platform a release archive is for, from its name: `EliteNexus-v0.8.3-windows-x64.zip` gives `windows-x64`.
-/// Checksum files and anything else give None.
+/// The platform of a canonical Gen2 archive. Each platform has one archive format.
 pub fn platform_of<'a>(file_name: &'a str, version: &str) -> Option<&'a str> {
-    let rest = file_name.strip_prefix("EliteNexus-v")?.strip_prefix(version)?.strip_prefix('-')?;
-    let platform = rest.strip_suffix(".zip").or_else(|| rest.strip_suffix(".tar.gz"))?;
-    (!platform.is_empty() && platform.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')).then_some(platform)
+    let rest = file_name.strip_prefix(PRODUCT)?.strip_prefix("-v")?.strip_prefix(version)?.strip_prefix('-')?;
+    match rest {
+        "windows-x64.zip" | "macos-arm64.zip" | "macos-x86_64.zip" => rest.strip_suffix(".zip"),
+        "linux-x64.tar.gz" => rest.strip_suffix(".tar.gz"),
+        _ => None,
+    }
 }
 
 /// This build's platform as release archives name it: `windows-x64`, `linux-x64`, `macos-arm64` (the Mac zip is named
@@ -151,7 +200,7 @@ pub fn this_platform() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A key pair of the tests' own and a signature for `bytes` with it: (public key file, signature file).
@@ -166,9 +215,40 @@ mod tests {
         let mut assets = BTreeMap::new();
         assets.insert(
             "windows-x64".to_string(),
-            Asset { name: "EliteNexus-v0.8.4-windows-x64.zip".into(), url: "https://github.com/uruskan/EliteNexus/releases/download/v0.8.4/EliteNexus-v0.8.4-windows-x64.zip".into(), size: 1234, sha256: "a".repeat(64) },
+            Asset { name: "EliteNexus-Gen2-v0.8.4-windows-x64.zip".into(), url: "https://github.com/Shadowgar/EliteNexus-Gen2/releases/download/v0.8.4/EliteNexus-Gen2-v0.8.4-windows-x64.zip".into(), size: 1234, sha256: "a".repeat(64) },
         );
-        Manifest { schema: SCHEMA, version: "0.8.4".into(), tag: "v0.8.4".into(), date: "2026-12-01".into(), assets }
+        Manifest { schema: SCHEMA, product: PRODUCT.into(), repository: REPO.into(), version: "0.8.4".into(), tag: "v0.8.4".into(), date: "2026-12-01".into(), assets }
+    }
+
+    #[test]
+    fn an_upstream_manifest_is_refused_even_with_a_valid_test_signature() {
+        let json = br#"{"schema":1,"version":"0.8.4","tag":"v0.8.4","assets":{"windows-x64":{"name":"EliteNexus-v0.8.4-windows-x64.zip","url":"https://github.com/uruskan/EliteNexus/releases/download/v0.8.4/EliteNexus-v0.8.4-windows-x64.zip","size":3,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}"#;
+        let (public, sig) = signed(json);
+        assert!(matches!(Manifest::verified(json, &sig, &public), Err(ManifestError::UnsupportedFormat(1))));
+    }
+
+    #[test]
+    fn a_gen2_manifest_cannot_authorize_an_upstream_download() {
+        let json = br#"{"schema":2,"product":"EliteNexus-Gen2","repository":"Shadowgar/EliteNexus-Gen2","version":"0.8.4","tag":"v0.8.4","assets":{"windows-x64":{"name":"EliteNexus-Gen2-v0.8.4-windows-x64.zip","url":"https://github.com/uruskan/EliteNexus/releases/download/v0.8.4/EliteNexus-Gen2-v0.8.4-windows-x64.zip","size":3,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}"#;
+        let (public, sig) = signed(json);
+        assert!(matches!(Manifest::verified(json, &sig, &public), Err(ManifestError::InvalidAsset(p)) if p == "windows-x64"));
+    }
+
+    #[test]
+    fn a_signed_gen2_manifest_needs_matching_identity_tag_and_archive() {
+        let json = sample().to_json();
+        for (original, changed) in [
+            ("\"EliteNexus-Gen2\"", "\"EliteNexus\""),
+            ("\"Shadowgar/EliteNexus-Gen2\"", "\"uruskan/EliteNexus\""),
+            ("\"v0.8.4\"", "\"v0.8.5\""),
+            ("\"0.8.4\"", "\"0.8.4+local\""),
+            ("EliteNexus-Gen2-v0.8.4-windows-x64.zip", "EliteNexus-v0.8.4-windows-x64.zip"),
+            ("windows-x64.zip", "windows-x64.tar.gz"),
+        ] {
+            let invalid = json.replace(original, changed);
+            let (public, sig) = signed(invalid.as_bytes());
+            assert!(Manifest::verified(invalid.as_bytes(), &sig, &public).is_err(), "accepted {changed}");
+        }
     }
 
     #[test]
@@ -194,12 +274,13 @@ mod tests {
 
     #[test]
     fn unknown_fields_are_ignored_and_newer_formats_reported() {
-        let json = r#"{"schema":1,"version":"0.9.0-beta.1","tag":"v0.9.0-beta.1","note":"later field","assets":{"linux-x64":{"name":"a.tar.gz","url":"https://x/a.tar.gz","size":5,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","extra":1}}}"#;
+        let json = sample().to_json().replacen('{', r#"{"note":"later field","#, 1);
         let m = Manifest::read(json.as_bytes()).expect("reads");
-        assert!(m.asset("linux-x64").is_some());
-        assert!(m.asset("windows-x64").is_none(), "no archive for this platform");
-        assert!(matches!(Manifest::read(br#"{"schema":2,"version":"1.0.0"}"#), Err(ManifestError::NewerFormat(2))));
-        assert!(matches!(Manifest::read(br#"{"schema":1,"version":"soon"}"#), Err(ManifestError::NoVersion)));
+        assert!(m.asset("windows-x64").is_some());
+        assert!(m.asset("linux-x64").is_none(), "no archive for this platform");
+        assert!(matches!(Manifest::read(br#"{"schema":3,"version":"1.0.0"}"#), Err(ManifestError::NewerFormat(3))));
+        let bad_version = json.replace("\"0.8.4\"", "\"soon\"");
+        assert!(matches!(Manifest::read(bad_version.as_bytes()), Err(ManifestError::NoVersion)));
         assert!(matches!(Manifest::read(b"<html>"), Err(ManifestError::Format(_))));
         // An archive without what it takes to download and check it isn't offered.
         let mut m = sample();
@@ -209,11 +290,12 @@ mod tests {
 
     #[test]
     fn release_file_names_give_their_platform() {
-        assert_eq!(platform_of("EliteNexus-v0.8.3-windows-x64.zip", "0.8.3"), Some("windows-x64"));
-        assert_eq!(platform_of("EliteNexus-v0.8.3-linux-x64.tar.gz", "0.8.3"), Some("linux-x64"));
-        assert_eq!(platform_of("EliteNexus-v0.9.0-beta.1-macos-arm64.zip", "0.9.0-beta.1"), Some("macos-arm64"));
-        assert_eq!(platform_of("EliteNexus-v0.8.3-windows-x64.zip.sha256", "0.8.3"), None);
-        assert_eq!(platform_of("EliteNexus-v0.8.2-windows-x64.zip", "0.8.3"), None, "another version");
+        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.3-windows-x64.zip", "0.8.3"), Some("windows-x64"));
+        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.3-linux-x64.tar.gz", "0.8.3"), Some("linux-x64"));
+        assert_eq!(platform_of("EliteNexus-Gen2-v0.9.0-beta.1-macos-arm64.zip", "0.9.0-beta.1"), Some("macos-arm64"));
+        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.3-windows-x64.zip.sha256", "0.8.3"), None);
+        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.2-windows-x64.zip", "0.8.3"), None, "another version");
+        assert_eq!(platform_of("EliteNexus-v0.8.3-windows-x64.zip", "0.8.3"), None, "upstream artifact");
         assert_eq!(platform_of("update.json", "0.8.3"), None);
         let p = this_platform();
         assert!(p.contains('-') && !p.contains(' '), "{p}");
@@ -233,16 +315,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nexus-update-manifest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        for (name, body) in [("EliteNexus-v0.8.4-windows-x64.zip", "zip"), ("EliteNexus-v0.8.4-windows-x64.zip.sha256", "sum"), ("EliteNexus-v0.8.4-linux-x64.tar.gz", "tar"), ("notes.md", "notes")] {
+        for (name, body) in [("EliteNexus-Gen2-v0.8.4-windows-x64.zip", "zip"), ("EliteNexus-Gen2-v0.8.4-windows-x64.zip.sha256", "sum"), ("EliteNexus-Gen2-v0.8.4-linux-x64.tar.gz", "tar"), ("EliteNexus-v0.8.4-macos-arm64.zip", "upstream"), ("notes.md", "notes")] {
             std::fs::write(dir.join(name), body).expect("file");
         }
-        let m = Manifest::from_release_files(&dir, "v0.8.4", "2026-12-01", "uruskan/EliteNexus").expect("manifest");
+        let m = Manifest::from_release_files(&dir, "v0.8.4", "2026-12-01").expect("manifest");
         assert_eq!(m.version, "0.8.4");
         assert_eq!(m.assets.keys().collect::<Vec<_>>(), ["linux-x64", "windows-x64"]);
         let w = &m.assets["windows-x64"];
         assert_eq!(w.size, 3);
         assert_eq!(w.sha256, crate::sha256_hex(b"zip"));
-        assert_eq!(w.url, "https://github.com/uruskan/EliteNexus/releases/download/v0.8.4/EliteNexus-v0.8.4-windows-x64.zip");
+        assert_eq!(w.url, "https://github.com/Shadowgar/EliteNexus-Gen2/releases/download/v0.8.4/EliteNexus-Gen2-v0.8.4-windows-x64.zip");
         // What it writes, it reads.
         assert_eq!(Manifest::read(m.to_json().as_bytes()).expect("reads"), m);
         let _ = std::fs::remove_dir_all(&dir);

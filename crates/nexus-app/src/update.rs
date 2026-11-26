@@ -1,18 +1,12 @@
-//! Updates: Elite Nexus asks GitHub whether a newer version is out (a minute after start, then every 12 hours; Settings
-//! › About switches it off), says so in a banner above every page, and on a click downloads it, checks it against the
-//! release's signed manifest and puts it in place once Elite Nexus closes: at once with Restart now, else whenever the
-//! commander closes it. Copies that can't replace themselves (Program Files, inside the zip, a Mac, a build from
-//! source) say why and offer the release page.
-//!
-//! Checks are downloads: nothing about the commander is sent. Never in a test run (`--screenshot`, `--journal-dir`),
-//! and the data folder is never touched. The release side, the checks and the swap are in the nexus-update crate.
+//! Gen2's updater stays inactive until an owner-approved release key is configured. The signed manifest and
+//! installer live in the nexus-update crate.
 
 use crate::jobs::Job;
 use crate::theme::{display, pal, size};
 use crate::widgets;
 use egui::{Align, CornerRadius, Frame, Layout, Margin, RichText, Ui, Vec2};
 use egui_phosphor::regular as icon;
-use nexus_update::{archive, install, notes, Asset, Manifest, Version};
+use nexus_update::{install, notes, Asset, Manifest, Version, PRODUCTION_PUBLIC_KEY};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -24,12 +18,10 @@ const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
 
 /// The first check, after start-up and the journals.
 const FIRST_CHECK: Duration = Duration::from_secs(60);
-/// Then one every 12 hours while Elite Nexus runs.
+/// Then one every 12 hours while EliteNexus-Gen2 runs.
 const EVERY: Duration = Duration::from_secs(12 * 3600);
 /// After a check that didn't get through, the next comes sooner.
 const RETRY: Duration = Duration::from_secs(3600);
-/// The release archive's program.
-const PROGRAM: &str = if cfg!(windows) { "EliteNexus.exe" } else { "EliteNexus" };
 /// main.rs writes why the swap at exit failed here; the next start says so.
 const SWAP_ERROR: &str = "update-error.txt";
 
@@ -44,23 +36,12 @@ pub struct UpdatePrefs {
     pub skipped: String,
     /// The version that ran last: a newer one at start says what's new.
     pub last_version: String,
-    /// A version downloaded and waiting beside the program, so a start after a crash still puts it in place when
-    /// Elite Nexus closes.
-    pub staged: Option<StagedPrefs>,
 }
 
 impl Default for UpdatePrefs {
     fn default() -> Self {
-        UpdatePrefs { check: true, skipped: String::new(), last_version: String::new(), staged: None }
+        UpdatePrefs { check: true, skipped: String::new(), last_version: String::new() }
     }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct StagedPrefs {
-    pub version: String,
-    /// The waiting program's SHA-256: a file something else left there isn't installed.
-    pub sha256: String,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -70,10 +51,11 @@ pub struct StagedPrefs {
 /// commander asked for a restart.
 #[derive(Debug, Clone)]
 pub struct ExitPlan {
-    pub exe: PathBuf,
-    pub restart: bool,
+    exe: PathBuf,
+    restart: bool,
+    sha256: String,
     /// The version that's closing, for the next start's "Updated from".
-    pub from: String,
+    from: String,
 }
 
 static EXIT_PLAN: std::sync::Mutex<Option<ExitPlan>> = std::sync::Mutex::new(None);
@@ -92,13 +74,16 @@ pub fn take_exit_plan() -> Option<ExitPlan> {
 /// Puts the waiting program in place, once this one has closed and let go of the instance lock, and starts it on a
 /// restart. If it can't, the old program stays (and starts again on a restart), and the next start says why.
 pub fn finish_at_exit(plan: ExitPlan, data_dir: &Path) {
-    match install::swap(&plan.exe) {
+    if PRODUCTION_PUBLIC_KEY.is_none() {
+        return;
+    }
+    match install::swap(&plan.exe, &plan.sha256) {
         Ok(()) => {
             tracing::info!(exe = %plan.exe.display(), from = %plan.from, "update put in place");
             if plan.restart
                 && let Err(e) = install::launch(&plan.exe, &["--updated", &plan.from])
             {
-                tracing::warn!("the updated Elite Nexus didn't start: {e}");
+                tracing::warn!("the updated EliteNexus-Gen2 didn't start: {e}");
             }
         }
         Err(e) => {
@@ -107,29 +92,6 @@ pub fn finish_at_exit(plan: ExitPlan, data_dir: &Path) {
             if plan.restart {
                 let _ = install::launch(&plan.exe, &[]);
             }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Where releases come from
-
-/// GitHub, or for a test a folder or address holding `update.json`, its signature and the archives
-/// (`ELITE_NEXUS_UPDATE_URL`). The signature is checked against the compiled-in key either way.
-#[derive(Debug, Clone, PartialEq)]
-enum Source {
-    GitHub,
-    Folder(PathBuf),
-    Url(String),
-}
-
-impl Source {
-    fn from_env() -> Source {
-        match std::env::var("ELITE_NEXUS_UPDATE_URL").map(|v| v.trim().to_string()) {
-            Ok(v) if v.is_empty() => Source::GitHub,
-            Ok(v) if Path::new(&v).is_dir() => Source::Folder(PathBuf::from(v)),
-            Ok(v) => Source::Url(v.trim_end_matches('/').to_string()),
-            Err(_) => Source::GitHub,
         }
     }
 }
@@ -169,9 +131,11 @@ pub struct Updater {
     exe: Option<PathBuf>,
     /// Whether this copy can replace itself, and if not, why.
     installable: Result<(), install::Blocked>,
-    /// Checks run by themselves: a live run of a release build, or one given a test source.
+    /// Whether this run has an approved update trust root and can perform updates.
+    enabled: bool,
+    demo: bool,
+    /// Checks run by themselves in an eligible live release.
     auto: bool,
-    source: Source,
     rt: tokio::runtime::Handle,
     http: Option<reqwest::Client>,
     next_check: Option<Instant>,
@@ -182,7 +146,7 @@ pub struct Updater {
     notes: Notes,
     notes_open: bool,
     download: Option<Download>,
-    /// A version waiting beside the program, put in place when Elite Nexus closes.
+    /// A version waiting beside the program, put in place when EliteNexus-Gen2 closes.
     ready: Option<String>,
     failed: Option<String>,
     banner_closed: bool,
@@ -198,17 +162,18 @@ impl Updater {
     /// version a Restart now came from (`--updated`); `shot_tab`: a screenshot run's `--tab`, for the update states.
     pub fn new(live: bool, prefs: &mut UpdatePrefs, restarted_from: Option<String>, data_dir: &Path, rt: tokio::runtime::Handle, shot_tab: Option<&str>) -> Updater {
         let current = Version::current();
-        let exe = std::env::current_exe().ok();
+        let enabled = live && shot_tab.is_none() && PRODUCTION_PUBLIC_KEY.is_some();
+        let exe = enabled.then(std::env::current_exe).and_then(Result::ok);
         let installable = exe.as_deref().map_or(Err(install::Blocked::Source), install::installable);
-        let source = Source::from_env();
         let mut u = Updater {
             current,
             exe,
             installable,
-            auto: live && prefs.check && (!cfg!(debug_assertions) || source != Source::GitHub),
-            source,
+            enabled,
+            demo: shot_tab.is_some(),
+            auto: enabled && prefs.check && !cfg!(debug_assertions),
             rt,
-            http: reqwest::Client::builder().user_agent(concat!("EliteNexus/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(20)).build().ok(),
+            http: enabled.then(|| reqwest::Client::builder().https_only(true).user_agent(concat!("EliteNexus-Gen2/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(20)).build().ok()).flatten(),
             next_check: None,
             check: None,
             checked: None,
@@ -231,7 +196,7 @@ impl Updater {
             return u;
         }
         u.next_check = u.auto.then(|| Instant::now() + FIRST_CHECK);
-        if let Some(exe) = u.exe.clone() {
+        if u.installable.is_ok() && let Some(exe) = u.exe.clone() {
             install::clean_up(&exe);
             if u.updated_from.is_some() {
                 // The copy that started this one may still be closing, and its program can't go while it runs: again
@@ -242,19 +207,10 @@ impl Updater {
                     install::clean_up(&exe);
                 });
             }
-            // A version downloaded before the last exit and still waiting (that run crashed): it goes in at this exit.
-            match prefs.staged.take() {
-                Some(s) if Version::parse(&s.version).is_some_and(|v| v > u.current) && install::staged_matches(&exe, &s.sha256) => {
-                    u.ready = Some(s.version.clone());
-                    plan_exit(Some(ExitPlan { exe: exe.clone(), restart: false, from: u.current.to_string() }));
-                    prefs.staged = Some(s);
-                }
-                // In place already, or replaced since by hand: what's left of it goes.
-                Some(s) if install::staged_matches(&exe, &s.sha256) => install::discard_staged(&exe),
-                _ => {}
-            }
+            // A previous process's pending executable has no in-memory verification to authorize a swap.
+            install::discard_staged(&exe);
         }
-        if let Ok(why) = std::fs::read_to_string(data_dir.join(SWAP_ERROR)) {
+        if u.enabled && let Ok(why) = std::fs::read_to_string(data_dir.join(SWAP_ERROR)) {
             let _ = std::fs::remove_file(data_dir.join(SWAP_ERROR));
             u.failed = Some(format!("{} nexus.log in the data folder has the details.", why.trim()));
         }
@@ -270,15 +226,19 @@ impl Updater {
     /// Screenshot states (`--tab update` and its siblings), with the changelog's own sections as the notes.
     fn demo(&mut self, tab: &str) {
         let next = Version { patch: self.current.patch + 1, pre: Vec::new(), ..self.current.clone() };
-        let asset = Asset { name: format!("EliteNexus-v{next}-windows-x64.zip"), url: nexus_update::release_file(&format!("v{next}"), "x.zip"), size: 21_400_000, sha256: "0".repeat(64) };
-        let manifest = Manifest { schema: 1, version: next.to_string(), tag: format!("v{next}"), date: String::new(), assets: [(nexus_update::manifest::this_platform(), asset)].into_iter().collect() };
+        let platform = nexus_update::manifest::this_platform();
+        let ext = if platform == "linux-x64" { "tar.gz" } else { "zip" };
+        let tag = format!("v{next}");
+        let name = format!("{}-{tag}-{platform}.{ext}", nexus_update::PRODUCT);
+        let asset = Asset { url: nexus_update::release_file(&tag, &name), name, size: 21_400_000, sha256: "0".repeat(64) };
+        let manifest = Manifest { version: next.to_string(), tag, assets: [(platform, asset)].into_iter().collect(), ..Manifest::default() };
         let found = Found { version: next.clone(), manifest };
         // The changelog's Unreleased part, as the made-up version's notes.
         let upcoming = notes::between(&CHANGELOG.replacen("## Unreleased", &format!("## [{next}]"), 1), &self.current, &next);
         let tab = tab.to_ascii_lowercase();
         // A screenshot build can't update itself (it's built from source): the states show a copy that can, or one in
         // a folder it can't write to, the most common reason it can't.
-        self.installable = if tab.contains("blocked") { Err(install::Blocked::ReadOnly(PathBuf::from(r"C:\Program Files\Elite Nexus"))) } else { Ok(()) };
+        self.installable = if tab.contains("blocked") { Err(install::Blocked::ReadOnly(PathBuf::from(r"C:\Program Files\EliteNexus-Gen2"))) } else { Ok(()) };
         match tab.as_str() {
             "update" | "update-blocked" => self.found = Some(found),
             "update-notes" => {
@@ -311,7 +271,7 @@ impl Updater {
         self.scroll_to_row = tab.starts_with("update");
     }
 
-    /// Every frame: starts checks when they're due and collects what the jobs found. True when `prefs` changed.
+    /// Every frame: starts checks when they're due and collects what the jobs found.
     pub fn tick(&mut self, ctx: &egui::Context, prefs: &mut UpdatePrefs, playing: bool) -> bool {
         self.playing = playing;
         let now = Instant::now();
@@ -322,7 +282,7 @@ impl Updater {
                 Ok(found) => {
                     self.checked = Some((now, None));
                     self.next_check = self.auto.then(|| now + EVERY);
-                    if found.version > self.current {
+                    if self.current.accepts_update(&found.version) {
                         if self.found.as_ref().is_none_or(|f| f.version != found.version) {
                             // A version not offered before: its banner opens again, with its own notes.
                             self.banner_closed = false;
@@ -330,7 +290,7 @@ impl Updater {
                         }
                         // The waiting version is older than this one: it gives way.
                         if self.ready.as_deref().and_then(Version::parse).is_some_and(|r| r < found.version) {
-                            self.give_up_staged(prefs);
+                            self.give_up_staged();
                             changed = true;
                         }
                         self.found = Some(found);
@@ -361,10 +321,9 @@ impl Updater {
                         tracing::info!(%version, "update downloaded and waiting");
                         self.ready = Some(version.clone());
                         self.failed = None;
-                        prefs.staged = Some(StagedPrefs { version, sha256: staged.sha256 });
                         changed = true;
                         if let Some(exe) = self.exe.clone() {
-                            plan_exit(Some(ExitPlan { exe, restart: false, from: self.current.to_string() }));
+                            plan_exit(Some(ExitPlan { exe, restart: false, sha256: staged.sha256, from: self.current.to_string() }));
                         }
                     }
                     Err(_) if cancelled => {}
@@ -390,20 +349,23 @@ impl Updater {
 
     /// The checks were switched on or off in Settings.
     fn set_auto(&mut self, on: bool, live: bool) {
-        self.auto = on && live;
+        self.auto = self.enabled && on && live && !cfg!(debug_assertions);
         self.next_check = self.auto.then(|| Instant::now() + Duration::from_secs(2));
     }
 
     fn start_check(&mut self, ctx: &egui::Context) {
+        let Some(key) = PRODUCTION_PUBLIC_KEY.filter(|_| self.enabled) else { return };
         let Some(http) = self.http.clone() else {
-            self.checked = Some((Instant::now(), Some("Elite Nexus couldn't set up its connection.".into())));
+            self.checked = Some((Instant::now(), Some("EliteNexus-Gen2 couldn't set up its connection.".into())));
             return;
         };
-        let (source, beta) = (self.source.clone(), self.current.is_pre());
-        self.check = Some(Job::spawn_async(ctx, &self.rt, check(http, source, beta)));
+        self.check = Some(Job::spawn_async(ctx, &self.rt, check(http, key, self.current.is_pre())));
     }
 
     fn start_download(&mut self, ctx: &egui::Context) {
+        if !self.enabled || self.installable.is_err() {
+            return;
+        }
         let (Some(found), Some(exe), Some(http)) = (self.found.clone(), self.exe.clone(), self.http.clone()) else { return };
         let Some(asset) = found.manifest.asset(&nexus_update::manifest::this_platform()).cloned() else {
             self.failed = Some("The release has no archive for this computer.".into());
@@ -411,7 +373,7 @@ impl Updater {
         };
         let (got, cancel) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicBool::new(false)));
         let total = asset.size;
-        let job = Job::spawn_async(ctx, &self.rt, download_and_stage(http, self.source.clone(), asset, exe, got.clone(), cancel.clone()));
+        let job = Job::spawn_async(ctx, &self.rt, download_and_stage(http, asset, exe, got.clone(), cancel.clone()));
         self.failed = None;
         self.download = Some(Download { job, version: found.version.to_string(), got, total, cancel });
     }
@@ -431,14 +393,10 @@ impl Updater {
             let Some(http) = self.http.clone() else { return };
             let tag = if tag.is_empty() { format!("v{to}") } else { tag };
             let from = self.current.clone();
-            let url = match &self.source {
-                Source::GitHub => nexus_update::changelog_at(&tag),
-                Source::Url(base) => format!("{base}/CHANGELOG.md"),
-                Source::Folder(dir) => dir.join("CHANGELOG.md").to_string_lossy().into_owned(),
-            };
-            let folder = matches!(self.source, Source::Folder(_));
+            let url = nexus_update::changelog_at(&tag);
             self.notes = Notes::Loading(Job::spawn_async(ctx, &self.rt, async move {
-                let text = if folder { std::fs::read_to_string(&url).map_err(|e| e.to_string())? } else { String::from_utf8_lossy(&get(&http, &url, 4 << 20, None, None).await?).into_owned() };
+                let bytes = get(&http, &url, 4 << 20, None, None).await?;
+                let text = String::from_utf8_lossy(&bytes);
                 Ok(notes::between(&text, &from, &to))
             }));
         } else if let Some(from) = &self.updated_from {
@@ -447,20 +405,23 @@ impl Updater {
         }
     }
 
-    /// Closes Elite Nexus, puts the waiting version in place and starts it.
+    /// Closes EliteNexus-Gen2, puts the waiting version in place and starts it.
     fn restart(&mut self, ctx: &egui::Context) {
-        let Some(exe) = self.exe.clone() else { return };
-        plan_exit(Some(ExitPlan { exe, restart: true, from: self.current.to_string() }));
+        if !self.enabled {
+            return;
+        }
+        let Ok(mut plan) = EXIT_PLAN.lock() else { return };
+        let Some(plan) = plan.as_mut() else { return };
+        plan.restart = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    fn give_up_staged(&mut self, prefs: &mut UpdatePrefs) {
+    fn give_up_staged(&mut self) {
         if let Some(exe) = &self.exe {
             install::discard_staged(exe);
         }
         plan_exit(None);
         self.ready = None;
-        prefs.staged = None;
     }
 
     /// The newer version to offer: not skipped, unless it's downloading or waiting already.
@@ -479,7 +440,7 @@ impl Updater {
             let (got, total) = (d.got.load(Ordering::Relaxed), d.total.max(1));
             let detail = format!("{} of {}. It's checked against the release's signed manifest before anything changes.", megabytes(got), megabytes(total));
             let mut cancel = false;
-            banner(ui, Tone::Info, &format!("Downloading Elite Nexus {}…", d.version), &detail, |ui| cancel = widgets::button(ui, "Cancel").clicked(), |ui| {
+            banner(ui, Tone::Info, &format!("Downloading EliteNexus-Gen2 {}…", d.version), &detail, |ui| cancel = widgets::button(ui, "Cancel").clicked(), |ui| {
                 widgets::bar(ui, (got as f32 / total as f32).clamp(0.0, 1.0), pal::BLUE, 4.0, None);
             });
             if cancel && let Some(d) = &self.download {
@@ -492,7 +453,7 @@ impl Updater {
         }
         if let Some(e) = self.failed.clone() {
             let (mut again, mut page, mut close) = (false, false, false);
-            let detail = format!("{e} Elite Nexus {cur} keeps running as it was.");
+            let detail = format!("{e} EliteNexus-Gen2 {cur} keeps running as it was.");
             banner(
                 ui,
                 Tone::Warn,
@@ -521,15 +482,15 @@ impl Updater {
         }
         if let Some(version) = self.ready.clone() {
             let detail = if self.playing {
-                "It takes this one's place when you close Elite Nexus, so nothing stops while you play. Restart now does it at once, in a few seconds.".to_string()
+                "It takes this one's place when you close EliteNexus-Gen2, so nothing stops while you play. Restart now does it at once, in a few seconds.".to_string()
             } else {
-                "It takes this one's place when you close Elite Nexus. Restart now does it at once, in a few seconds; your settings and data stay as they are.".to_string()
+                "It takes this one's place when you close EliteNexus-Gen2. Restart now does it at once, in a few seconds; your settings and data stay as they are.".to_string()
             };
             let (mut restart, mut notes, mut close) = (false, false, false);
             banner(
                 ui,
                 Tone::Info,
-                &format!("Elite Nexus {version} is ready."),
+                &format!("EliteNexus-Gen2 {version} is ready."),
                 &detail,
                 |ui| {
                     close = close_button(ui);
@@ -552,14 +513,14 @@ impl Updater {
             let has_asset = found.manifest.asset(&nexus_update::manifest::this_platform()).is_some();
             let can = self.installable.is_ok() && has_asset;
             let detail = match &self.installable {
-                Ok(()) if has_asset => format!("You have {cur}. Update downloads it, checks it, and puts it in place when you close Elite Nexus or restart it. Your settings and data stay as they are."),
+                Ok(()) if has_asset => format!("You have {cur}. Update downloads it, checks it, and puts it in place when you close EliteNexus-Gen2 or restart it. Your settings and data stay as they are."),
                 Ok(()) => format!("You have {cur}. This release has no archive for this computer: the release page has what there is."),
                 Err(why) => format!("You have {cur}. {}", why.why()),
             };
             banner(
                 ui,
                 Tone::Info,
-                &format!("Elite Nexus {} is out.", found.version),
+                &format!("EliteNexus-Gen2 {} is out.", found.version),
                 &detail,
                 |ui| {
                     close = close_button(ui);
@@ -589,7 +550,7 @@ impl Updater {
             banner(
                 ui,
                 Tone::Info,
-                &format!("Updated to Elite Nexus {cur}."),
+                &format!("Updated to EliteNexus-Gen2 {cur}."),
                 &format!("From {from}. Your settings and data are as they were."),
                 |ui| {
                     close = close_button(ui);
@@ -703,6 +664,15 @@ impl Updater {
         if std::mem::take(&mut self.scroll_to_row) {
             g.ui.scroll_to_cursor(Some(Align::Center));
         }
+        if !self.enabled && !self.demo {
+            let status = if PRODUCTION_PUBLIC_KEY.is_none() {
+                "Disabled pending approval of the Gen2 signing key."
+            } else {
+                "Disabled for this run."
+            };
+            g.row("Updates", status, |_| {});
+            return false;
+        }
         let status = self.status(prefs);
         let mut action = None;
         g.row("Updates", &status, |ui| {
@@ -756,9 +726,9 @@ impl Updater {
         if g.switch(
             &mut prefs.check,
             "Check for updates",
-            "A minute after start and every 12 hours, Elite Nexus asks GitHub which version is newest: a download, like opening the release page. Nothing about you, your commander or your game is sent. Updating always takes a click.",
+            "A minute after start and every 12 hours, EliteNexus-Gen2 asks GitHub which version is newest: a download, like opening the release page. Nothing about you, your commander or your game is sent. Updating always takes a click.",
         ) {
-            self.set_auto(prefs.check && (!cfg!(debug_assertions) || self.source != Source::GitHub), live);
+            self.set_auto(prefs.check, live);
             changed = true;
         }
         changed
@@ -770,7 +740,7 @@ impl Updater {
             return format!("Downloading {}: {} of {}.", d.version, megabytes(d.got.load(Ordering::Relaxed)), megabytes(d.total));
         }
         if let Some(v) = &self.ready {
-            return format!("{v} is downloaded and checked: it's put in place when you close Elite Nexus.");
+            return format!("{v} is downloaded and checked: it's put in place when you close EliteNexus-Gen2.");
         }
         if let Some(e) = &self.failed {
             return format!("The last update didn't work: {e}");
@@ -790,7 +760,7 @@ impl Updater {
             Some((at, None)) => format!("Up to date: {} is the newest. Checked {}.", self.current, ago(*at)),
             Some((at, Some(e))) => format!("Couldn't check {}: {e}.", ago(*at)),
             None if !prefs.check => "Checks are off: Check now asks once.".into(),
-            None if cfg!(debug_assertions) && self.source == Source::GitHub => "A build from source doesn't check by itself: Check now asks once.".into(),
+            None if cfg!(debug_assertions) => "A build from source doesn't check by itself: Check now asks once.".into(),
             None if self.next_check.is_some() => "The first check comes a minute after start.".into(),
             None => "Not checked in this run.".into(),
         }
@@ -802,55 +772,31 @@ impl Updater {
 
 /// Asks for the newest release: the latest stable one, or for a beta the newest of all (the releases' feed), and
 /// checks its manifest's signature.
-async fn check(http: reqwest::Client, source: Source, beta: bool) -> Result<Found, String> {
-    let (bytes, sig) = match &source {
-        Source::GitHub => {
-            let tag = if beta {
-                let feed = get(&http, nexus_update::FEED, 2 << 20, None, None).await?;
-                nexus_update::newest_tag(&nexus_update::feed_tags(&String::from_utf8_lossy(&feed))).map(|(_, t)| t)
-            } else {
-                None
-            };
-            let url = |file: &str| tag.as_deref().map_or_else(|| nexus_update::latest_file(file), |t| nexus_update::release_file(t, file));
-            let bytes = get(&http, &url(nexus_update::MANIFEST), nexus_update::manifest::MAX_MANIFEST_BYTES, None, None).await?;
-            let sig = get(&http, &url(nexus_update::SIGNATURE), 4096, None, None).await?;
-            (bytes, sig)
-        }
-        Source::Url(base) => {
-            let bytes = get(&http, &format!("{base}/{}", nexus_update::MANIFEST), nexus_update::manifest::MAX_MANIFEST_BYTES, None, None).await?;
-            let sig = get(&http, &format!("{base}/{}", nexus_update::SIGNATURE), 4096, None, None).await?;
-            (bytes, sig)
-        }
-        Source::Folder(dir) => {
-            let read = |f: &str| std::fs::read(dir.join(f)).map_err(|e| format!("{}: {e}", dir.join(f).display()));
-            (read(nexus_update::MANIFEST)?, read(nexus_update::SIGNATURE)?)
-        }
+async fn check(http: reqwest::Client, key: &str, beta: bool) -> Result<Found, String> {
+    let tag = if beta {
+        let feed = get(&http, nexus_update::FEED, 2 << 20, None, None).await?;
+        nexus_update::newest_tag(&nexus_update::feed_tags(&String::from_utf8_lossy(&feed))).map(|(_, t)| t)
+    } else {
+        None
     };
-    let manifest = Manifest::verified(&bytes, &String::from_utf8_lossy(&sig), nexus_update::PUBLIC_KEY).map_err(|e| format!("the release's update manifest was refused: {e}"))?;
+    let url = |file: &str| tag.as_deref().map_or_else(|| nexus_update::latest_file(file), |t| nexus_update::release_file(t, file));
+    let bytes = get(&http, &url(nexus_update::MANIFEST), nexus_update::manifest::MAX_MANIFEST_BYTES, None, None).await?;
+    let sig = get(&http, &url(nexus_update::SIGNATURE), 4096, None, None).await?;
+    let manifest = Manifest::verified(&bytes, &String::from_utf8_lossy(&sig), key).map_err(|e| format!("the release's update manifest was refused: {e}"))?;
+    if tag.is_some_and(|tag| tag != manifest.tag) {
+        return Err("The signed manifest does not match the requested release tag.".into());
+    }
     let version = manifest.version().ok_or("the release's update manifest names no version")?;
     Ok(Found { version, manifest })
 }
 
 /// Downloads the archive, checks it against the signed manifest, takes the program from it and puts it beside the
 /// running one. Nothing changes unless every check holds.
-async fn download_and_stage(http: reqwest::Client, source: Source, asset: Asset, exe: PathBuf, got: Arc<AtomicU64>, cancel: Arc<AtomicBool>) -> Result<install::Staged, String> {
-    // Never more than the manifest says, and never more than any Elite Nexus could be.
-    let max = (asset.size as usize).min(600 << 20);
-    let bytes = match &source {
-        Source::GitHub => get(&http, &asset.url, max, Some(&got), Some(&cancel)).await?,
-        Source::Url(base) => get(&http, &format!("{base}/{}", asset.name), max, Some(&got), Some(&cancel)).await?,
-        Source::Folder(dir) => std::fs::read(dir.join(&asset.name)).map_err(|e| format!("{}: {e}", asset.name))?,
-    };
-    if bytes.len() as u64 != asset.size {
-        return Err("The download isn't as large as the release says, so nothing was changed.".into());
-    }
-    if nexus_update::sha256_hex(&bytes) != asset.sha256 {
-        return Err("The download isn't the file the release signed, so nothing was changed.".into());
-    }
-    let kind = archive::Kind::of(&asset.name).ok_or_else(|| format!("{} isn't an archive Elite Nexus reads.", asset.name))?;
+async fn download_and_stage(http: reqwest::Client, asset: Asset, exe: PathBuf, got: Arc<AtomicU64>, cancel: Arc<AtomicBool>) -> Result<install::Staged, String> {
+    let max = asset.size.min(nexus_update::manifest::MAX_ARCHIVE_BYTES as u64) as usize;
+    let bytes = get(&http, &asset.url, max, Some(&got), Some(&cancel)).await?;
     tokio::task::spawn_blocking(move || {
-        let files = archive::extract(&bytes, kind, PROGRAM).map_err(|e| format!("The release archive: {e}."))?;
-        install::stage(&exe, &files, PROGRAM).map_err(|e| format!("The new version couldn't be put beside this one ({e}), so nothing was changed."))
+        install::verify_and_stage(&exe, &asset, &bytes, || cancel.load(Ordering::Relaxed))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1018,7 +964,25 @@ mod tests {
         assert!(s.updates.check);
         let p: UpdatePrefs = serde_json::from_str(r#"{"check":false,"skipped":"0.8.4","staged":{"version":"0.8.4","sha256":"ab"},"later":1}"#).expect("prefs");
         assert!(!p.check);
-        assert_eq!(p.staged, Some(StagedPrefs { version: "0.8.4".into(), sha256: "ab".into() }));
+        assert_eq!(p.skipped, "0.8.4");
+        assert!(serde_json::to_value(p).expect("prefs").get("staged").is_none());
+    }
+
+    #[test]
+    fn the_missing_production_key_blocks_update_jobs_and_restart_even_in_a_live_run() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
+        let ctx = egui::Context::default();
+        let mut prefs = UpdatePrefs::default();
+        let mut u = Updater::new(true, &mut prefs, None, Path::new("unused"), rt.handle().clone(), None);
+        u.start_check(&ctx);
+        u.start_download(&ctx);
+        u.restart(&ctx);
+        assert!(u.exe.is_none(), "the installer does not even inspect the executable");
+        assert!(u.http.is_none(), "no update transport is configured");
+        assert!(u.next_check.is_none());
+        assert!(u.check.is_none());
+        assert!(u.download.is_none());
+        assert!(u.ready.is_none());
     }
 
     #[test]
@@ -1030,7 +994,7 @@ mod tests {
 
     #[test]
     fn the_exit_plan_is_taken_once() {
-        plan_exit(Some(ExitPlan { exe: PathBuf::from("EliteNexus.exe"), restart: true, from: "0.8.3".into() }));
+        plan_exit(Some(ExitPlan { exe: PathBuf::from(nexus_update::PROGRAM), restart: true, sha256: String::new(), from: "0.8.3".into() }));
         assert!(take_exit_plan().is_some_and(|p| p.restart));
         assert!(take_exit_plan().is_none());
     }

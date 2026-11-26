@@ -1,9 +1,12 @@
 # Changelog
 
-What changed in each release, newest first. Add user-visible changes under "Unreleased" as you make them; at
-release time that section becomes the new version and the release workflow publishes it as the release notes.
+What changed in each release, newest first. Add user-visible changes under "Unreleased" as you make them.
+The versioned entries through 0.8.2 preserve the original EliteNexus release notes.
 
 ## Unreleased
+
+- **Updates:** EliteNexus-Gen2 checks, downloads and installs are disabled pending approval of Gen2 signing.
+  Local Windows and macOS development packages carry the separate Gen2 identity.
 
 - **Journals:** Keep complete records in order when new parts appear and rebuild local views when a journal is replaced.
   Logbook's **All commanders** tab shows the aggregate source. Ask and AI agents can search records attributed to
