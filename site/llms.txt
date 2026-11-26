@@ -1,5 +1,7 @@
 # Elite Nexus
 
+This Gen2 repository preserves the original project information below. Gen2 is in development. Upstream downloads and support links refer to the original Elite Nexus. Gen2 production updates, cloud Ask, and outbound community sync are disabled pending separate approval. The cumulative improvement register is in docs/GEN2_IMPROVEMENTS.md.
+
 > Elite Nexus is a free, open-source (GPL-3.0-or-later) companion app for Elite Dangerous (Horizons and Odyssey) on
 > Windows 10/11, Linux (64-bit) and macOS. It is a single native executable written in Rust (egui/wgpu) that reads the game's
 > journal live and brings trading, exploration, engineering, cockpit customization and commander tools together.

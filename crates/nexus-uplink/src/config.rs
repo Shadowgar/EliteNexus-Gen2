@@ -165,7 +165,7 @@ impl UplinkConfig {
 
     /// User-Agent for every request.
     pub fn user_agent(&self) -> String {
-        format!("EliteNexus/{}", self.version())
+        format!("{}/{}", self.software().replace(char::is_whitespace, ""), self.version())
     }
 }
 

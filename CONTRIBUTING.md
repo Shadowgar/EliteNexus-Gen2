@@ -70,7 +70,7 @@ Each crate ships examples that work on your own journals and database:
 **Testing updates.** `ELITE_NEXUS_UPDATE_URL` points a build at a folder (or an address) holding `update.json`,
 `update.json.minisig`, the archives it names and optionally a `CHANGELOG.md`, instead of GitHub; the signature is still
 checked against the built-in key, so sign the test manifest with `update_sign`. With the variable set even a debug build
-checks by itself; it installs only from a release build outside a `target` folder (copy `EliteNexus.exe` elsewhere),
+checks by itself; it installs only from a release build outside a `target` folder (copy `EliteNexus-Gen2.exe` elsewhere),
 and never in a test run. `--tab update` (and `update-blocked`, `update-download`, `update-ready`, `update-failed`,
 `update-notes`, `updated`) shows the banner's states in a screenshot; with `--page Settings`, the About rows too.
 
@@ -92,8 +92,7 @@ the galaxy database has one writer thread with pooled readers. `docs/ARCHITECTUR
 
 ## Reporting a bug
 
-Open a [GitHub issue](https://github.com/uruskan/EliteNexus/issues) (questions and ideas go to
-[Discussions](https://github.com/uruskan/EliteNexus/discussions)) with:
+For Gen2, use the [Gen2 issue tracker](https://github.com/Shadowgar/EliteNexus-Gen2/issues) and include:
 
 * the version (Settings › About), your OS, and how the game runs there (natively, Proton, Wine, CrossOver, Whisky);
 * what you did, what you expected and what happened;

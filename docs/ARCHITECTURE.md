@@ -16,7 +16,7 @@ cargo test --workspace
 On Windows, `tools\dev\cargo.ps1` runs cargo at BelowNormal priority (logs in `target\cc\`) so a game on the same PC
 isn't slowed, and `tools\dev\shot.ps1` checks the UI with off-screen screenshots; `AGENTS.md` has the working rules.
 Parallel builds: set your own `CARGO_TARGET_DIR` (e.g. `target-agents\<name>`) to avoid lock contention.
-`EliteNexus.exe --page Exploration --screenshot out.png` renders a page after loading and saves a PNG (used for UI checks;
+`EliteNexus-Gen2.exe --page Exploration --screenshot out.png` renders a page after loading and saves a PNG (used for UI checks;
 the window is placed off-screen and never takes focus). `--size 1000x700` tests responsive layouts, `--tab <name>` opens
 a Market section (`abnormal`, `database`, …; `routes` finds trade routes on the first frame, `station` opens four markets side by side, `browse` opens Find commodity's whole list), the whole-galaxy map (`galaxy`), an Exploration tab (`find`, `history`,
 `unsold`), Exobiology › Find planets (`untouched`, `known`; these three searches start on the first frame of a
@@ -31,7 +31,7 @@ HUD & cockpit's tabs (`glare`, `cockpit`) or a HUD colours preset to start from 
 `royalpurple`, …), `--demo` adds a sample Ask conversation, an alert banner and sample alerts in the alert history
 (`--tab bell` opens it), `--overlay <moment>` shows an overlay
 moment compact and expanded with sample content (`overlay::DEMOS`), `--shot-delay 8` waits longer (the
-galaxy image paints in the background, Spansh searches take 5–20 s). `ELITE_NEXUS_GAME_DIR` points HUD & cockpit at
+galaxy image paints in the background, Spansh searches take 5–20 s). `ELITE_NEXUS_GEN2_GAME_DIR` points HUD & cockpit at
 another game folder (one holding `EliteDangerous64.exe`): test the Cockpit lights installer against a copy, never
 a real install.
 
@@ -40,11 +40,11 @@ a real install.
 | crate | role | depends on |
 |---|---|---|
 | `nexus-journal` | journal + companion-file I/O: typed events (`Event::parse`), `load_history` (parallel bulk load), `Watcher` (100 ms live tail), NaN-sanitising parser | — |
-| `nexus-data` | static game knowledge compiled in: ranks, ships, exploration values, exobiology, commodities/modules/materials names (FDevIDs), engineering blueprints & engineers, material-trader maths, ship fitting (`fitting`: hulls, slots and module figures from coriolis-data; a build's jump range, speed, shields, armour, power, mass and cost) | — |
+| `nexus-gen2-data` | static game knowledge compiled in: ranks, ships, exploration values, exobiology, commodities/modules/materials names (FDevIDs), engineering blueprints & engineers, material-trader maths, ship fitting (`fitting`: hulls, slots and module figures from coriolis-data; a build's jump range, speed, shields, armour, power, mass and cost) | — |
 | `nexus-model` | pure state machine: `Model` (all CMDRs) → `GameState` (location, fleet, inventory, missions + massacre stacks, exploration, exobio, mining, carrier, colonisation, history ledger with time in the game and timestamped deeds, session, feed) + `Alerts`; `career`: the game's own statistics in plain words (labels and units for every figure, earnings and spending, records, milestones); `period`: what the commander did over a period, from the journals (money by category with trade counted by its profit, time in the game, per-day series, journal records); `ships`: the same ship by ship, each journal line going to the ship the commander was in (`History::aboard`); `context`: what the commander is doing right now (docked, supercruise, charging a jump, near a body, landed, SRV, on foot, …, the GuiFocus screen, danger), from Status.json and the journal, for anything that follows the game | journal, data |
 | `nexus-galaxy` | local SQLite (WAL) galaxy/market DB: one writer thread, pooled read connections, in-memory station index; commodity search, trade routes, nearest services, hotspots, conflicts near a point (each system's `Conflicts[]` kept with its factions; faction states stand in where a report lacked the list), streaming Spansh dump import | journal |
 | `nexus-eddn` | EDDN **subscriber** (ZeroMQ relay → decoder thread → galaxy DB), dedupe, watchdog + reconnect, stats & headlines | galaxy |
-| `nexus-uplink` | **uploads**: EDDN (schema-validated, strictly compliant), EDSM journal sync, Inara, EDAstro; persistent retry queues (`nexus-data\uplink\*.jsonl`), per-service rate limits | journal |
+| `nexus-uplink` | **uploads**: EDDN (schema-validated, strictly compliant), EDSM journal sync, Inara, EDAstro; persistent retry queues (`nexus-gen2-data\uplink\*.jsonl`), per-service rate limits | journal |
 | `nexus-spansh` | Spansh API client: neutron/galaxy/carrier/riches/exobio/trade plotters, system/station/body search | — |
 | `nexus-binds` | `.binds` parser, conflicts/missing essentials, printable reference card | — |
 | `nexus-hud` | HUD colour matrix: maths and previews (linear light), surgical edits of `GraphicsConfigurationOverride.xml` (only the `<Matrix…>` rows, backup once, atomic), credited community presets, friend/foe readability checks, game install and EDHM detection, tone mapping (glare, ACES curve, auto-exposure targets in `<HDRNode_Reference>`), Elite Nexus's graphics hook (`dimmer`: 3Dmigoto from its official release with pinned SHA-256s and a pure-Rust 7z reader; `[ShaderRegex]` patterns that patch the game's box-light shader at load (cockpit-light dimmer) and, when switched on, the HUD shaders that apply the colour matrix (keep hostile red, friendly green and shield blue; `palette::is_hud_orange` is the same rule in Rust for previews); install / settings / removal tracked by a manifest in the game folder) | — |
@@ -82,7 +82,7 @@ UI pages ──► background jobs (jobs.rs) ──► galaxy read pool / Spansh
   gives each section a share and cuts a long one to the lines about the question. `NexusTools::call` cuts anything
   still over the budget (`within`), saying so. A tool marked offline answers an agent from local data only: `origin()`
   looks an unknown system up on Spansh for Ask, never for an agent. `mcp.rs` is
-  Settings › AI agents: `EliteNexus --mcp` (`mcp/stdio.rs`, started by the agent, before any window, lock or log)
+  Settings › AI agents: `EliteNexus-Gen2 --mcp` (`mcp/stdio.rs`, started by the agent, before any window, lock or log)
   speaks MCP on stdin/stdout, both the 2026-07-28 revision (`server/discover`, `_meta` on every request) and the
   `initialize` revisions before it, and hands each call to the running app as one line of JSON over a named pipe named
   by the user's SID (`mcp/win.rs`: created with the user as owner and an owner-only DACL, opened at identification
@@ -164,7 +164,7 @@ UI pages ──► background jobs (jobs.rs) ──► galaxy read pool / Spansh
 * History is folded with alerts **disabled**; only live events raise alerts or get uploaded. Never upload history.
   Test runs (`--journal-dir`, `--screenshot`) never upload at all.
 * The UI never blocks: long work (DB queries, HTTP) runs off-thread and results are polled each frame.
-* Data dir: `nexus-data\` next to the exe (portable) — fallback `%LOCALAPPDATA%\EliteNexus`, override `ELITE_NEXUS_HOME`.
+* Data dir: `nexus-gen2-data\` next to the exe (portable) — fallback `%LOCALAPPDATA%\EliteNexus-Gen2`, override `ELITE_NEXUS_GEN2_HOME`.
   Contents: `settings.json` (API keys DPAPI-sealed), `galaxy.db` (+ WAL), `uplink\` queues and caches.
 * The galaxy DB only keeps what queries use: EDDN jumps into unpopulated systems are dropped (populated systems,
   carrier jumps, docked arrivals, stations, markets and ring hotspots are kept); the commander's own journal is kept whole.

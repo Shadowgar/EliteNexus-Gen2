@@ -198,7 +198,10 @@ mod tests {
     #[test]
     fn defaults_upload_nothing() {
         let s = crate::settings::Settings::default();
-        assert!(!config(&s.accounts).any_enabled());
+        let cfg = config(&s.accounts);
+        assert!(!cfg.any_enabled());
+        assert_eq!(cfg.software(), "EliteNexus-Gen2");
+        assert!(cfg.user_agent().starts_with("EliteNexus-Gen2/"));
     }
 
     #[test]
