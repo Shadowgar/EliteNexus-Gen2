@@ -192,7 +192,7 @@ fn depot_card(ui: &mut Ui, gs: &GameState, d: &Depot, inv: Involvement, now: Tim
             });
         }
         // An expired colonisation ship needs nothing more; other out-of-date sites may still want the goods.
-        if !d.finished() && !(stale && d.colonisation_ship) {
+        if !(d.finished() || stale && d.colonisation_ship) {
             ui.add_space(6.0);
             suppliers_section(ui, gs, d, market, st);
         }

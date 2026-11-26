@@ -1189,7 +1189,7 @@ pub fn preflight(schema: Schema, envelope: &Value) -> Result<(), &'static str> {
         return Err("header must have exactly the five sender keys");
     }
     for k in ["uploaderID", "softwareName", "softwareVersion"] {
-        if !header.get(k).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()) {
+        if header.get(k).and_then(Value::as_str).is_none_or(|s| s.trim().is_empty()) {
             return Err("header key missing or empty");
         }
     }

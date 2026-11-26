@@ -472,37 +472,35 @@ impl InaraMapper {
                     out.push(InaraEvent::new("setCommanderRankEngineer", ts, d));
                 }
             }
-            "Cargo" => {
-                if get_str(ev, "Vessel") == Some("Ship") {
-                    if self.session_start_pending {
-                        self.session_start_pending = false;
-                        if !self.reputation.is_empty() {
-                            let list: Vec<Value> = self
-                                .reputation
-                                .iter()
-                                .map(|(k, v)| json!({"majorfactionName": k, "majorfactionReputation": v}))
-                                .collect();
-                            out.push(InaraEvent::new("setCommanderReputationMajorFaction", ts, Value::Array(list)));
-                        }
-                        if !self.engineers.is_empty() {
-                            let list: Vec<Value> = self.engineers.values().cloned().collect();
-                            out.push(InaraEvent::new("setCommanderRankEngineer", ts, Value::Array(list)));
-                        }
-                        if let Some(e) = self.current_ship_event(ts) {
-                            out.push(e);
-                            if let (Some(s), Some(l)) = (&self.ship, &self.loadout) {
-                                out.push(InaraEvent::new(
-                                    "setCommanderShipLoadout",
-                                    ts,
-                                    json!({"shipType": s.kind, "shipGameID": s.id, "shipLoadout": l}),
-                                ));
-                            }
+            "Cargo" if get_str(ev, "Vessel") == Some("Ship") => {
+                if self.session_start_pending {
+                    self.session_start_pending = false;
+                    if !self.reputation.is_empty() {
+                        let list: Vec<Value> = self
+                            .reputation
+                            .iter()
+                            .map(|(k, v)| json!({"majorfactionName": k, "majorfactionReputation": v}))
+                            .collect();
+                        out.push(InaraEvent::new("setCommanderReputationMajorFaction", ts, Value::Array(list)));
+                    }
+                    if !self.engineers.is_empty() {
+                        let list: Vec<Value> = self.engineers.values().cloned().collect();
+                        out.push(InaraEvent::new("setCommanderRankEngineer", ts, Value::Array(list)));
+                    }
+                    if let Some(e) = self.current_ship_event(ts) {
+                        out.push(e);
+                        if let (Some(s), Some(l)) = (&self.ship, &self.loadout) {
+                            out.push(InaraEvent::new(
+                                "setCommanderShipLoadout",
+                                ts,
+                                json!({"shipType": s.kind, "shipGameID": s.id, "shipLoadout": l}),
+                            ));
                         }
                     }
-                    match get_array(ev, "Inventory") {
-                        Some(inv) => self.cargo_event(inv, ts, &mut out),
-                        None => self.expect = Some((CompanionKind::Cargo, Timestamp::parse(ts).unwrap_or_default())),
-                    }
+                }
+                match get_array(ev, "Inventory") {
+                    Some(inv) => self.cargo_event(inv, ts, &mut out),
+                    None => self.expect = Some((CompanionKind::Cargo, Timestamp::parse(ts).unwrap_or_default())),
                 }
             }
             "Materials" => {
@@ -685,22 +683,20 @@ impl InaraMapper {
                 }
                 self.taxi = None;
             }
-            "Touchdown" => {
-                if get_bool(ev, "PlayerControlled") == Some(true) && get_bool(ev, "OnPlanet") != Some(false) {
-                    let mut d = Map::new();
-                    put(&mut d, "starsystemName", val(ev, "StarSystem"));
-                    put(&mut d, "starsystemBodyName", val(ev, "Body"));
-                    if let (Some(lat), Some(lon)) = (get_f64(ev, "Latitude"), get_f64(ev, "Longitude")) {
-                        d.insert("starsystemBodyCoords".into(), json!([lat, lon]));
-                    }
-                    if get_bool(ev, "Taxi") != Some(true) {
-                        self.ship_fields(&mut d);
-                    }
-                    d.insert("isTaxiShuttle".into(), json!(false));
-                    d.insert("isTaxiDropship".into(), json!(false));
-                    if d.contains_key("starsystemName") && d.contains_key("starsystemBodyName") {
-                        out.push(InaraEvent::new("addCommanderTravelLand", ts, Value::Object(d)));
-                    }
+            "Touchdown" if get_bool(ev, "PlayerControlled") == Some(true) && get_bool(ev, "OnPlanet") != Some(false) => {
+                let mut d = Map::new();
+                put(&mut d, "starsystemName", val(ev, "StarSystem"));
+                put(&mut d, "starsystemBodyName", val(ev, "Body"));
+                if let (Some(lat), Some(lon)) = (get_f64(ev, "Latitude"), get_f64(ev, "Longitude")) {
+                    d.insert("starsystemBodyCoords".into(), json!([lat, lon]));
+                }
+                if get_bool(ev, "Taxi") != Some(true) {
+                    self.ship_fields(&mut d);
+                }
+                d.insert("isTaxiShuttle".into(), json!(false));
+                d.insert("isTaxiDropship".into(), json!(false));
+                if d.contains_key("starsystemName") && d.contains_key("starsystemBodyName") {
+                    out.push(InaraEvent::new("addCommanderTravelLand", ts, Value::Object(d)));
                 }
             }
             "ShipyardNew" => {
