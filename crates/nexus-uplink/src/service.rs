@@ -405,14 +405,16 @@ impl Uplink {
         // A new or changed Inara key: find out again who it belongs to.
         let inara_key = |c: &UplinkConfig| c.inara_credentials().map(|i| fingerprint(&[&i.api_key]));
         let new_key = inara_key(&cfg);
-        if new_key != inara_key(&self.shared.config.read()) {
+        let mut current = self.shared.config.write();
+        if new_key != inara_key(&current) {
             *self.shared.inara_account.lock() = None;
             self.shared.inara_check.store(new_key.is_some(), Ordering::Relaxed);
             self.shared.inara_check_now.store(new_key.is_some(), Ordering::Relaxed);
         }
-        *self.shared.config.write() = cfg.clone();
-        clear_disabled_queues(&self.shared, &cfg);
+        *current = cfg.clone();
         self.shared.epoch.fetch_add(1, Ordering::Relaxed);
+        drop(current);
+        clear_disabled_queues(&self.shared, &cfg);
         let _ = self.tx.send(Input::Config(Box::new(cfg)));
         self.shared.wake_all();
     }
@@ -1201,11 +1203,10 @@ async fn run_inara(shared: Arc<Shared>) {
         gate.pause(Duration::from_secs(left), &svc.counters, "Inara rate limit (from a previous run)".into());
     }
     while !shared.stopping() {
-        let (creds, software, version) = {
+        let (creds, software, version, epoch) = {
             let c = shared.config.read();
-            (c.inara_sending().cloned(), c.software().to_string(), c.version().to_string())
+            (c.inara_sending().cloned(), c.software().to_string(), c.version().to_string(), shared.epoch.load(Ordering::Relaxed))
         };
-        let epoch = shared.epoch.load(Ordering::Relaxed);
         let Some(creds) = creds else {
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
