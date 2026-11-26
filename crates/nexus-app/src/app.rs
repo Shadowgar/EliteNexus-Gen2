@@ -1321,6 +1321,11 @@ impl eframe::App for NexusApp {
                     self.log = Default::default();
                     self.colo = Default::default();
                     self.map = Default::default();
+                    self.fleet.retire_commander_results();
+                    self.combat.retire_commander_results();
+                    let tab = self.market_ui.tab;
+                    self.market_ui = pages::market::MarketUi::new(self.settings.market.clone());
+                    self.market_ui.tab = tab;
                 }
                 self.navigation_scope = Some(scope);
                 self.last_jump_count = None;

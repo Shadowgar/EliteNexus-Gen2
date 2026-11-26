@@ -858,7 +858,10 @@ async fn find_admin(spansh: Spansh, key: (Near, String), db: Option<GalaxyDb>, p
         return Err(format!("Spansh couldn't be reached ({why}), and the local database isn't open."));
     };
     // The position of the system the list is measured from, looked up here, off the UI thread, if need be.
-    let origin = place.pos.or_else(|| place.address.and_then(|a| db.system_by_id(a).ok().flatten()).and_then(|s| s.pos));
+    let origin = place.pos.or_else(|| place.address.filter(|&a| a != 0)
+        .and_then(|a| db.system_by_id(a).ok().flatten())
+        .filter(|s| s.name.eq_ignore_ascii_case(&key.1))
+        .and_then(|s| s.pos));
     let Some(origin) = origin else {
         return Err(format!("Spansh couldn't be reached ({why}), and the local database doesn't know where {} is.", key.1));
     };

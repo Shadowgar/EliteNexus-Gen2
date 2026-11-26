@@ -100,6 +100,8 @@ impl CombatPrefs {
 #[derive(Debug, Clone, PartialEq)]
 struct Asked {
     system: String,
+    address: u64,
+    pos: Option<[f64; 3]>,
     prefs: CombatPrefs,
 }
 
@@ -110,6 +112,11 @@ pub struct CombatUi {
 }
 
 impl CombatUi {
+    pub fn retire_commander_results(&mut self) {
+        self.scan = Slot::default();
+        self.asked = None;
+    }
+
     /// `tab` from the command line (`guide` opens How to fight legally).
     pub fn new(tab: Option<&str>) -> CombatUi {
         CombatUi { tab: if tab == Some("guide") { Tab::Guide } else { Tab::Fights }, scan: Slot::default(), asked: None }
@@ -156,15 +163,21 @@ fn fights(ui: &mut Ui, gs: &GameState, db: Option<&GalaxyDb>, feed: bool, st: &m
         empty(ui, icon::DATABASE, "The galaxy database isn't open", "Wars are looked up in Elite Nexus's galaxy database, which couldn't be opened. Market › Database says why.");
         return action;
     };
-    let asked = Asked { system: gs.location.system.clone(), prefs };
-    let stale = st.asked.as_ref().is_none_or(|(a, at)| *a != asked || at.elapsed() >= REFRESH);
+    let asked = Asked { system: gs.location.system.clone(), address: gs.location.system_address, pos: gs.location.star_pos, prefs };
+    if st.asked.as_ref().is_some_and(|(a, _)| *a != asked) {
+        st.retire_commander_results();
+    }
+    let stale = st.asked.as_ref().is_none_or(|(_, at)| at.elapsed() >= REFRESH);
     if stale && !st.scan.busy() && !asked.system.is_empty() {
-        let (db, system, pos) = (db.clone(), asked.system.clone(), gs.location.star_pos);
+        let (db, system, address, pos) = (db.clone(), asked.system.clone(), asked.address, asked.pos);
         st.scan.run(ui.ctx(), move || {
             let origin = match pos {
-                Some(p) => p,
-                None => db.system_by_name(&system).map_err(|e| e.to_string())?.and_then(|s| s.pos).ok_or_else(|| format!("Elite Nexus doesn't know where {system} is yet."))?,
-            };
+                Some(p) => Some(p),
+                None if address != 0 => db.system_by_id(address).map_err(|e| e.to_string())?
+                    .filter(|s| s.name.eq_ignore_ascii_case(&system))
+                    .and_then(|s| s.pos),
+                None => None,
+            }.ok_or_else(|| format!("Elite Nexus doesn't know where {system} is yet."))?;
             let q = ConflictQuery { origin, max_distance_ly: prefs.range.ly(), since_unix: Timestamp::now().0 - prefs.fresh.secs(), elections: prefs.elections, limit: 60 };
             db.conflicts_near(&q).map_err(|e| e.to_string())
         });

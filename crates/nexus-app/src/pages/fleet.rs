@@ -36,6 +36,11 @@ pub struct FleetUi {
 }
 
 impl FleetUi {
+    pub fn retire_commander_results(&mut self) {
+        self.selected = None;
+        self.buy = BuyUi::default();
+    }
+
     /// `--tab buy` opens Where to buy; in a screenshot run it starts from the current ship's build
     /// and searches on the first frame. `--tab buy-one` searches for one module (a 6A frame shift
     /// drive) on the first frame. `--tab buy-build` opens A whole build, with nothing loaded.
