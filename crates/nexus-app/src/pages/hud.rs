@@ -913,8 +913,14 @@ mod tests {
         assert!(st.protection().is_none());
 
         let dimmer = Dimmer { on: true, strength: 0.15, reach: 8.0 };
-        let fake = vec![("d3d11.dll", b"fake".to_vec()), ("d3dcompiler_47.dll", b"fake".to_vec())];
-        dimmer::install(&game, &fake, &HookConfig { dimmer, ..HookConfig::default() }).unwrap();
+        let config = dimmer::render_config(&HookConfig { dimmer, ..HookConfig::default() });
+        let mut manifest = dimmer::Manifest {
+            migoto_version: dimmer::MIGOTO_VERSION.into(),
+            files: dimmer::MIGOTO_FILES.iter().map(|(name, hash)| (name.to_string(), hash.to_string())).collect(),
+        };
+        manifest.files.push((dimmer::CONFIG.into(), dimmer::sha256_hex(config.as_bytes())));
+        std::fs::write(game.join(dimmer::CONFIG), config).unwrap();
+        std::fs::write(game.join(dimmer::MANIFEST), serde_json::to_vec(&manifest).unwrap()).unwrap();
         st.read_hook();
         assert!(st.protection().is_none());
         st.protect.on = true;
