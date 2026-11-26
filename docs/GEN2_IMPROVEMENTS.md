@@ -194,7 +194,13 @@ Phase 01C changes are implemented in draft. The verification record below distin
 
 [Windows verification head](https://github.com/Shadowgar/EliteNexus-Gen2/commit/a6b6d11fb89c37efff956711ad4d2e0f453d58e4) passed the locked application build, strict workspace Clippy and all workspace tests on exact Rust 1.100.0 and 1.95.0 MSVC. Each toolchain reported 874 passed, zero failures and 18 ignored. The Phase 01B baseline was 858 passed, zero failures and 18 ignored. Focused checks passed for launch recovery (4), Inara (10), isolated updater entry (1), Spansh access (2) and profile separation (1). The update crate passed 28 synthetic manifest, version, archive and installer tests. The Windows binary reports the Gen2 product and filename while retaining upstream copyright.
 
-Native GUI and GPU-device-loss verification, Linux and macOS acceptance, production signing and live service operation remain outstanding. The Phase 01C draft has passed automated Windows checks. Owner acceptance, merge and release are separate statuses.
+### Phase 01C-W — Windows development run
+
+The owner accepted Phase 01C as an automated development milestone. A local Windows x64 release-profile build at `16c4f3d15272aa4ec0de278f61d29a82a41e2b3e` completed with exact Rust 1.100.0 MSVC and the unchanged lockfile. The nine hosted build, Clippy and test jobs for that source passed across Windows, Linux and macOS. [Hosted CI](https://github.com/Shadowgar/EliteNexus-Gen2/actions/runs/45769758648)
+
+The Windows executable rendered Dashboard, Navigation and Settings through its native DirectX 12 screenshot mode with synthetic journals, an explicit journal directory and a separate profile. A newly appended synthetic jump updated the displayed system and live event count. Subsequent runs retained the seeded preference and restored the saved screenshot page. Each screenshot run closed through the application's normal viewport exit path. Isolated MCP exited with status 2 before creating a profile. Process endpoint samples showed no TCP connections or UDP endpoints during the walkthrough. Four focused recovery argument tests passed, including scope preservation and suppression of restart in screenshot mode.
+
+Settings About identifies Gen2. The sidebar retains the upstream product label, and Navigation displays a clipboard preference whose action is disabled in isolated mode. Interactive Windows navigation and visible-window shutdown, a native graphics device-loss restart, owner gameplay, independent review, Linux and macOS runtime acceptance, live services, signing, packaging and distribution remain open.
 
 ## Upstream review opportunities
 
