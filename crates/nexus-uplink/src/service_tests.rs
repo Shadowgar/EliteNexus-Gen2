@@ -537,13 +537,15 @@ fn source_change_retires_held_market_and_ignores_quiet_events() {
     h.uplink().source_changed();
     h.session();
     h.send(UNDOCKED_CARRIER);
-    let replay = LiveEvent { live: false, ..live_event(FSDJUMP, Timestamp::now()) };
+    let jump = FSDJUMP.replace("Synuefe BR-L c24-23", "Quiet Fixture");
+    let replay = LiveEvent { live: false, ..live_event(&jump, Timestamp::now()) };
+    h.tracker.apply(&replay.raw);
     h.uplink().on_event(&replay, h.tracker.context());
     h.uplink().flush();
     h.settle();
     let requests = h.transport.requests();
     assert_eq!(commodity_count(&requests), 0);
-    assert!(!eddn_bodies(&requests).iter().any(|b| b["message"]["event"] == "FSDJump"));
+    assert!(!eddn_bodies(&requests).iter().any(|b| b["message"]["StarSystem"] == "Quiet Fixture"));
 }
 
 #[test]
