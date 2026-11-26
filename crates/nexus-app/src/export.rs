@@ -126,7 +126,8 @@ pub(crate) mod tests {
         let text = slef(journal).expect("slef");
         let v: Value = serde_json::from_str(&text).expect("json");
         assert!(edsy_imports(&v) && coriolis_imports(&v), "{text}");
-        assert_eq!(v[0]["header"]["appName"], "Elite Nexus");
+        assert_eq!(v[0]["header"]["appName"], "EliteNexus-Gen2");
+        assert_eq!(v[0]["header"]["appURL"], "https://github.com/Shadowgar/EliteNexus-Gen2");
         let back = crate::shopping::parse_build(&text).expect("read back");
         assert_eq!((back.ship.as_str(), back.modules.len()), ("python", 1));
         both_sites_import(&text);
