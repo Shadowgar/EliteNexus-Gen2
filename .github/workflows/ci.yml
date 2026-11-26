@@ -31,44 +31,31 @@ on:
       - "docs/screenshots/**"
       - "docs/social-preview.png"
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: windows-latest
+    name: ${{ matrix.os }} / Rust ${{ matrix.rust }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        rust: ["1.95.0", stable]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: rustup toolchain install "${{ matrix.rust }}" --profile minimal --component clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --workspace
-
-  linux:
-    # The same checks on Linux, where the game runs under Proton.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
+          key: ${{ matrix.rust }}
+      - name: Build
+        run: cargo +${{ matrix.rust }} build --locked -p nexus-app
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo +${{ matrix.rust }} clippy --locked --workspace --all-targets -- -D warnings
       - name: Tests
-        run: cargo test --workspace
-
-  macos:
-    # The same checks on macOS, where the game runs under NotProton, CrossOver or Whisky.
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --workspace
+        run: cargo +${{ matrix.rust }} test --locked --workspace

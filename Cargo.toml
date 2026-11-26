@@ -19,7 +19,7 @@ default-members = ["crates/nexus-app"]
 [workspace.package]
 version = "0.8.2"
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.95"
 authors = ["CMDR Alka Uruskan"]
 license = "GPL-3.0-or-later"
 publish = false

@@ -46,10 +46,12 @@ file is for anyone changing the code. Read it before your first change; several 
 
 ## Build, test, check
 
+The locked workspace requires Rust **1.95.0** or newer. CI checks the minimum and stable toolchains.
+
 ```powershell
-cargo build -p nexus-app
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo build --locked -p nexus-app
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same clippy and tests on `windows-latest`, `ubuntu-latest` and
