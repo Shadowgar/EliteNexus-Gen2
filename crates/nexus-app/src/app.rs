@@ -162,7 +162,8 @@ impl NexusApp {
             notices.extend(crate::notices::last_run(&data_dir, ov.gpu_reset));
             notices.extend(crate::notices::running_from_zip());
         }
-        nexus_hud::install::set_game_dir(settings.game_dir.as_deref());
+        let isolated = crate::launch::isolated();
+        if !isolated { nexus_hud::install::set_game_dir(settings.game_dir.as_deref()); }
         let page = start_page.or_else(|| cc.storage.and_then(|s| eframe::get_value(s, "page"))).unwrap_or(Page::Dashboard);
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("nexus-net").enable_all().build().expect("tokio runtime");
         let mut market = crate::market::MarketService::open(&data_dir, &cc.egui_ctx);
@@ -170,11 +171,11 @@ impl NexusApp {
         let own_journals = ov.journal_dir.is_none() && settings.journal_dir.is_none();
         let core = start_core(&cc.egui_ctx, ov.journal_dir.as_ref().or(settings.journal_dir.as_ref()), market.history_sink(), &settings);
         market.attach(&core);
-        market.set_listen(settings.accounts.eddn_listen, rt.handle());
+        market.set_listen(!isolated && settings.accounts.eddn_listen, rt.handle());
         // Test runs (CLI journal folder, screenshots) never upload, and never touch the game's screenshots: replayed
         // journals must not reach the services or the Pictures folder.
-        let live_run = ov.journal_dir.is_none() && shot.is_none();
-        let sync = if live_run { crate::sync::SyncService::start(&core, &settings.accounts, &data_dir, rt.handle()) } else { crate::sync::SyncService::disabled() };
+        let live_run = !isolated && ov.journal_dir.is_none() && shot.is_none();
+        let sync = if live_run && crate::sync::OUTBOUND_AUTHORIZED { crate::sync::SyncService::start(&core, &settings.accounts, &data_dir, rt.handle()) } else { crate::sync::SyncService::disabled() };
         let shots = if live_run { crate::screenshots::ScreenshotService::start(&core, &settings.screenshots, &cc.egui_ctx) } else { crate::screenshots::ScreenshotService::disabled() };
         let mut market_ui = pages::market::MarketUi::new(settings.market.clone());
         if let Some(t) = ov.tab.as_deref().and_then(pages::market::Tab::from_name) {
@@ -198,10 +199,10 @@ impl NexusApp {
         {
             tracing::warn!("--overlay {name}: no such moment (one of {})", crate::overlay::DEMOS.join(", "));
         }
-        let agents_spansh = nexus_spansh::Spansh::builder().max_concurrent_requests(1).build().unwrap_or_else(|_| nexus_spansh::Spansh::new());
+        let agents_spansh = nexus_spansh::Spansh::gen2(isolated, 1);
         let mut mcp = crate::mcp::McpService::default();
         // Screenshot runs never answer agents.
-        mcp.apply(settings.ai.agents && shot.is_none(), || agent_tools(&core, market.db.clone(), rt.handle(), &agents_spansh), rt.handle());
+        mcp.apply(!isolated && settings.ai.agents && shot.is_none(), || agent_tools(&core, market.db.clone(), rt.handle(), &agents_spansh), rt.handle());
         // `--demo` screenshots fill the alert history, and `--tab bell` opens it, so its design can be checked (not
         // "alerts": Market has a tab of that name).
         let demo = ov.demo && shot.is_some();
@@ -257,7 +258,7 @@ impl NexusApp {
             settings_ui: Default::default(),
             nav: pages::navigation::NavUi::new(ov.tab.as_deref()),
             rt,
-            spansh: nexus_spansh::Spansh::new(),
+            spansh: nexus_spansh::Spansh::gen2(isolated, 2),
             accounts: Default::default(),
             sync,
             shots,
@@ -279,7 +280,7 @@ impl NexusApp {
             clipboard: None,
             overlay,
             xsoverlay: Default::default(),
-            dimmer_check: Some(crate::jobs::Job::spawn(&cc.egui_ctx, crate::notices::old_dimmer_installed)),
+            dimmer_check: (!isolated).then(|| crate::jobs::Job::spawn(&cc.egui_ctx, crate::notices::old_dimmer_installed)),
             frame_started: None,
             // The first frames load fonts and textures: nothing is logged in the first 10 seconds.
             slow_frame_logged: Some(Instant::now()),
@@ -306,6 +307,7 @@ impl NexusApp {
 
     /// After every jump, put the next route system on the clipboard (paste into the galaxy map).
     fn auto_copy_next(&mut self) {
+        if crate::launch::isolated() { return; }
         let next = {
             let model = self.core.model.read();
             let Some(gs) = model.active() else { return };
@@ -446,7 +448,7 @@ impl NexusApp {
                     self.speaker.say(s.clone());
                 }
             self.overlay.alert(&a);
-            if self.settings.overlay.xsoverlay && self.shot.is_none() {
+            if !crate::launch::isolated() && self.settings.overlay.xsoverlay && self.shot.is_none() {
                 self.xsoverlay.send(&a);
             }
             self.notify(a);
@@ -839,6 +841,9 @@ impl NexusApp {
                 settings_changed |=
                     pages::navigation::show(ui, gs, &mut self.nav, &mut self.settings.auto_copy_next_system, &mut self.settings.carrier, &self.spansh, self.market.db.as_ref(), self.rt.handle())
             }
+            Page::Bindings | Page::Hud if crate::launch::isolated() => {
+                widgets::footnote(ui, "Game files are unavailable in an isolated run.");
+            }
             Page::Bindings => settings_changed |= pages::bindings::show(ui, &mut self.binds, &self.data_dir, &mut self.settings.game_dir),
             Page::Hud => {
                 let s = &mut self.settings;
@@ -982,11 +987,11 @@ impl NexusApp {
             self.sync.apply(&self.settings.accounts);
             self.shots.apply(&self.settings.screenshots);
             self.market.set_watches(&self.settings.price_watches);
-            self.market.set_listen(self.settings.accounts.eddn_listen, self.rt.handle());
-            let on = self.settings.ai.agents && self.shot.is_none();
+            self.market.set_listen(!crate::launch::isolated() && self.settings.accounts.eddn_listen, self.rt.handle());
+            let on = !crate::launch::isolated() && self.settings.ai.agents && self.shot.is_none();
             self.mcp.apply(on, || agent_tools(&self.core, self.market.db.clone(), self.rt.handle(), &self.agents_spansh), self.rt.handle());
         }
-        if test_voice {
+        if test_voice && !self.overrides.mute {
             self.speaker.say("Elite Nexus voice check. All systems nominal, commander.");
         }
         if restart {
@@ -1381,6 +1386,9 @@ impl eframe::App for NexusApp {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.draw(ui);
+        if crate::launch::isolated() {
+            ui.ctx().output_mut(|output| output.commands.clear());
+        }
         // A frame that took long goes to nexus.log with its page, so a report of the window freezing can be traced.
         if let Some(took) = self.frame_started.take().map(|t| t.elapsed())
             && took > Duration::from_millis(250)

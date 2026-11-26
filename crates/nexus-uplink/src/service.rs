@@ -141,7 +141,7 @@ enum Input {
     Event(RawEvent, Box<UploadContext>),
     Companion(Companion, Box<UploadContext>),
     /// The current session for an Inara profile update (see [`Uplink::sync_inara_profile`]).
-    InaraSnapshot(Vec<RawEvent>, Box<UploadContext>),
+    InaraSnapshot(Vec<RawEvent>, Box<UploadContext>, u64),
     Config(Box<UplinkConfig>),
     Flush,
     Stop,
@@ -402,7 +402,6 @@ impl Uplink {
     /// withdrawn, or what happens while paused isn't kept); any change resumes services that were
     /// stopped by a rejection.
     pub fn set_config(&self, cfg: UplinkConfig) {
-        clear_disabled_queues(&self.shared, &cfg);
         // A new or changed Inara key: find out again who it belongs to.
         let inara_key = |c: &UplinkConfig| c.inara_credentials().map(|i| fingerprint(&[&i.api_key]));
         let new_key = inara_key(&cfg);
@@ -412,6 +411,7 @@ impl Uplink {
             self.shared.inara_check_now.store(new_key.is_some(), Ordering::Relaxed);
         }
         *self.shared.config.write() = cfg.clone();
+        clear_disabled_queues(&self.shared, &cfg);
         self.shared.epoch.fetch_add(1, Ordering::Relaxed);
         let _ = self.tx.send(Input::Config(Box::new(cfg)));
         self.shared.wake_all();
@@ -453,7 +453,10 @@ impl Uplink {
     /// earlier in the session goes out (a mission handed in before sync was switched on, or while
     /// it was paused); nothing goes to EDDN, EDSM or EDAstro.
     pub fn sync_inara_profile(&self, session: Vec<RawEvent>, ctx: &UploadContext) {
-        let _ = self.tx.send(Input::InaraSnapshot(session, Box::new(ctx.clone())));
+        let key = self.shared.config.read().inara_snapshot_key().map(|key| fingerprint(&[key]));
+        if let Some(key) = key {
+            let _ = self.tx.send(Input::InaraSnapshot(session, Box::new(ctx.clone()), key));
+        }
     }
 
     /// Closes pending batches and sends everything queued as soon as each service's rate
@@ -600,7 +603,7 @@ impl Processor {
                 // Anything queued under the old configuration for a now-disabled service goes.
                 clear_disabled_queues(&self.shared, &self.cfg);
             }
-            Input::InaraSnapshot(events, ctx) => self.inara_snapshot(&events, &ctx),
+            Input::InaraSnapshot(events, ctx, key) => self.inara_snapshot(&events, &ctx, key),
             Input::Flush => {
                 self.release_stub();
                 let now = Timestamp::now();
@@ -763,8 +766,8 @@ impl Processor {
     /// (`inara::is_state`): the commander's present state, sent at once. Past activity is left
     /// out, the "add" events and the "set" events that record something done (missions handed in,
     /// failed or abandoned, ship transfers) alike.
-    fn inara_snapshot(&mut self, events: &[RawEvent], ctx: &UploadContext) {
-        if self.cfg.inara_sending().is_none() {
+    fn inara_snapshot(&mut self, events: &[RawEvent], ctx: &UploadContext, key: u64) {
+        if self.cfg.inara_snapshot_key().is_none_or(|configured| fingerprint(&[configured]) != key) {
             return;
         }
         let mut session = Session::new();
@@ -777,6 +780,11 @@ impl Processor {
         }
         // The same rules as live syncing: Live galaxy only, no beta, not as someone's crew.
         if out.is_empty() || session.is_beta(ctx) || !session.is_live_galaxy(ctx) || session.blocked(None).is_some() {
+            return;
+        }
+        let shared = self.shared.clone();
+        let config = shared.config.read();
+        if config.inara_snapshot_key().is_none_or(|configured| fingerprint(&[configured]) != key) {
             return;
         }
         self.queue_inara(out, ctx, Timestamp::now());

@@ -70,6 +70,8 @@ pub struct UplinkConfig {
     pub inara: Option<InaraCredentials>,
     /// The same pause for Inara (no key check either).
     pub inara_paused: bool,
+    /// Explicit permission to build current state from earlier rows in this session.
+    pub inara_profile_consent: bool,
     /// Send the events EDAstro accepts.
     pub edastro: bool,
     /// The same pause for EDAstro.
@@ -88,6 +90,7 @@ impl Default for UplinkConfig {
             edsm_paused: false,
             inara: None,
             inara_paused: false,
+            inara_profile_consent: false,
             edastro: false,
             edastro_paused: false,
         }
@@ -115,6 +118,10 @@ impl UplinkConfig {
     /// The EDSM credentials to send with now: EDSM is on, with both fields filled in, and not paused.
     pub fn edsm_sending(&self) -> Option<&EdsmCredentials> {
         self.edsm_credentials().filter(|_| !self.edsm_paused)
+    }
+
+    pub(crate) fn inara_snapshot_key(&self) -> Option<&str> {
+        self.inara_sending().filter(|_| self.inara_profile_consent).map(|c| c.api_key.as_str())
     }
 
     /// Inara credentials, if Inara is enabled with a key (paused or not).

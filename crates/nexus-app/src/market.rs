@@ -415,12 +415,15 @@ impl MarketService {
 /// An HTTP body as a blocking `Read`, downloaded on the shared runtime with back-pressure (at most
 /// 64 chunks buffered), so a 4.5 GB dump never sits in memory or on disk.
 fn http_reader(url: &str, rt: &tokio::runtime::Handle) -> Result<(BodyReader, Option<u64>), String> {
+    if crate::launch::isolated() {
+        return Err("Network downloads are unavailable in an isolated run.".into());
+    }
     let (meta_tx, meta_rx) = tokio::sync::oneshot::channel::<Result<Option<u64>, String>>();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(64);
     let url = url.to_string();
     rt.spawn(async move {
         let client = reqwest::Client::builder()
-            .user_agent(concat!("EliteNexus/", env!("CARGO_PKG_VERSION")))
+            .user_agent(crate::identity::USER_AGENT)
             .connect_timeout(Duration::from_secs(20))
             .read_timeout(Duration::from_secs(90))
             .build();

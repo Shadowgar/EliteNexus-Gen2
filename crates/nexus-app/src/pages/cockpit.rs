@@ -182,7 +182,7 @@ fn megabytes(bytes: u64) -> String {
 /// Downloads the official 3Dmigoto release and unpacks the two DLLs (checked against pinned
 /// checksums).
 async fn fetch() -> Result<Files, String> {
-    let http = reqwest::Client::builder().user_agent(concat!("EliteNexus/", env!("CARGO_PKG_VERSION"))).build().map_err(|e| e.to_string())?;
+    let http = reqwest::Client::builder().user_agent(crate::identity::USER_AGENT).build().map_err(|e| e.to_string())?;
     let resp = http.get(dimmer::MIGOTO_URL).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     tokio::task::spawn_blocking(move || dimmer::extract(&bytes).map_err(|e| e.to_string())).await.map_err(|e| e.to_string())?

@@ -1221,7 +1221,7 @@ static SPANSH_SYSTEMS: Mutex<Vec<(u64, Instant, Arc<SpanshSystem>)>> = Mutex::ne
 /// `system_bodies` for biology bodies whose footfall is unknown locally. It is a Patreon-funded
 /// service without published limits, so: a few bodies per call, one request at a time, a day's
 /// cache. Store `false` to switch the lookups off (e.g. from a setting); off in unit tests.
-pub(crate) static ONLINE_FOOTFALL_LOOKUP: AtomicBool = AtomicBool::new(!cfg!(test));
+pub(crate) static ONLINE_FOOTFALL_LOOKUP: AtomicBool = AtomicBool::new(false);
 /// Held during each EDGalaxyData request: Ask and an AI agent never ask it at the same time.
 static EDGD_ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 const EDGD_URL: &str = "https://edgalaxydata.space/eddn-lookup-v2";
@@ -1240,7 +1240,7 @@ const ODYSSEY_LAUNCH: i64 = 1_621_382_400;
 /// HTTP client for EDGalaxyData (TLS 1.3 only: rustls handles it, Windows 10's Schannel can't).
 static EDGD_HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
     reqwest::Client::builder()
-        .user_agent(concat!("EliteNexus/", env!("CARGO_PKG_VERSION")))
+        .user_agent(crate::identity::USER_AGENT)
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(8))
         .build()

@@ -87,9 +87,7 @@ impl Destination {
         let address = address.trim();
         let raw = if kind.takes_address() && !address.is_empty() { address } else { kind.default_base_url() };
         let mut base = reqwest::Url::parse(raw).map_err(|_| AiError::Destination)?;
-        let loopback = base.host_str().is_some_and(|host| {
-            host == "localhost" || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
-        });
+        let loopback = is_loopback(&base);
         if !(base.scheme() == "https" && base.has_host() || base.scheme() == "http" && loopback)
             || !base.username().is_empty() || base.password().is_some() || base.query().is_some() || base.fragment().is_some()
         {
@@ -102,9 +100,19 @@ impl Destination {
         Ok(Self { kind, base: base.into() })
     }
 
+    pub fn is_loopback(&self) -> bool {
+        reqwest::Url::parse(&self.base).is_ok_and(|url| is_loopback(&url))
+    }
+
     pub fn base_url(&self) -> &str {
         &self.base
     }
+}
+
+fn is_loopback(url: &reqwest::Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host == "localhost" || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+    })
 }
 
 #[derive(Clone)]
@@ -165,7 +173,7 @@ pub struct ProviderHttp {
 impl Default for ProviderHttp {
     fn default() -> Self {
         let client = |direct| {
-            let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).user_agent("EliteNexus");
+            let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).user_agent(concat!("EliteNexus-Gen2/", env!("CARGO_PKG_VERSION")));
             let builder = if direct { builder.no_proxy() } else { builder };
             builder.build().map_err(|_| AiError::Http("could not initialize the model connection".into()))
         };
@@ -177,7 +185,7 @@ impl ProviderHttp {
     pub(crate) fn request(&self, rt: &Handle, cfg: &ProviderConfig, path: &str, body: Option<&Value>, stop: Option<&AtomicBool>) -> Result<Value, AiError> {
         let destination = cfg.destination()?;
         // Only loopback is allowed to use HTTP. Keep cleartext loopback requests out of ambient proxies.
-        let connection = if destination.base_url().starts_with("http://") { &self.loopback } else { &self.remote };
+        let connection = if destination.is_loopback() { &self.loopback } else { &self.remote };
         let client = connection.as_ref().map_err(Clone::clone)?;
         let headers = auth_headers(cfg, &destination)?;
         let url = format!("{}{path}", destination.base_url());

@@ -300,7 +300,7 @@ fn edsm_bad_credentials_stop_until_settings_change() {
 }
 
 fn inara_cfg() -> UplinkConfig {
-    UplinkConfig { inara: Some(InaraCredentials { api_key: "inara-secret".into() }), ..UplinkConfig::default() }
+    UplinkConfig { inara: Some(InaraCredentials { api_key: "inara-secret".into() }), inara_profile_consent: true, ..UplinkConfig::default() }
 }
 
 #[test]
@@ -763,6 +763,45 @@ fn inara_rejected_key_is_reported() {
     let st = wait_status(&h, |s| s.paused.is_some());
     assert!(st.paused.unwrap_or_default().contains("Invalid API key"));
     assert!(st.account.is_none() && !st.checking);
+}
+
+#[test]
+fn current_session_snapshot_needs_consent_and_a_current_unpaused_key() {
+    let configured = inara_cfg();
+    let unconsented = UplinkConfig { inara_profile_consent: false, ..configured.clone() };
+    let mut h = Harness::new(unconsented.clone(), RecordingTransport::simulated());
+    h.session();
+    h.uplink().flush();
+    h.settle();
+    let ts = Timestamp(Timestamp::now().0 - 3 * 3600);
+    let rows = || [FILEHEADER, LOADGAME,
+        r#""event":"Rank", "Combat":1, "Trade":4, "Explore":6, "Soldier":0, "Exobiologist":2, "Empire":7, "Federation":1, "CQC":0"#,
+    ].into_iter().map(|body| live_event(body, ts).raw).collect();
+    let sent_rank = |r: &[HttpRequest]| inara_events(r).iter().filter(|name| *name == "setCommanderRankPilot").count();
+    let before = sent_rank(&h.transport.requests());
+    let snapshot = |h: &Harness| {
+        h.uplink().sync_inara_profile(rows(), h.tracker.context());
+        h.uplink().flush();
+    };
+    snapshot(&h);
+    h.settle();
+    assert_eq!(sent_rank(&h.transport.requests()), before);
+    h.uplink().set_config(UplinkConfig { inara_paused: true, ..configured.clone() });
+    snapshot(&h);
+    h.settle();
+    assert_eq!(sent_rank(&h.transport.requests()), before);
+    h.uplink().set_config(configured.clone());
+    snapshot(&h);
+    assert!(h.wait_for(|r| sent_rank(r) > before), "the opted-in snapshot is sent");
+    let accepted = sent_rank(&h.transport.requests());
+    h.uplink().set_config(UplinkConfig { inara: Some(InaraCredentials { api_key: "other-fixture-key".into() }), ..unconsented });
+    snapshot(&h);
+    h.settle();
+    assert_eq!(sent_rank(&h.transport.requests()), accepted);
+    h.uplink().set_config(UplinkConfig::default());
+    snapshot(&h);
+    h.settle();
+    assert_eq!(sent_rank(&h.transport.requests()), accepted);
 }
 
 #[test]

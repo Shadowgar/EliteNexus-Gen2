@@ -204,12 +204,16 @@ pub fn show(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
                 }
             });
             section(ui, "Game");
-            game_folder(ui, cx);
-            screenshots(ui, cx);
-            agents(ui, cx);
+            if crate::launch::isolated() {
+                footnote(ui, "Game discovery, screenshot conversion and MCP are unavailable in an isolated run.");
+            } else {
+                game_folder(ui, cx);
+                screenshots(ui, cx);
+                agents(ui, cx);
+            }
             section(ui, "About");
             group(ui, |g| {
-                g.value("Version", format!("Elite Nexus {}", env!("CARGO_PKG_VERSION")));
+                g.value("Version", format!("{} {}", crate::identity::NAME, env!("CARGO_PKG_VERSION")));
                 cx.changed |= cx.update.about_rows(g, &mut cx.settings.updates, cx.live);
                 g.row("Support Elite Nexus", "It's free, with no ads. If it helps you, GitHub Sponsors keeps it going.", |ui| {
                     ui.hyperlink_to(format!("{} Sponsor {}", icon::HEART, icon::ARROW_SQUARE_OUT), SPONSOR_URL).on_hover_text(SPONSOR_URL);
@@ -222,7 +226,7 @@ pub fn show(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
                     ui.add(egui::Label::new(RichText::new(d.clone()).color(pal::DIM)).truncate()).on_hover_text(d);
                 });
                 #[cfg(target_os = "linux")]
-                app_menu(g);
+                if !crate::launch::isolated() { app_menu(g); }
             });
             footnote(ui, "Elite Nexus is free software under the GNU GPL, version 3 or later, and comes with no warranty. Gen2 source: github.com/Shadowgar/EliteNexus-Gen2. Based on Elite Nexus by CMDR Alka Uruskan and contributors. Elite Dangerous is a trademark of Frontier Developments plc; Elite Nexus is an unofficial community tool.");
         });
@@ -398,6 +402,12 @@ fn program_name(engine: &str) -> &str {
 /// The journal folder setting with, on Linux and macOS, where Elite Nexus looks by itself. Also shown under a journal
 /// problem on every page, so the folder can be set before any commander is loaded.
 pub fn journal_setup(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
+    if crate::launch::isolated() {
+        if widgets::button(ui, "Reload fixture journals").clicked() {
+            cx.restart_core = true;
+        }
+        return;
+    }
     journal_folder(ui, cx);
     if cfg!(not(windows)) {
         let hint = if cfg!(target_os = "macos") {

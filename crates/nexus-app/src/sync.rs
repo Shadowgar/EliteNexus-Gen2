@@ -12,6 +12,9 @@ use nexus_journal::{LineSource, RawEvent};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Gen2 needs separate application authorization before a real outbound transport starts.
+pub const OUTBOUND_AUTHORIZED: bool = false;
+
 pub struct SyncService {
     /// None for test runs: the uplink is never started, so its persisted queues are not touched.
     uplink: Option<Arc<Uplink>>,
@@ -25,7 +28,7 @@ impl SyncService {
     pub fn start(core: &Core, acc: &Accounts, data_dir: &Path, rt: &tokio::runtime::Handle) -> SyncService {
         let cfg = config(acc);
         let uplink = Arc::new(Uplink::new(cfg.clone(), data_dir, rt));
-        let inara_due = cfg.inara_enabled();
+        let inara_due = inara_snapshot_due(&UplinkConfig::default(), &cfg);
         let sync = SyncService { uplink: Some(uplink), applied: cfg, inara_due, attachment: Default::default() };
         sync.attach(core);
         sync
@@ -74,11 +77,7 @@ impl SyncService {
         let Some(u) = &self.uplink else { return };
         let cfg = config(acc);
         if cfg != self.applied {
-            // Switched on, a new key, or resumed after a pause: the profile is brought up to date.
-            let inara_key = |c: &UplinkConfig| c.inara_credentials().map(|i| i.api_key.clone());
-            if cfg.inara_enabled() && (!self.applied.inara_enabled() || inara_key(&cfg) != inara_key(&self.applied)) {
-                self.inara_due = true;
-            }
+            self.inara_due = (self.inara_due && snapshot_key(&cfg).is_some()) || inara_snapshot_due(&self.applied, &cfg);
             u.set_config(cfg.clone());
             self.applied = cfg;
         }
@@ -163,9 +162,18 @@ fn upload_context(c: &EventContext) -> UploadContext {
     }
 }
 
+fn snapshot_key(cfg: &UplinkConfig) -> Option<&str> {
+    cfg.inara_sending().filter(|_| cfg.inara_profile_consent).map(|c| c.api_key.as_str())
+}
+
+fn inara_snapshot_due(previous: &UplinkConfig, next: &UplinkConfig) -> bool {
+    snapshot_key(next).is_some() && snapshot_key(previous) != snapshot_key(next)
+}
+
 /// The uplink configuration for the user's choices (keys decrypted here, never logged).
 pub fn config(acc: &Accounts) -> UplinkConfig {
     UplinkConfig {
+        software_name: crate::identity::NAME.to_owned(),
         eddn: acc.eddn_upload,
         eddn_test_mode: acc.eddn_test_mode,
         eddn_paused: acc.eddn_paused,
@@ -176,6 +184,7 @@ pub fn config(acc: &Accounts) -> UplinkConfig {
         edsm_paused: acc.edsm_paused,
         inara: acc.inara_enabled.then(|| InaraCredentials { api_key: secrets::open(&acc.inara_api_key) }),
         inara_paused: acc.inara_paused,
+        inara_profile_consent: acc.inara_profile_consent,
         edastro: acc.edastro_enabled,
         edastro_paused: acc.edastro_paused,
         ..UplinkConfig::default()

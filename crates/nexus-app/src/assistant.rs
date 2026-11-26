@@ -121,6 +121,17 @@ impl AssistantService {
     }
 
     pub fn ask(&mut self, question: String, cfg: ProviderConfig, mut tools: NexusTools, context: String, ctx: &egui::Context) {
+        if !model_service_allowed(crate::launch::isolated(), &cfg) {
+            self.status = None;
+            self.exchanges.push(Exchange {
+                question,
+                answer: Some(Err("This Gen2 draft permits only local model connections on loopback. Isolated runs disable model connections.".into())),
+                tools: Vec::new(),
+                usage: Usage::default(),
+                stopped: false,
+            });
+            return;
+        }
         let question = question.trim().to_string();
         let Some(scope) = self.scope.clone() else { return };
         if self.busy() || question.is_empty() || !cfg.is_ready() || scope.destination != cfg.destination().ok() {
@@ -225,6 +236,10 @@ impl AssistantService {
     }
 }
 
+fn model_service_allowed(isolated: bool, cfg: &ProviderConfig) -> bool {
+    !isolated && cfg.kind == nexus_ai::ProviderKind::Local && cfg.destination().is_ok_and(|destination| destination.is_loopback())
+}
+
 struct Guarded<'a> {
     tools: &'a NexusTools,
     stop: &'a AtomicBool,
@@ -319,6 +334,19 @@ mod tests {
         assert!(stopped.load(Ordering::Acquire));
         assert!(matches!(&svc.conv[..], [Turn::User(text)] if text == "first"));
         assert!(svc.exchanges.last().unwrap().stopped);
+    }
+
+    #[test]
+    fn model_gate_blocks_cloud_and_isolated_sessions_before_discovery() {
+        use nexus_ai::ProviderKind::{Custom, Gemini, Local};
+        for (kind, url, expected) in [
+            (Gemini, "", false), (Custom, "https://localhost/v1", false),
+            (Local, "https://example.invalid/v1", false), (Local, "http://127.0.0.1:7/v1", true),
+        ] {
+            let cfg = ProviderConfig::new(kind, url.into(), "fixture".into());
+            assert_eq!(model_service_allowed(false, &cfg), expected);
+            assert!(!model_service_allowed(true, &cfg));
+        }
     }
 
     #[test]

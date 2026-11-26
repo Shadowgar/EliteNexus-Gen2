@@ -295,6 +295,7 @@ pub struct Accounts {
     pub edsm_commander: String,
     pub edsm_api_key: String,
     pub inara_enabled: bool,
+    pub inara_profile_consent: bool,
     pub inara_api_key: String,
     pub edastro_enabled: bool,
     /// EDDN sharing paused by the commander (the header's Pause button).

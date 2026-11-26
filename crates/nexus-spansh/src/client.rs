@@ -37,7 +37,31 @@ pub struct Spansh {
     pub(crate) job: JobOptions,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+enum Access {
+    #[default]
+    Full,
+    PublicRecords,
+    Offline,
+}
+
+impl Access {
+    fn allows(self, url: &str) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Offline => false,
+            Self::PublicRecords => url.strip_prefix(DEFAULT_BASE_URL)
+                .and_then(|path| path.strip_prefix('/'))
+                .and_then(|path| path.split_once('/'))
+                .is_some_and(|(resource, id)| {
+                    matches!(resource, "system" | "body" | "station" | "dump") && id.parse::<u64>().is_ok()
+                }),
+        }
+    }
+}
+
 struct Inner {
+    access: Access,
     http: reqwest::Client,
     base_url: String,
     limiter: Semaphore,
@@ -64,6 +88,7 @@ impl Default for Spansh {
 /// Configuration for [`Spansh`]; start with [`Spansh::builder`].
 #[derive(Debug, Clone)]
 pub struct SpanshBuilder {
+    access: Access,
     base_url: String,
     user_agent: String,
     request_timeout: Duration,
@@ -77,6 +102,7 @@ pub struct SpanshBuilder {
 impl Default for SpanshBuilder {
     fn default() -> Self {
         Self {
+            access: Access::Full,
             base_url: DEFAULT_BASE_URL.to_owned(),
             user_agent: USER_AGENT.to_owned(),
             request_timeout: Duration::from_secs(60),
@@ -168,6 +194,7 @@ impl SpanshBuilder {
         Spansh {
             inner: Arc::new(Inner {
                 http,
+                access: self.access,
                 base_url: self.base_url,
                 limiter: Semaphore::new(self.max_concurrent),
                 record_dir: self.record_dir,
@@ -202,6 +229,27 @@ impl Spansh {
         SpanshBuilder::default()
     }
 
+    /// Gen2 keeps documented public records separate from unapproved hosted search and planner jobs.
+    pub fn gen2(offline: bool, max_concurrent: usize) -> Self {
+        let builder = SpanshBuilder {
+            access: if offline { Access::Offline } else { Access::PublicRecords },
+            user_agent: concat!("EliteNexus-Gen2/", env!("CARGO_PKG_VERSION")).into(),
+            max_concurrent: max_concurrent.max(1),
+            ..Default::default()
+        };
+        if let Ok(http) = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(&builder.user_agent)
+            .timeout(builder.request_timeout)
+            .connect_timeout(builder.connect_timeout)
+            .build()
+        {
+            builder.finish(http)
+        } else {
+            SpanshBuilder { access: Access::Offline, ..builder }.finish(reqwest::Client::new())
+        }
+    }
+
     pub fn base_url(&self) -> &str {
         &self.inner.base_url
     }
@@ -233,6 +281,9 @@ impl Spansh {
 
     /// Send a request (respecting the concurrency limit and cancellation) and read the body.
     async fn execute(&self, request: reqwest::RequestBuilder, url: &str) -> Result<Reply> {
+        if !self.inner.access.allows(url) {
+            return Err(Error::InvalidRequest("this Spansh operation is unavailable in Gen2".into()));
+        }
         let work = async {
             let _permit = self
                 .inner
@@ -510,5 +561,29 @@ mod tests {
         assert!(Arc::ptr_eq(&a.inner, &b.inner));
         assert_eq!(b.url("/route"), "http://localhost:1/api/route");
         assert!(a.job.cancel.is_none() && b.job.cancel.is_some());
+    }
+}
+
+#[cfg(test)]
+mod access_tests {
+    use super::*;
+
+    #[test]
+    fn gen2_spansh_allows_only_documented_numeric_records() {
+        assert!(Access::PublicRecords.allows(&format!("{DEFAULT_BASE_URL}/system/42")));
+        for endpoint in ["systems/search", "generic/route", "results/job", "system/name", "system/42?filter=yes"] {
+            assert!(!Access::PublicRecords.allows(&format!("{DEFAULT_BASE_URL}/{endpoint}")));
+        }
+        assert!(!Access::Offline.allows(&format!("{DEFAULT_BASE_URL}/system/42")));
+        assert!(!Access::PublicRecords.allows("https://example.invalid/api/system/42"));
+    }
+
+    #[tokio::test]
+    async fn blocked_calls_fail_before_transport() {
+        for client in [Spansh::gen2(true, 1), Spansh::gen2(false, 1)] {
+            let url = client.url("systems/search");
+            let result = client.execute(client.inner.http.post(&url), &url).await;
+            assert!(matches!(result, Err(Error::InvalidRequest(_))));
+        }
     }
 }

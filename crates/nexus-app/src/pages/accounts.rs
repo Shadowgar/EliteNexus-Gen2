@@ -102,7 +102,8 @@ fn link_row(g: &mut Group, text: &str, url: &str) {
 /// Returns true if settings changed.
 pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &str, status: &StatusView) -> bool {
     let mut changed = false;
-    footnote(ui, &format!("Connect your commander to the community services. Everything is off until you switch it on, keys are {}, and history is never uploaded: only what happens while Elite Nexus is running.", secrets::KEPT));
+    footnote(ui, "Gen2 outbound sync is unavailable pending service approval. The EDDN receive switch controls the separate public market feed.");
+    footnote(ui, &format!("Sync preferences and API keys are local. Keys are {}. Each approved service requires opt-in before it can send data.", secrets::KEPT));
     ui.add_space(4.0);
     if acc.edsm_commander.is_empty() && !cmdr_name.is_empty() {
         acc.edsm_commander = cmdr_name.to_string();
@@ -172,21 +173,36 @@ pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &st
             });
             section(ui, "Inara · commander profile");
             group(ui, |g| {
-                changed |= g.switch(&mut acc.inara_enabled, "Sync my commander profile to Inara", "");
+                changed |= g.switch(&mut acc.inara_enabled, "Sync my live activity to Inara", "When authorized, sends supported commander and activity events as they occur.");
+                if !acc.inara_enabled && acc.inara_profile_consent {
+                    acc.inara_profile_consent = false;
+                    changed = true;
+                }
                 if acc.inara_enabled {
                     changed |= g.switch(
                         &mut acc.inara_paused,
                         "Pause sync",
-                        "Send nothing until you resume (also in the toolbar). What happens while paused is dropped, not sent later; when you resume, your profile is brought up to date as it is then.",
+                        "Pauses synchronization and key checks. A current-session profile can be sent on resume only when you allow it below.",
                     );
                 }
-                changed |= key_row(g, &mut acc.inara_api_key, &mut st.inara_key_input, &mut st.inara_key_error, "Inara API key");
+                if key_row(g, &mut acc.inara_api_key, &mut st.inara_key_input, &mut st.inara_key_error, "Inara API key") {
+                    acc.inara_profile_consent = false;
+                    changed = true;
+                }
+                if acc.inara_enabled && !acc.inara_api_key.is_empty() {
+                    changed |= g.switch(
+                        &mut acc.inara_profile_consent,
+                        "Allow a current-session profile snapshot",
+                        "At startup, enablement or resume, Inara can receive credits, ranks, reputation, ship and loadout, materials, cargo and location from the verified current game session. Some entries can predate startup or consent. This sends state and excludes past activity.",
+                    );
+                }
+                g.content(|ui| footnote(ui, "Turn off sync or remove your key to withdraw authorization. Revoke the key at Inara to stop its reuse. Replacing it requires fresh snapshot consent."));
                 link_row(g, "Get your Inara API key", "https://inara.cz/elite/cmdr-settings-api/");
                 // Proof that it works: who Inara says the key belongs to, with a link to the profile.
                 let s = &status.uplink.inara;
                 // Paused, nothing goes to Inara: not even the question of who the key belongs to.
                 let paused = acc.inara_paused;
-                if acc.inara_enabled && !acc.inara_api_key.is_empty() {
+                if crate::sync::OUTBOUND_AUTHORIZED && acc.inara_enabled && !acc.inara_api_key.is_empty() {
                     g.content(|ui| {
                         ui.horizontal_wrapped(|ui| {
                             match (&s.account, s.checking) {
@@ -221,14 +237,14 @@ pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &st
                         );
                     });
                 }
-                // Inara approved "Elite Nexus" on 2026-10-13; should it ever refuse the app again, say so plainly.
+                // An upstream approval does not authorize the Gen2 software identity.
                 let refused = s.last_error.as_deref().is_some_and(|e| e.to_ascii_lowercase().contains("no access allowed"));
                 if refused {
                     g.content(|ui| {
                         ui.add(
                             egui::Label::new(
                                 RichText::new(format!(
-                                    "{} Inara answered \"no access allowed\": it isn't accepting requests from \"Elite Nexus\" right now, so sync is paused. Inara approved the app in October 2026, so this is unexpected: check Inara for news, or ask its author.",
+                                    "{} Inara answered \"no access allowed\": it is not accepting requests from this application identity.",
                                     icon::WARNING
                                 ))
                                 .color(pal::WARN),
@@ -243,7 +259,7 @@ pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &st
             if !matches!(status.uplink.inara.last_error.as_deref(), Some(e) if e.to_ascii_lowercase().contains("no access allowed")) {
                 footnote(
                     ui,
-                    "Inara accepts uploads only from apps it has approved by name; it approved \"Elite Nexus\" in October 2026. Updates go in batches at least 35 seconds apart, within Inara's limit of about two requests a minute.",
+                    "Inara approval is specific to the application identity. Gen2 is awaiting separate approval.",
                 );
             }
         });
