@@ -257,6 +257,29 @@ fn full_text_search(index: &Arc<RwLock<JournalIndex>>, needle: &str) -> Vec<usiz
     hits
 }
 
+fn table(ui: &mut Ui, headers: &[&str], rows: usize, mut cell: impl FnMut(usize, usize, &mut Ui)) {
+    let mut b = TableBuilder::new(ui).striped(true).resizable(false)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+    for (i, _) in headers.iter().enumerate() {
+        b = b.column(if i + 1 == headers.len() { Column::remainder() } else { Column::initial(if i == 0 { 130.0 } else { 220.0 }) });
+    }
+    b.header(30.0, |mut h| {
+        for t in headers {
+            h.col(|ui| {
+                crate::widgets::th(ui, t);
+            });
+        }
+    })
+    .body(|body| {
+        body.rows(32.0, rows, |mut row| {
+            let i = row.index();
+            for c in 0..headers.len() {
+                row.col(|ui| cell(i, c, ui));
+            }
+        });
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,27 +307,4 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert_eq!(hits, [0, 1, 2]);
     }
-}
-
-fn table(ui: &mut Ui, headers: &[&str], rows: usize, mut cell: impl FnMut(usize, usize, &mut Ui)) {
-    let mut b = TableBuilder::new(ui).striped(true).resizable(false)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
-    for (i, _) in headers.iter().enumerate() {
-        b = b.column(if i + 1 == headers.len() { Column::remainder() } else { Column::initial(if i == 0 { 130.0 } else { 220.0 }) });
-    }
-    b.header(30.0, |mut h| {
-        for t in headers {
-            h.col(|ui| {
-                crate::widgets::th(ui, t);
-            });
-        }
-    })
-    .body(|body| {
-        body.rows(32.0, rows, |mut row| {
-            let i = row.index();
-            for c in 0..headers.len() {
-                row.col(|ui| cell(i, c, ui));
-            }
-        });
-    });
 }
