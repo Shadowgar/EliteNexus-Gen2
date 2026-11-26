@@ -13,9 +13,9 @@ mod unix;
 #[cfg(windows)]
 mod win;
 
-use crate::ai_tools::{Caller, NexusTools};
+use crate::ai_tools::{Caller, CommanderScope, NexusTools};
 use nexus_ai::ToolHost;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -125,9 +125,16 @@ impl Limiter {
     }
 }
 
+/// The selected model and its attachment generation, shared by the listener and worker.
+struct Source {
+    epoch: u64,
+    model: Arc<RwLock<nexus_model::Model>>,
+}
+
 /// A call for the worker thread.
 struct Call {
     source_epoch: u64,
+    scope: CommanderScope,
     name: String,
     args: Value,
     reply: tokio::sync::oneshot::Sender<WireReply>,
@@ -146,7 +153,7 @@ struct Running {
     /// New tools for the worker (the journal was read again): a channel of its own, so the window never waits behind
     /// queued calls to hand them over.
     tools: crossbeam_channel::Sender<NexusTools>,
-    source_epoch: Arc<Mutex<u64>>,
+    source: Arc<Mutex<Source>>,
     /// Set when switched off: calls still queued are answered that it's off, and none runs.
     off: Arc<AtomicBool>,
     /// Tells open connections to close when switched off, so their pipe instances don't keep the name taken.
@@ -176,8 +183,9 @@ impl McpService {
     /// The tools to answer from after the journal was read again (a new model). Never waits.
     pub fn attach(&self, tools: NexusTools) {
         if let Some(r) = &self.running {
-            let mut epoch = r.source_epoch.lock();
-            *epoch = epoch.wrapping_add(1);
+            let mut source = r.source.lock();
+            source.epoch = source.epoch.wrapping_add(1);
+            source.model = tools.model.clone();
             let _ = r.tools.send(tools);
         }
     }
@@ -197,9 +205,9 @@ impl McpService {
         let (calls, inbox) = crossbeam_channel::bounded::<Call>(QUEUE);
         let (new_tools, swaps) = crossbeam_channel::unbounded::<NexusTools>();
         let off = Arc::new(AtomicBool::new(false));
-        let source_epoch = Arc::new(Mutex::new(0));
-        let (status, stop, worker_epoch) = (self.status.clone(), off.clone(), source_epoch.clone());
-        let spawned = std::thread::Builder::new().name("mcp-tools".into()).spawn(move || work(tools, inbox, swaps, stop, status, worker_epoch));
+        let source = Arc::new(Mutex::new(Source { epoch: 0, model: tools.model.clone() }));
+        let (status, stop, worker_source) = (self.status.clone(), off.clone(), source.clone());
+        let spawned = std::thread::Builder::new().name("mcp-tools".into()).spawn(move || work(tools, inbox, swaps, stop, status, worker_source));
         if let Err(e) = spawned {
             self.status.lock().error = Some(format!("Couldn't start: {e}"));
             return;
@@ -207,9 +215,9 @@ impl McpService {
         let (shutdown, closing) = tokio::sync::watch::channel(false);
         let bound = Arc::new(AtomicBool::new(false));
         let (status, to_worker, at, made) = (self.status.clone(), calls.clone(), endpoint.clone(), bound.clone());
-        let listener_epoch = source_epoch.clone();
+        let listener_source = source.clone();
         let listener = rt.spawn(async move {
-            if let Err(e) = listen(&at, to_worker, status.clone(), closing, made, listener_epoch).await {
+            if let Err(e) = listen(&at, to_worker, status.clone(), closing, made, listener_source).await {
                 tracing::warn!("MCP: stopped listening on {at}: {e}");
                 let mut s = status.lock();
                 s.listening = false;
@@ -221,14 +229,14 @@ impl McpService {
             }
         });
         tracing::info!("MCP: answering AI agents on {endpoint}");
-        self.running = Some(Running { listener, calls, tools: new_tools, source_epoch, off, shutdown, bound, endpoint });
+        self.running = Some(Running { listener, calls, tools: new_tools, source, off, shutdown, bound, endpoint });
     }
 
     fn stop(&mut self) {
         let Some(r) = self.running.take() else { return };
         // Nothing more runs, not even what is queued; the worker ends once the last connection lets go of the channel.
         {
-            let _source = r.source_epoch.lock();
+            let _source = r.source.lock();
             r.off.store(true, Ordering::Release);
         }
         // Open connections close now, their pipe instances with them: switched on again, the name is free.
@@ -254,15 +262,15 @@ impl Drop for McpService {
 }
 
 /// The worker: one call at a time, within the limits, from the tools offered to agents; none once switched off.
-fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: crossbeam_channel::Receiver<NexusTools>, off: Arc<AtomicBool>, status: Arc<Mutex<Status>>, source_epoch: Arc<Mutex<u64>>) {
+fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: crossbeam_channel::Receiver<NexusTools>, off: Arc<AtomicBool>, status: Arc<Mutex<Status>>, source: Arc<Mutex<Source>>) {
     let mut limiter = Limiter::default();
-    for Call { source_epoch: received_epoch, name, args, reply } in inbox {
+    for Call { source_epoch: received_epoch, scope, name, args, reply } in inbox {
         {
-            let epoch = source_epoch.lock();
+            let selected = source.lock();
             while let Ok(t) = swaps.try_recv() {
                 tools = t;
             }
-            if *epoch != received_epoch {
+            if selected.epoch != received_epoch {
                 let _ = reply.send(WireReply::Error("Elite Nexus changed journal sources.".into()));
                 continue;
             }
@@ -275,6 +283,10 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
             let _ = reply.send(WireReply::Error("Elite Nexus stopped answering AI agents (Settings › AI agents was switched off).".into()));
             continue;
         }
+        if !scope.matches(&tools.model.read()) {
+            let _ = reply.send(WireReply::Error("Elite Nexus changed data scope before answering.".into()));
+            continue;
+        }
         let answer = match crate::ai_tools::tool(&name).filter(|t| t.available_to(Caller::Mcp)) {
             None => WireReply::Error(format!("Unknown tool \"{name}\".")),
             Some(t) => match limiter.admit(t.online, Instant::now()) {
@@ -284,12 +296,11 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
                 }
                 Ok(()) => {
                     // A tool that panics answers with an error; the worker keeps answering.
-                    let scope = crate::ai_tools::CommanderScope::capture(&tools.model.read());
                     tools.commander_scope = Some(scope.clone());
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tools.call(t.name, &args)));
-                    let epoch = source_epoch.lock();
+                    let selected = source.lock();
                     let model = tools.model.read();
-                    if !scope.matches(&model) || *epoch != received_epoch || off.load(Ordering::Acquire) {
+                    if !scope.matches(&model) || selected.epoch != received_epoch || off.load(Ordering::Acquire) {
                         let _ = reply.send(WireReply::Error("Elite Nexus changed data scope while answering.".into()));
                         continue;
                     }
@@ -312,7 +323,7 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
 
 /// Waits for agents' connections and answers each in a task of its own.
 #[cfg(windows)]
-async fn listen(name: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<Mutex<Status>>, closing: tokio::sync::watch::Receiver<bool>, _bound: Arc<AtomicBool>, source_epoch: Arc<Mutex<u64>>) -> std::io::Result<()> {
+async fn listen(name: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<Mutex<Status>>, closing: tokio::sync::watch::Receiver<bool>, _bound: Arc<AtomicBool>, source: Arc<Mutex<Source>>) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
     // Every instance with the user as owner and only the user let in.
     let user = win::user_sid().ok_or_else(|| std::io::Error::other("Windows didn't say which account this is"))?;
@@ -338,7 +349,7 @@ async fn listen(name: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<M
         let next = create(false)?;
         let conn = std::mem::replace(&mut server, next);
         match connected {
-            Ok(()) => drop(tokio::spawn(serve(conn, jobs.clone(), closing.clone(), source_epoch.clone()))),
+            Ok(()) => drop(tokio::spawn(serve(conn, jobs.clone(), closing.clone(), source.clone()))),
             // An agent that came and went before it was answered: the next one is waited for all the same.
             Err(e) => tracing::debug!("MCP: a connection failed: {e}"),
         }
@@ -347,7 +358,7 @@ async fn listen(name: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<M
 
 /// Waits for agents' connections and answers each in a task of its own.
 #[cfg(not(windows))]
-async fn listen(path: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<Mutex<Status>>, closing: tokio::sync::watch::Receiver<bool>, bound: Arc<AtomicBool>, source_epoch: Arc<Mutex<u64>>) -> std::io::Result<()> {
+async fn listen(path: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<Mutex<Status>>, closing: tokio::sync::watch::Receiver<bool>, bound: Arc<AtomicBool>, source: Arc<Mutex<Source>>) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     // A socket left behind by a run that ended abruptly answers nobody: it goes. One that answers is another app's.
     if std::path::Path::new(path).exists() {
@@ -366,7 +377,7 @@ async fn listen(path: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<M
             Ok((conn, _)) => {
                 use std::os::unix::io::AsRawFd;
                 if unix::peer_uid(conn.as_raw_fd()).is_ok_and(|uid| uid == unix::euid()) {
-                    drop(tokio::spawn(serve(conn, jobs.clone(), closing.clone(), source_epoch.clone())));
+                    drop(tokio::spawn(serve(conn, jobs.clone(), closing.clone(), source.clone())));
                 }
             }
             // Out of file handles, say: wait a moment rather than spin, and go on listening.
@@ -379,24 +390,28 @@ async fn listen(path: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<M
 }
 
 /// One connection, closed as soon as AI agents are switched off.
-async fn serve<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, jobs: crossbeam_channel::Sender<Call>, mut closing: tokio::sync::watch::Receiver<bool>, source_epoch: Arc<Mutex<u64>>) {
+async fn serve<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, jobs: crossbeam_channel::Sender<Call>, mut closing: tokio::sync::watch::Receiver<bool>, source: Arc<Mutex<Source>>) {
     tokio::select! {
-        () = serve_one(conn, jobs, source_epoch) => {}
+        () = serve_one(conn, jobs, source) => {}
         _ = closing.wait_for(|off| *off) => {}
     }
 }
 
 /// A call in, its answer out.
-async fn serve_one<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, jobs: crossbeam_channel::Sender<Call>, source_epoch: Arc<Mutex<u64>>) {
+async fn serve_one<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, jobs: crossbeam_channel::Sender<Call>, source: Arc<Mutex<Source>>) {
     let (read, mut write) = tokio::io::split(conn);
     let mut line = String::new();
     let got = tokio::time::timeout(Duration::from_secs(10), BufReader::new(read.take(MAX_REQUEST)).read_line(&mut line)).await;
     if !matches!(got, Ok(Ok(n)) if n > 0) {
         return;
     }
-    let epoch = *source_epoch.lock();
+    let (epoch, scope) = {
+        let selected = source.lock();
+        let model = selected.model.read();
+        (selected.epoch, CommanderScope::capture(&model))
+    };
     let reply = match serde_json::from_str::<WireCall>(&line) {
-        Ok(call) => answer(call, &jobs, epoch).await,
+        Ok(call) => answer(call, &jobs, epoch, scope).await,
         Err(e) => WireReply::Error(format!("Unreadable call: {e}")),
     };
     let mut text = serde_json::to_string(&reply).unwrap_or_else(|_| r#"{"error":"The answer couldn't be written."}"#.to_string());
@@ -406,10 +421,10 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, 
 }
 
 /// Hands a call to the worker and waits for it, up to [`DEADLINE`].
-async fn answer(call: WireCall, jobs: &crossbeam_channel::Sender<Call>, epoch: u64) -> WireReply {
+async fn answer(call: WireCall, jobs: &crossbeam_channel::Sender<Call>, epoch: u64, scope: CommanderScope) -> WireReply {
     let (reply, answered) = tokio::sync::oneshot::channel();
     let args = if call.arguments.is_null() { Value::Object(Default::default()) } else { call.arguments };
-    if jobs.try_send(Call { source_epoch: epoch, name: call.tool, args, reply }).is_err() {
+    if jobs.try_send(Call { source_epoch: epoch, scope, name: call.tool, args, reply }).is_err() {
         return WireReply::Error("Elite Nexus is busy with other agents' calls: try again in a moment.".into());
     }
     match tokio::time::timeout(DEADLINE, answered).await {
@@ -444,15 +459,20 @@ mod tests {
     /// Switched off, a call still in the queue isn't run: it's answered that agents were switched off.
     #[test]
     fn switched_off_nothing_more_runs() {
-        assert_queued_call_refused(true, 0, "switched off");
+        assert_queued_call_refused(true, 0, false, "switched off");
     }
 
     #[test]
     fn a_queued_call_cannot_run_after_source_switch() {
-        assert_queued_call_refused(false, 1, "changed journal sources");
+        assert_queued_call_refused(false, 1, false, "changed journal sources");
     }
 
-    fn assert_queued_call_refused(off: bool, epoch: u64, expected: &str) {
+    #[test]
+    fn a_queued_call_cannot_run_after_commander_switch() {
+        assert_queued_call_refused(false, 0, true, "changed data scope");
+    }
+
+    fn assert_queued_call_refused(off: bool, epoch: u64, switch: bool, expected: &str) {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let tools = NexusTools {
             model: Arc::new(parking_lot::RwLock::new(nexus_model::Model::default())),
@@ -469,9 +489,21 @@ mod tests {
         let (new_tools, swaps) = crossbeam_channel::unbounded();
         let status = Arc::new(Mutex::new(Status::default()));
         let (reply, answered) = tokio::sync::oneshot::channel();
-        calls.send(Call { source_epoch: 0, name: "commander".into(), args: serde_json::json!({}), reply }).unwrap();
+        let scope = CommanderScope::capture(&tools.model.read());
+        calls.send(Call { source_epoch: 0, scope, name: "commander".into(), args: serde_json::json!({}), reply }).unwrap();
+        if switch {
+            let line = r#"{"timestamp":"2026-09-05T00:13:29Z","event":"Commander","FID":"F1","Name":"Fixture"}"#;
+            let (ts, name) = nexus_journal::raw::scan_line(line).unwrap();
+            let event = nexus_journal::Event::parse(name, line).unwrap();
+            tools.model.write().apply(
+                &nexus_journal::EventCtx { ts, name, line, live: false },
+                &event,
+                &mut nexus_model::Alerts::disabled(),
+            );
+        }
+        let source = Arc::new(Mutex::new(Source { epoch, model: tools.model.clone() }));
         drop((calls, new_tools));
-        work(tools, inbox, swaps, Arc::new(AtomicBool::new(off)), status.clone(), Arc::new(Mutex::new(epoch)));
+        work(tools, inbox, swaps, Arc::new(AtomicBool::new(off)), status.clone(), source);
         match answered.blocking_recv() {
             Ok(WireReply::Error(e)) => assert!(e.contains(expected), "{e}"),
             other => panic!("{other:?}"),
