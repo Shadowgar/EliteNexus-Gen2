@@ -204,6 +204,14 @@ Settings About identifies Gen2. The sidebar retains the upstream product label, 
 
 On November 26, 2026, the owner accepted the first Windows gameplay milestone after 21 of 21 manual checks passed alongside the game. This covers startup and interface (5), commander data (5), live journal updates (6), and responsiveness, shutdown and restart (5). Preliminary observations were 0.1% CPU and 225 MB RAM. GPU use and comparative FPS were unmeasured. Native graphics device-loss recovery, independent review, Linux and macOS runtime, live services, signing, packaging and distribution remain open.
 
+## Phase 01D-A — Storage and protected operations
+
+### ENX-023 — Report durable galaxy writes and preserve existing stores
+
+- **Upstream and Gen2 behavior.** The writer's completion barrier previously returned success after a failed transaction. Gen2 reports that failure to the caller, counts write errors separately from pending writes, and checks SQLite's WAL checkpoint result before reporting a completed import. Committed rows remain recoverable from the WAL if a checkpoint is blocked.
+- **Code and compatibility.** `nexus-galaxy/src/{lib,writer,schema,spansh}.rs` and `nexus-app/src/pages/market.rs`. WAL commits use full synchronization. Compatible older schemas receive additive upgrades in one transaction. Newer and unreadable stores stay in place, with a clear open error. Use a compatible build or a separate profile for an incompatible store.
+- **Regression evidence and upstream applicability.** Disposable SQLite fixtures reproduce false commit success and replacement of a newer schema on the earlier source. The newer build also verifies a reader-blocked checkpoint, compatible upgrade, corrupt-file preservation and reopen after rollback. The changes apply independently to upstream's existing single-writer and indexed reader architecture.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.

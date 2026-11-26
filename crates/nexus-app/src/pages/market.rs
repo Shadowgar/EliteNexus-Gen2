@@ -4500,6 +4500,7 @@ fn database_tab(ui: &mut Ui, svc: &mut MarketService, st: &mut MarketUi, rt: &to
                         ("Faction entries", digits(s.faction_rows)),
                         ("Price history points", s.price_history_rows.map_or_else(|| "counting…".to_string(), digits)),
                         ("Size on disk", mb(s.db_bytes)),
+                        ("Pending write messages", digits(s.pending_writes)),
                     ] {
                         ui.label(RichText::new(k).color(pal::DIM));
                         ui.label(RichText::new(v).font(display(14.0)));
@@ -4519,6 +4520,9 @@ fn database_tab(ui: &mut Ui, svc: &mut MarketService, st: &mut MarketUi, rt: &to
                     RichText::new(format!("{} snapshots stored this session, {} older than what was already known", digits(s.market_snapshots), digits(s.stale_markets)))
                         .small().color(pal::DIM),
                 );
+                if s.write_errors > 0 {
+                    ui.label(RichText::new(format!("{} write errors this session. See nexus.log for details.", digits(s.write_errors))).small().color(pal::WARN));
+                }
             }
             None => {
                 ui.label(RichText::new("No statistics yet.").color(pal::DIM));

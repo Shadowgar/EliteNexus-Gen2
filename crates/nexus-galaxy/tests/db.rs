@@ -49,6 +49,77 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
+#[test]
+fn flush_reports_a_rolled_back_batch_and_reopen_keeps_committed_rows() {
+    let mut temp = TempDb::new("failed-commit");
+    let path = temp.db().path().to_path_buf();
+    let row = |id, name: &str| Ingest::System(SystemUpdate {
+        id64: id, name: name.into(), pos: Some([1.0, 2.0, 3.0]), timestamp: now(), details: None,
+    });
+    temp.db().ingest(row(4242, "Committed"));
+    temp.db().flush().expect("first commit");
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("CREATE TRIGGER fail_write BEFORE INSERT ON systems WHEN NEW.id64 = 4243
+                       BEGIN SELECT RAISE(ROLLBACK, 'fixture write failure'); END;").unwrap();
+    temp.db().ingest(row(4243, "Rolled back"));
+    assert!(temp.db().flush().is_err());
+    sql.execute_batch("DROP TRIGGER fail_write").unwrap();
+    drop(sql);
+    temp.reopen();
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let count: u32 = sql.query_row("SELECT COUNT(*) FROM systems WHERE id64 IN (4242,4243)", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 1);
+    temp.db().ingest(row(4243, "Retried"));
+    temp.db().flush().expect("retry");
+    let name: String = sql.query_row("SELECT name FROM systems WHERE id64=4243", [], |r| r.get(0)).unwrap();
+    assert_eq!(name, "Retried");
+}
+
+#[test]
+fn newer_schema_is_refused_without_modifying_the_file() {
+    let mut temp = TempDb::new("newer-schema");
+    let path = temp.db().path().to_path_buf();
+    temp.db = None;
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=100;
+                       INSERT INTO systems (id64,name,name_lower) VALUES(4242,'Future','future');").unwrap();
+    drop(sql);
+    let before = std::fs::read(&path).unwrap();
+    assert!(GalaxyDb::open(&path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn compatible_older_schema_and_interrupted_write_recover_in_place() {
+    let mut temp = TempDb::new("older-schema");
+    let path = temp.db().path().to_path_buf();
+    temp.db = None;
+    let mut sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("PRAGMA user_version=1; ALTER TABLE stations DROP COLUMN history_at;
+                       INSERT INTO systems (id64,name,name_lower) VALUES(4242,'Older','older');").unwrap();
+    let transaction = sql.transaction().unwrap();
+    transaction.execute("DELETE FROM systems WHERE id64=4242", []).unwrap();
+    drop(transaction);
+    drop(sql);
+    temp.db = Some(GalaxyDb::open(&path).unwrap());
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = sql.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+    assert_eq!(version, 2);
+    let name: String = sql.query_row("SELECT name FROM systems WHERE id64=4242", [], |r| r.get(0)).unwrap();
+    assert_eq!(name, "Older");
+    assert!(sql.prepare("SELECT history_at FROM stations").is_ok());
+}
+
+#[test]
+fn unrecognized_database_bytes_are_preserved() {
+    let temp = TempDb::new("corrupt-file");
+    let path = temp.dir.join("damaged.db");
+    let original = b"fixture: incomplete database header";
+    std::fs::write(&path, original).unwrap();
+    assert!(GalaxyDb::open(&path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
 const SYS_A: u64 = 1001;
 const SYS_B: u64 = 1002;
 const SYS_C: u64 = 1003;

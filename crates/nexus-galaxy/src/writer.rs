@@ -4,7 +4,7 @@
 use crate::GalaxyOptions;
 use crate::bodies;
 use crate::commodities::{CommodityCache, CommodityMeta, fallback_name, normalize_symbol};
-use crate::error::Result;
+use crate::error::{GalaxyError, Result};
 use crate::index::StationIndex;
 use crate::model::*;
 use crate::names::clean_station_name;
@@ -16,7 +16,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// Upper bound of ingest items per transaction (keeps a single commit short).
@@ -28,9 +28,9 @@ pub(crate) enum WriterMsg {
     Ingest(Vec<Ingest>, Option<Arc<AtomicU64>>),
     Import(ImportBatch),
     /// Reply once everything sent before it is committed.
-    Flush(Sender<()>),
+    Flush(Sender<Result<()>>),
     /// Commit, then `PRAGMA wal_checkpoint(TRUNCATE)`.
-    Checkpoint(Sender<()>),
+    Checkpoint(Sender<Result<()>>),
 }
 
 impl WriterMsg {
@@ -108,6 +108,7 @@ pub(crate) struct Shared {
     pub stale_markets: AtomicU64,
     pub commits: AtomicU64,
     pub write_errors: AtomicU64,
+    pub active_writes: AtomicUsize,
     /// Rows in `price_history`, kept up to date by the writer: counting the table can take seconds once it holds
     /// a month of live prices. Only meaningful once `history_counted` (the writer counts once when it starts,
     /// before its first prune).
@@ -144,6 +145,7 @@ pub(crate) struct Writer {
     conn: Connection,
     rx: Receiver<WriterMsg>,
     ctx: Ctx,
+    live_failure: Option<String>,
 }
 
 /// Everything the apply functions need besides the transaction.
@@ -174,6 +176,7 @@ impl Writer {
         Writer {
             conn,
             rx,
+            live_failure: None,
             ctx: Ctx {
                 shared,
                 opts,
@@ -201,6 +204,7 @@ impl Writer {
         loop {
             let Ok(first) = self.rx.recv() else { break };
             let mut weight = first.weight();
+            self.ctx.shared.active_writes.store(usize::from(weight > 0), Ordering::Relaxed);
             let mut urgent = first.urgent();
             let mut batch = vec![first];
             let mut disconnected = false;
@@ -210,6 +214,9 @@ impl Writer {
                     match self.rx.recv_deadline(deadline) {
                         Ok(m) => {
                             weight += m.weight();
+                            if m.weight() > 0 {
+                                self.ctx.shared.active_writes.fetch_add(1, Ordering::Relaxed);
+                            }
                             urgent = m.urgent();
                             batch.push(m);
                             if urgent {
@@ -230,21 +237,48 @@ impl Writer {
                 break;
             }
         }
-        if let Err(e) = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+        if let Err(e) = checkpoint(&self.conn) {
             tracing::debug!(error = %e, "final WAL checkpoint failed");
         }
         tracing::debug!("galaxy writer stopped");
     }
 
-    fn process(&mut self, batch: Vec<WriterMsg>) {
-        let mut flushers = Vec::new();
-        let mut checkpoints = Vec::new();
+    fn process(&mut self, mut batch: Vec<WriterMsg>) {
+        // The first barrier ends collection, so no later inputs can be attributed to it.
+        let barrier = if matches!(batch.last(), Some(WriterMsg::Flush(_) | WriterMsg::Checkpoint(_))) {
+            batch.pop()
+        } else {
+            None
+        };
+        if !batch.is_empty() {
+            self.write_batch(batch);
+        }
+        self.ctx.shared.active_writes.store(0, Ordering::Relaxed);
+        match barrier {
+            Some(WriterMsg::Flush(done)) => {
+                let result = self.live_failure.take().map_or(Ok(()), |e| Err(GalaxyError::WriteFailed(e)));
+                let _ = done.send(result);
+            }
+            Some(WriterMsg::Checkpoint(done)) => {
+                let _ = done.send(checkpoint(&self.conn));
+            }
+            _ => {}
+        }
+    }
+
+    fn write_batch(&mut self, batch: Vec<WriterMsg>) {
+        let has_live = batch.iter().any(|m| matches!(m, WriterMsg::Ingest(..)));
+        let import_reply = batch.iter().find_map(|m| match m {
+            WriterMsg::Import(b) => Some(b.done.clone()),
+            _ => None,
+        });
         let mut acks: Vec<(Sender<ImportAck>, ImportAck)> = Vec::new();
         // How many items of a counted message changed the database, added to its counter once committed.
         let mut counted: Vec<(Arc<AtomicU64>, u64)> = Vec::new();
         let mut outcome = BatchOutcome::default();
+        let mut live_errors = 0;
         let started = Instant::now();
-        let committed = match self
+        let commit = match self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
         {
@@ -252,6 +286,7 @@ impl Writer {
                 for msg in batch {
                     match msg {
                         WriterMsg::Ingest(items, counter) => {
+                            let previous_errors = outcome.errors;
                             let mut stored = 0;
                             for item in items {
                                 for it in item.expand() {
@@ -262,6 +297,7 @@ impl Writer {
                             if let Some(c) = counter {
                                 counted.push((c, stored));
                             }
+                            live_errors += outcome.errors - previous_errors;
                         }
                         WriterMsg::Import(b) => {
                             let mut local = BatchOutcome::default();
@@ -297,24 +333,27 @@ impl Writer {
                             ));
                             outcome.errors += local.errors;
                         }
-                        WriterMsg::Flush(s) => flushers.push(s),
-                        WriterMsg::Checkpoint(s) => checkpoints.push(s),
+                        WriterMsg::Flush(_) | WriterMsg::Checkpoint(_) => unreachable!("barrier is handled separately"),
                     }
                 }
-                match tx.commit() {
-                    Ok(()) => true,
-                    Err(e) => {
-                        tracing::error!(error = %e, "galaxy database commit failed");
-                        false
-                    }
-                }
+                tx.commit().map_err(|e| format!("commit: {e}"))
             }
-            Err(e) => {
-                tracing::error!(error = %e, "could not start a galaxy database transaction");
-                false
-            }
+            Err(e) => Err(format!("begin: {e}")),
         };
+        let committed = commit.is_ok();
         let shared = &self.ctx.shared;
+        if let Err(error) = commit {
+            tracing::error!(%error, "galaxy database transaction failed");
+            shared.write_errors.fetch_add(1, Ordering::Relaxed);
+            if has_live {
+                self.live_failure.get_or_insert(error);
+            }
+            if acks.is_empty() && let Some(reply) = import_reply {
+                let _ = reply.send(ImportAck::default());
+            }
+        } else if live_errors > 0 {
+            self.live_failure.get_or_insert_with(|| format!("{live_errors} live rows rejected in a batch that committed"));
+        }
         let mut dirty = std::mem::take(&mut *self.ctx.dirty.borrow_mut());
         let history_added = self.ctx.history_added.take();
         if committed {
@@ -351,20 +390,49 @@ impl Writer {
         if elapsed > Duration::from_secs(2) {
             tracing::debug!(ms = elapsed.as_millis() as u64, "long galaxy transaction");
         }
-        if !checkpoints.is_empty()
-            && let Err(e) = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-        {
-            tracing::warn!(error = %e, "WAL checkpoint failed");
-        }
-        for f in flushers.into_iter().chain(checkpoints) {
-            let _ = f.send(());
-        }
         for (done, mut ack) in acks {
             ack.committed = committed;
             let _ = done.send(ack);
         }
         self.ctx.maybe_prune(&mut self.conn);
     }
+}
+
+fn checkpoint(conn: &Connection) -> Result<()> {
+    let (busy, frames, transferred): (i64, i64, i64) = conn.query_row(
+        "PRAGMA wal_checkpoint(TRUNCATE)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).map_err(|e| GalaxyError::Checkpoint(e.to_string()))?;
+    if busy != 0 || frames != 0 || transferred != 0 {
+        return Err(GalaxyError::Checkpoint(format!("busy={busy}, WAL frames={frames}, checkpointed={transferred}")));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn checkpoint_reports_a_reader_holding_wal_frames() {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("gen2-galaxy-checkpoint-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("galaxy.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.busy_timeout(Duration::ZERO).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE evidence (n INTEGER);
+                            INSERT INTO evidence VALUES (1);").unwrap();
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        assert_eq!(reader.query_row("SELECT n FROM evidence", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        conn.execute("INSERT INTO evidence VALUES (2)", []).unwrap();
+        assert!(matches!(checkpoint(&conn), Err(GalaxyError::Checkpoint(_))));
+        reader.execute_batch("COMMIT").unwrap();
+        checkpoint(&conn).unwrap();
+    }
+    let reopened = Connection::open(&path).unwrap();
+    assert_eq!(reopened.query_row("SELECT SUM(n) FROM evidence", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+    drop(reopened);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&dir).unwrap();
 }
 
 // ---------------------------------------------------------------------------------------------

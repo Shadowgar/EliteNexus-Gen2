@@ -1,12 +1,10 @@
 //! SQLite schema, pragmas and seeding.
 
-use crate::error::Result;
-use rusqlite::Connection;
+use crate::error::{GalaxyError, Result};
+use rusqlite::{Connection, TransactionBehavior};
 use std::time::Duration;
 
-/// Bump when the schema changes incompatibly. The database is a cache that can be rebuilt from
-/// EDDN and dumps, so an older schema is dropped and recreated. New tables (`CREATE TABLE IF NOT
-/// EXISTS`, e.g. `bodies`) are added to existing databases without a bump.
+/// The schema understood by this build. Compatible older stores migrate in place.
 pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 const TABLES: &str = r#"
@@ -209,21 +207,6 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
 /// the whole market table.
 const RETIRED: &str = "DROP VIEW IF EXISTS market_goods;";
 
-const DROP_ALL: &str = r#"
-DROP TABLE IF EXISTS systems;
-DROP TABLE IF EXISTS systems_rtree;
-DROP TABLE IF EXISTS stations;
-DROP TABLE IF EXISTS station_rtree;
-DROP TABLE IF EXISTS commodities;
-DROP TABLE IF EXISTS market;
-DROP TABLE IF EXISTS system_factions;
-DROP TABLE IF EXISTS system_conflicts;
-DROP TABLE IF EXISTS ring_signals;
-DROP TABLE IF EXISTS price_history;
-DROP TABLE IF EXISTS bodies;
-DROP TABLE IF EXISTS fixes;
-"#;
-
 /// Pragmas shared by every connection.
 fn common_pragmas(conn: &Connection) -> Result<()> {
     conn.busy_timeout(Duration::from_secs(10))?;
@@ -236,39 +219,45 @@ fn common_pragmas(conn: &Connection) -> Result<()> {
 }
 
 /// Opens the writer connection, enables WAL and creates/migrates the schema.
-pub(crate) fn open_writer(path: &std::path::Path) -> Result<Connection> {
-    let conn = Connection::open(path)?;
+pub(crate) fn open_writer(path: &std::path::Path, shared: &crate::writer::Shared) -> Result<Connection> {
+    let mut conn = Connection::open(path)?;
+    conn.busy_timeout(Duration::from_secs(10))?;
+    ensure_supported_schema(&conn)?;
     common_pragmas(&conn)?;
     let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
     if !mode.eq_ignore_ascii_case("wal") {
-        tracing::warn!(mode, "could not enable WAL journal mode");
+        return Err(GalaxyError::Other(format!("could not enable galaxy database WAL mode (SQLite returned {mode})")));
     }
     conn.execute_batch(
-        "PRAGMA synchronous = NORMAL;
+        "PRAGMA synchronous = FULL;
          PRAGMA cache_size = -65536;
          PRAGMA wal_autocheckpoint = 4000;
          PRAGMA journal_size_limit = 67108864;",
     )?;
     conn.set_prepared_statement_cache_capacity(64);
 
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 0 && version != SCHEMA_VERSION {
-        tracing::warn!(
-            found = version,
-            expected = SCHEMA_VERSION,
-            "galaxy database schema changed; rebuilding it"
-        );
-        conn.execute_batch(DROP_ALL)?;
-    }
-    conn.execute_batch(TABLES)?;
-    conn.execute_batch(RETIRED)?;
-    // Abnormal-price scans (built once on an existing database, then maintained by SQLite).
-    conn.execute_batch(crate::deals::ANOMALY_INDEXES)?;
-    add_missing_columns(&conn)?;
-    run_fixes(&conn)?;
-    conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
-    seed_commodities(&conn)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    ensure_supported_schema(&tx)?;
+    tx.execute_batch(TABLES)?;
+    tx.execute_batch(RETIRED)?;
+    tx.execute_batch(crate::deals::ANOMALY_INDEXES)?;
+    add_missing_columns(&tx)?;
+    run_fixes(&tx)?;
+    seed_commodities(&tx)?;
+    // Build the read projections before advancing the version. They are private until open succeeds.
+    shared.load_commodities(&tx)?;
+    *shared.stations.write() = crate::index::StationIndex::load(&tx)?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
     Ok(conn)
+}
+
+fn ensure_supported_schema(conn: &Connection) -> Result<()> {
+    let found: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if found > SCHEMA_VERSION {
+        return Err(GalaxyError::NewerSchema { found, supported: SCHEMA_VERSION });
+    }
+    Ok(())
 }
 
 /// The demand to store. The game lists a good a station produces with demand 1 and demand bracket 0,
@@ -291,10 +280,8 @@ fn run_fixes(conn: &Connection) -> Result<()> {
         if done {
             continue;
         }
-        let tx = conn.unchecked_transaction()?;
-        let n = tx.execute(sql, [])?;
-        tx.execute("INSERT INTO fixes (name, applied) VALUES (?1, strftime('%s','now'))", [name])?;
-        tx.commit()?;
+        let n = conn.execute(sql, [])?;
+        conn.execute("INSERT INTO fixes (name, applied) VALUES (?1, strftime('%s','now'))", [name])?;
         tracing::info!(fix = name, rows = n, "galaxy database repaired");
     }
     Ok(())
@@ -337,18 +324,12 @@ fn seed_commodities(conn: &Connection) -> Result<()> {
     if have > 0 {
         return Ok(());
     }
-    let tx = conn.unchecked_transaction()?;
-    {
-        let mut stmt = tx.prepare(
-            "INSERT OR IGNORE INTO commodities (symbol, name, category, fdev_id, is_rare) VALUES (?1, ?2, ?3, ?4, ?5)",
-        )?;
-        for c in crate::commodities::seed() {
-            stmt.execute(rusqlite::params![
-                c.symbol, c.name, c.category, c.fdev_id, c.rare
-            ])?;
-        }
+    let mut stmt = conn.prepare(
+        "INSERT OR IGNORE INTO commodities (symbol, name, category, fdev_id, is_rare) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for c in crate::commodities::seed() {
+        stmt.execute(rusqlite::params![c.symbol, c.name, c.category, c.fdev_id, c.rare])?;
     }
-    tx.commit()?;
     Ok(())
 }
 

@@ -804,9 +804,8 @@ pub(crate) fn import<R: Read>(
         wait(rx, &mut summary)?;
     }
     let (cp_tx, cp_rx) = crossbeam_channel::bounded(1);
-    if tx.send(WriterMsg::Checkpoint(cp_tx)).is_ok() {
-        let _ = cp_rx.recv();
-    }
+    tx.send(WriterMsg::Checkpoint(cp_tx)).map_err(|_| GalaxyError::WriterGone)?;
+    cp_rx.recv().map_err(|_| GalaxyError::WriterGone)??;
     summary.progress.bytes_read = count.get();
     summary.progress.elapsed = started.elapsed();
     tracing::info!(

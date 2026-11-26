@@ -1061,7 +1061,7 @@ pub struct DbStats {
     pub newest_market_update: Option<i64>,
     /// Main file + WAL.
     pub db_bytes: u64,
-    /// Items waiting for the writer thread.
+    /// Messages waiting for the writer thread or being committed.
     pub pending_writes: u64,
     /// Items accepted since open (after `Raw` expansion).
     pub ingested: u64,
@@ -1069,4 +1069,6 @@ pub struct DbStats {
     /// Market snapshots ignored because newer data was already stored.
     pub stale_markets: u64,
     pub commits: u64,
+    /// Rejected rows and failed transactions since open.
+    pub write_errors: u64,
 }

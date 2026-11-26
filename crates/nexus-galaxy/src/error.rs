@@ -11,6 +11,12 @@ pub enum GalaxyError {
     Json(#[from] serde_json::Error),
     #[error("the galaxy database writer thread has stopped")]
     WriterGone,
+    #[error("galaxy writes failed before the persistence check: {0}")]
+    WriteFailed(String),
+    #[error("galaxy WAL checkpoint incomplete: {0}")]
+    Checkpoint(String),
+    #[error("galaxy schema {found} is newer than supported schema {supported}; use a compatible build or a separate profile")]
+    NewerSchema { found: i64, supported: i64 },
     #[error("{0}")]
     Other(String),
 }

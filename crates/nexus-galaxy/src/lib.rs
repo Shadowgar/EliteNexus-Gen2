@@ -153,10 +153,8 @@ impl GalaxyDb {
         {
             std::fs::create_dir_all(dir)?;
         }
-        let conn = schema::open_writer(&path)?;
         let shared = Arc::new(Shared::default());
-        shared.load_commodities(&conn)?;
-        *shared.stations.write() = index::StationIndex::load(&conn)?;
+        let conn = schema::open_writer(&path, &shared)?;
         let (tx, rx) = crossbeam_channel::unbounded();
         let w = writer::Writer::new(conn, rx, shared.clone(), opts.clone());
         let handle = std::thread::Builder::new()
@@ -236,16 +234,17 @@ impl GalaxyDb {
         n
     }
 
-    /// Blocks until everything queued before this call is committed.
+    /// Waits for prior writes to finish and reports any unreported live write failure.
+    /// An error acknowledges the failed interval. The caller may replay its inputs before retrying.
     pub fn flush(&self) -> Result<()> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.send(WriterMsg::Flush(tx))?;
-        rx.recv().map_err(|_| GalaxyError::WriterGone)
+        rx.recv().map_err(|_| GalaxyError::WriterGone)?
     }
 
-    /// Items waiting for the writer thread.
+    /// Write messages waiting in the channel or still in the writer's current batch.
     pub fn pending(&self) -> usize {
-        self.inner.tx.as_ref().map_or(0, Sender::len)
+        self.inner.tx.as_ref().map_or(0, Sender::len) + self.inner.shared.active_writes.load(Ordering::Relaxed)
     }
 
     /// Streams a Spansh dump (gzip or plain JSON, one record per line) into the database with
@@ -519,6 +518,7 @@ impl GalaxyDb {
         s.market_snapshots = sh.market_snapshots.load(Ordering::Relaxed);
         s.stale_markets = sh.stale_markets.load(Ordering::Relaxed);
         s.commits = sh.commits.load(Ordering::Relaxed);
+        s.write_errors = sh.write_errors.load(Ordering::Relaxed);
         s.price_history_rows = sh.history_counted.load(Ordering::Relaxed).then(|| sh.history_rows.load(Ordering::Relaxed).max(0) as u64);
         Ok(s)
     }
