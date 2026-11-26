@@ -536,7 +536,7 @@ impl SnapshotScope {
         }
         if kind == CompanionKind::Status {
             // Status has no announcement or FID. Only use it with current, dated session evidence.
-            if !self.local_profile || !model.active().is_some_and(|gs| !gs.game_stopped()) {
+            if !self.local_profile || model.active().is_none_or(|gs| gs.game_stopped()) {
                 return SnapshotStatus::Unknown;
             }
             if ts < model.last_event {
@@ -554,7 +554,7 @@ impl SnapshotScope {
                 let Some(gs) = model.active() else { return SnapshotStatus::Unknown };
                 let loc = &gs.location;
                 if !loc.docked || !market.star_system.eq_ignore_ascii_case(&loc.system)
-                    || !loc.station.as_ref().is_some_and(|station| station.market_id == market.market_id)
+                    || loc.station.as_ref().is_none_or(|station| station.market_id != market.market_id)
                 {
                     return SnapshotStatus::Unknown;
                 }
