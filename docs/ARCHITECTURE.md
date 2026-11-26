@@ -8,8 +8,8 @@ with one fast app.
 ## Build
 
 ```powershell
-cargo run -p nexus-app                # debug build (deps optimised, fast enough)
-cargo build --release -p nexus-app    # → target\release\EliteNexus.exe
+cargo +1.100.0 run --locked -p nexus-app                # debug build (deps optimised, fast enough)
+cargo +1.100.0 build --locked --release -p nexus-app    # → target\release\EliteNexus-Gen2.exe
 cargo test --workspace
 ```
 
@@ -51,6 +51,12 @@ a real install.
 | `nexus-ai` | built-in assistant: providers (Gemini via its OpenAI-compatible endpoint, Claude Messages API with prompt caching, local/other OpenAI-compatible), tool-calling loop, embedded knowledge base (`knowledge/*.md` + `docs/USER_GUIDE.md`, BM25 search) | — |
 | `nexus-update` | updates: release versions in semver's order, the signed release manifest (`update.json` + its minisign signature, checked against `src/minisign.pub`), what to take from a release archive (the program and its documents, by name), staging the new program beside the old one and swapping it in at exit, the changelog's sections for What's new; `examples/update_sign.rs` makes the key and writes and signs a release's manifest (release.yml) | — |
 | `nexus-app` | egui 0.36 / eframe (wgpu) GUI, services wiring, TTS, toasts; `update.rs` checks for updates, downloads and stages them, and `main.rs` swaps the program once the window has closed | everything |
+
+## Gen2 boundaries
+
+The executable, desktop entry, window identifier, update manifest and MCP name are Gen2-specific. Ordinary runs may share read-only game journals with upstream. Settings, credentials, databases, caches and logs resolve through the Gen2 profile. See the [improvement register](GEN2_IMPROVEMENTS.md) and [migration procedure](../CONTRIBUTING.md#profile-migration-and-rollback).
+
+GPU recovery keeps the original arguments and working directory and pins the resolved profile. Screenshot runs skip respawn. Fixture runs keep their selected source, muted speech, offline policy and disabled MCP and game integration. Production staging requires a signed Gen2 manifest and an approved signing root. The production root is unconfigured.
 
 ## Runtime
 

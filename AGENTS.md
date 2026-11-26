@@ -23,18 +23,10 @@ file is for anyone changing the code. Read it before your first change; several 
 
 ## Hard rules
 
-* **Uploads are opt-in and send live events only.** Never switch a service on for a user, never upload history, and
-  test runs (`--journal-dir`, `--screenshot`) never upload at all.
-* **Never touch a player's game or data without a click.** The game folder changes only through HUD & cockpit ›
-  Cockpit lights, with a manifest of what was added; settings files are edited surgically with the original kept.
-  Test that code against a copy of the game folder (`ELITE_NEXUS_GAME_DIR`), never a real install. Frontier's
-  shader code (3Dmigoto exports, frame captures) never goes into git.
-* **Updates take a click.** Elite Nexus asks GitHub for the newest version by itself (Settings › About switches that
-  off; it's a download and sends nothing about the commander), but downloads and installs one only on a click, puts
-  it in place only once the old copy has closed, never touches `nexus-data`, and test runs never check. Every
-  release must carry a signed `update.json` (see Releases).
-* Never commit `nexus-data`, databases, logs or keys (`.gitignore` covers them; don't force-add). The update signing
-  key (`UPDATE_SIGNING_KEY`) lives only in the repository's secrets and the maintainer's offline backup.
+* **External services require Gen2 authorization and user opt-in.** Production uploads and updates are disabled in development drafts. Inara current-session profile state requires separate consent after service approval.
+* **Protect game files.** Ordinary cockpit and HUD operations keep their explicit controls and surgical writes. Isolated runs suppress discovery and protected operations. Use synthetic journals and isolated profiles for verification. Keep Frontier shader exports outside Git.
+* **Preserve app boundaries.** Use Gen2 file and platform identities. Do not copy a user's upstream credentials or app profile. Never commit application data directories, databases, logs or keys.
+
 * Never panic on external data: no `unwrap()` on I/O or network data, `#[serde(default)]` on external structs.
 * **Be honest in the UI.** Say where data comes from and what it can't show (the Exobiology bonus hunt explains why
   "no record" isn't proof; Find valuable bodies says Spansh skips populated systems). Explain, don't just show
@@ -134,7 +126,7 @@ a layout changes.
   first frame too, `station` (Market › Station) opens four markets side by side: your system's, then the nearest,
   `browse` opens Market › Find commodity with its search field's whole list open, and `trip` opens Market › Shopping
   trip, planned for the goods the settings hold (`market.trip`).
-* HUD & cockpit with a game folder of your own making: set `ELITE_NEXUS_GAME_DIR` to a folder holding a dummy
+* HUD & cockpit with a game folder of your own making: set `ELITE_NEXUS_GEN2_GAME_DIR` to a folder holding a dummy
   `EliteDangerous64.exe`; add a `d3dx.ini` starting `; Elite Nexus` with a `[Constants]` section (`x1 = 1` switches
   the HUD colour protection on) and an `EliteNexus-3Dmigoto.json` of `{"migoto_version":"1.4.9","files":[]}` for
   the installed state. For README shots, also point `LOCALAPPDATA` at a demo folder holding
@@ -187,48 +179,11 @@ egui 0.36 layout lessons learned here:
 
 ## Releases
 
-1. Bump `version` under `[workspace.package]` in `Cargo.toml` (the only place it lives; the app shows it), then
-   `cargo check --workspace` to refresh `Cargo.lock`.
-2. In `CHANGELOG.md`, turn "Unreleased" into `## [x.y.z] - YYYY-MM-DD` and start a new empty "Unreleased".
-3. Commit as `Elite Nexus x.y.z`, push `main` and wait for CI.
-4. Tag `vx.y.z` and push the tag (`git push origin vx.y.z`; GitHub Desktop users create the tag in Desktop, which
-   doesn't push tags made on the command line).
-5. The tag runs `.github/workflows/release.yml` (about 10 minutes on a cold cache): it builds on `windows-latest`,
-   `ubuntu-22.04` (an older glibc, so the binary starts on older distributions) and `macos-latest` (Apple Silicon),
-   packs the exe and the Linux binary with the README, NOTICE, user guide and Inter licence (a zip and a tar.gz) and
-   the Mac app with `tools/macos/build-app.sh` (a zip of the ad-hoc signed `Elite Nexus.app`), and publishes the
-   GitHub Release with that version's CHANGELOG section as notes, GitHub's list of merged pull requests under it,
-   and the support buttons and supporters at the end: the public GitHub sponsors, read from GitHub's API, and
-   README › Thanks, where Buy Me a Coffee supporters are added by hand under **Sponsors**. If the run's own token
-   can't read sponsors (the log warns), a `SPONSORS_TOKEN` secret holding a classic token with no scopes can.
-   Windows and Linux must build; if only the macOS job fails, the release still goes out, without the Mac zip.
-   Before publishing, it writes `update.json` (each archive's name, address, size and SHA-256) and signs it with the
-   `UPDATE_SIGNING_KEY` secret as `update.json.minisig`, then checks that signature against the key the app has
-   compiled in (`crates/nexus-update/src/minisign.pub`); without the secret, or with another key, the release stops
-   there.
-6. Check it without credentials (the repo is public):
-   `https://api.github.com/repos/uruskan/EliteNexus/releases/latest`, and that
-   `https://github.com/uruskan/EliteNexus/releases/latest/download/update.json` names the new version: that's what
-   every copy already out reads.
+Publication, signing and production updates require separate owner approval and a Gen2 trust root. The release workflow is an informational placeholder. Local packaging uses Gen2-named artifacts. Keep original Elite Nexus executables, profiles and signed manifests separate.
 
-**Updates are a promise to every version already out.** Each one reads `releases/latest/download/update.json` (a beta,
-the releases' feed and that release's `update.json`) and checks its signature with the key it was built with. So every
-release carries both files, the manifest's fields are only ever added to, never renamed or removed (`schema` goes up
-only for a format old versions can't read; they then send commanders to the release page), and the archives stay
-`EliteNexus-v<version>-<platform>.zip` or `.tar.gz` with the program at the root or in one folder. The secret key is
-in the repository's secrets and in the maintainer's offline backup, nowhere else: a new key (`update_sign keygen`)
-means every version out refuses releases signed with it, so make one only to replace a lost or leaked key, and say in
-the release notes that this release has to be downloaded by hand.
+## Improvement documentation
 
-**Betas** follow the same steps with a hyphenated version: `0.6.0-beta.1` in `Cargo.toml`, `## [0.6.0-beta.1] -
-YYYY-MM-DD` in the changelog, tag `v0.6.0-beta.1`. The workflow publishes it as a pre-release, which GitHub never marks
-"Latest": the website and README keep offering the last stable version, and testers get the pre-release's own page
-(check it at `.../releases/tags/v0.6.0-beta.1`). Fixes go under "Unreleased" as usual and ship as `beta.2`. For the
-stable release, merge the beta sections into one `## [x.y.z]` section. Betas don't go to winget.
-
-A local release build: `tools\build-release.ps1` installs into `dist\EliteNexus`, or stages `EliteNexus.new.exe`
-while the app runs (`Update-EliteNexus.cmd` swaps it in), and writes `dist\EliteNexus-vx.y.z-windows-x64.zip`. It
-never touches `nexus-data`.
+For every substantive change, update the cumulative [improvement register](docs/GEN2_IMPROVEMENTS.md). Record affected paths, commits and PRs, regression tests and observed results, compatibility effects, upstream applicability and remaining limits. Update the user guide, changelog and architecture where their contracts change. Keep older entries and link later refinements. Group routine mechanical edits into related entries.
 
 ## Open decisions
 

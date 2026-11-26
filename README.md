@@ -1,6 +1,8 @@
 <p align="center"><img src="site/assets/favicon.svg" width="88" alt="Elite Nexus icon"></p>
 
-<h1 align="center">Elite Nexus</h1>
+<h1 align="center">EliteNexus-Gen2</h1>
+
+**Development drafts.** Gen2 builds on [Elite Nexus](https://github.com/uruskan/EliteNexus), created by CMDR Alka Uruskan and its contributors. The [Gen2 improvement register](docs/GEN2_IMPROVEMENTS.md) follows each change from the audited base through verification and upstream review. The screenshots, feature descriptions, and community feedback below also document inherited upstream functionality.
 
 <p align="center"><strong>The free, open-source Elite Dangerous companion app for Windows, Linux and macOS.</strong><br>
 Live trading, exploration, exobiology, engineering, loadout planning, fleet and carrier tracking, the nearest wars,
@@ -8,8 +10,8 @@ Spansh routes, an overlay over the game, an AI co-pilot, HUD colours, cockpit li
 native app instead of a pile of tools and browser tabs.</p>
 
 <p align="center">
-  <a href="https://github.com/uruskan/EliteNexus/releases/latest"><img src="https://img.shields.io/github/v/release/uruskan/EliteNexus?label=Download&logo=github" alt="Download the latest release"></a>
-  <a href="https://uruskan.github.io/EliteNexus/"><img src="https://img.shields.io/badge/Website-uruskan.github.io%2FEliteNexus-0b7285" alt="Website"></a>
+  <a href="https://github.com/uruskan/EliteNexus/releases/latest"><img src="https://img.shields.io/github/v/release/uruskan/EliteNexus?label=Upstream%20release&logo=github" alt="Original Elite Nexus releases"></a>
+  <a href="https://uruskan.github.io/EliteNexus/"><img src="https://img.shields.io/badge/Website-uruskan.github.io%2FEliteNexus-0b7285" alt="Original Elite Nexus website"></a>
   <a href="https://github.com/sponsors/uruskan"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors" alt="Sponsor on GitHub"></a>
   <a href="https://buymeacoffee.com/uruskan"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%98%95-ffdd00" alt="Buy me a coffee"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/licence-GPL--3.0-blue" alt="Licence: GPL-3.0-or-later"></a>
@@ -32,24 +34,11 @@ the older tools need.
 
 ![Quotes from commanders on the Frontier Forums, GitHub and Reddit, October 2026. "The engineering section is excellent as is the colonisation section and also the carrier route planning. This app does most of what I need from EDDiscovery in a fraction of memory usage. Keep going." "This is now my goto Elite companion. It does everything I want and more." "Not launched any other 3rd party apps since 0.6.0 dropped." "That abnormal price filtering is a great idea." "It ran without any problems, and immediately detected my Elite Dangerous installation. The Exploration and Exobiology sections of the application worked perfectly." "I love EliteNexus, handsome work you did there." "Works great so far, thanks for making it!"](docs/testimonials.png)
 
-## Get started
+## Build a Gen2 development copy
 
-1. **[Download the latest release](https://github.com/uruskan/EliteNexus/releases/latest)**:
-   `EliteNexus-…-windows-x64.zip`, `EliteNexus-…-linux-x64.tar.gz` or `EliteNexus-…-macos-arm64.zip` (Apple Silicon;
-   on an Intel Mac, build the app from source as the [user guide](docs/USER_GUIDE.md#macos) says).
-2. **Unpack and run.** Windows: unzip anywhere and run `EliteNexus.exe`. Linux: unpack and run `./EliteNexus`.
-   Mac: drag `Elite Nexus.app` to Applications; the first time, allow it once under System Settings › Privacy &
-   Security › Open Anyway (it isn't notarized).
-3. **Fly.** Elite Nexus finds the game's journal folder by itself and loads your commander. Start it before or after
-   the game. Community sync, the overlay, the AI co-pilot and the cockpit tools are optional and wait until you set
-   them up. When a new version is out, Elite Nexus tells you; on Windows and Linux, **Update** installs it with a click
-   and keeps your settings and data.
+Use [the contributor instructions](CONTRIBUTING.md) to build EliteNexus-Gen2 from source with Rust 1.100.0. The binary and its app-owned state are separate from the original installation. Gen2 uses `nexus-gen2-data` next to the executable or a per-user `EliteNexus-Gen2` directory. Both applications can read the same game journals.
 
-Everything it keeps (settings, the galaxy database, saved builds, logs) lives in a `nexus-data` folder next to the
-program (on a Mac, in `~/Library/Application Support/EliteNexus`; on Linux, in `~/.local/share/EliteNexus` when the
-program's folder can't be written to). Every page, and the Linux and macOS notes, are in the
-**[user guide](docs/USER_GUIDE.md)**. Linux reports are collected in
-[discussion #17](https://github.com/uruskan/EliteNexus/discussions/17).
+Gen2 has no approved release or automatic updates. This draft permits local Ask on loopback, public EDDN receive and documented public data reads. Community uploads, hosted model providers, and other unapproved operations remain disabled. The original project's download, website and support links below retain their upstream purpose.
 
 ## Support Elite Nexus
 
@@ -212,7 +201,7 @@ page in one line; the
 | **Statistics** | Your career from the game's own statistics, in plain words: where your credits came from and went, each activity with its rank, records and the milestones within reach. What you did over 7, 30 or 90 days or all time, from your journals: time in the game, credits per hour, money in and out with trade counted by its profit, your balance over time (with a log scale), a chart by day and the period before for comparison. The same period ship by ship: time, jumps, earnings, kills, deaths and costs for each ship you flew. And every figure the game keeps, searchable. |
 | **Bindings** | Your active presets per category, conflicts, missing essentials, a searchable list of every bound action and a printable reference card. Read-only: the app never changes your bindings. |
 | **HUD & cockpit** | **HUD colours**, **Glare and exposure** and **Cockpit lights**: see [Make the cockpit yours](#make-the-cockpit-yours). |
-| **Ask** | The AI co-pilot: plain questions ("where can I make the most money in the next hour?") answered from your ship, your whole fleet and its engineering, cargo, materials, ranks and engineers, your journal (any period you name), the market database and Spansh, with tools for price deals, selling your cargo, trade routes, shopping trips for several goods, commodities, nearest services, mining hotspots, where to mine and your surface mining sites, where to buy a build, engineering plans, the nearest wars, systems and their planets (and who has set foot on them), untouched biology, route and money-route planning, exobiology here and journal search, plus a built-in knowledge base. **What I can see and do** lists every tool it has, and **Stop** ends an answer. Google Gemini by default (one pasted key); Claude or a local model (Ollama, LM Studio) optional. Nothing else in the app needs it. |
+| **Ask** | Local model inference on loopback. Ask can read current verified commander state, scoped journal history and the local database. The on-screen list describes available tools. Hosted model providers and effectful route tools remain gated. |
 | **Accounts & sync** | EDDN (schema-checked, with a test mode), EDSM journal sync, Inara profile sync (the app name is approved, so your personal key is enough) and EDAstro, each opt-in and each with its own pause, with retry queues that respect the service's limits. |
 | **Alerts & voice** | Toasts plus speech (Windows speech or SAPI in the voice you pick, speech-dispatcher on Linux, `say` on macOS) for high-value bodies, likely valuable biology, sample spacing, motherlodes, a non-scoopable star when fuel is low, interdictions, hull critical, mission completion, carrier jumps and more, down to the priority you choose. The bell in the toolbar keeps every alert since Elite Nexus started, and the important ones can go to XSOverlay in VR. |
 | **Overlay** | One small black island at the top of the game's screen that says what's going on in a word or two ("2 of 3 samples · Far enough", "Scoopable · 12 jumps · 231 ly"), opens up for the moments that need you (the next jump and where the route ends, an arrival worth it, an approach, a sample, a deposit, a pinned trade stop, docking and your landing pad, the data a station buys, an alert) and fades away when nothing does; it counts down your carrier's jump too. Click-through, it never takes the focus, and it shows only while the game is in front; see-through, or an opaque window of the island's own size, and a VR mode for mirroring it into a headset. On Windows, run the game Borderless or Windowed, since exclusive fullscreen hides every other window; on a Mac, run it in a window (the overlay shows there all the time); on Linux, the overlay needs X11, or XWayland under Wayland (`WAYLAND_DISPLAY= ./EliteNexus`). |

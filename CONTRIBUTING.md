@@ -7,23 +7,14 @@ just want to use the app, the [README](README.md) and the [user guide](docs/USER
 
 Use exact Rust **1.100.0** for Gen2 development and initial verification. Rust **1.95.0** remains the verified Windows minimum. The CI matrix tracks exact development and compatibility toolchains as well as floating stable.
 
-Elite Nexus is a Rust workspace. Install the pinned toolchain from [rustup.rs](https://rustup.rs). On Windows the build also uses the MSVC linker,
-Linux and macOS: CI builds on all three with nothing else installed.
+Install exact Rust 1.100.0 from [rustup.rs](https://rustup.rs). Windows also uses the MSVC linker.
 
 ```sh
-cargo run -p nexus-app                 # debug build, started right away
-cargo build --release -p nexus-app     # target/release/EliteNexus (EliteNexus.exe on Windows)
+cargo +1.100.0 build --locked -p nexus-app
+cargo +1.100.0 run --locked -p nexus-app -- --isolated
 ```
 
-* **macOS**: `tools/macos/build-app.sh` builds and packs `target/macos/Elite Nexus.app` and a zip of it (it needs
-  Xcode's Command Line Tools); `--install` also copies the app to Applications. Releases carry an Apple Silicon build
-  only, so this is how an Intel Mac gets the app.
-* **Windows, a release build for yourself**: `tools\build-release.ps1` installs into `dist\EliteNexus`, or stages
-  `EliteNexus.new.exe` while the app runs (`Update-EliteNexus.cmd` swaps it in once the app is closed).
-  `Start-EliteNexus.cmd` starts that copy, building it first when there is none. Neither touches `nexus-data`.
-* Every build keeps its data (settings, galaxy database, logs) in `nexus-data` next to its own executable, so a debug
-  build (`target/debug/nexus-data`) never shares anything with the copy you play with. On macOS the app bundle keeps
-  it in `~/Library/Application Support/EliteNexus` instead, and `ELITE_NEXUS_HOME` points any build at another folder.
+The executable is `EliteNexus-Gen2` (`EliteNexus-Gen2.exe` on Windows). The Windows and macOS developer packaging scripts use Gen2 names. Gen2 resolves a portable `nexus-gen2-data` profile first, then the per-user `EliteNexus-Gen2` directory. macOS bundles use Application Support. `ELITE_NEXUS_GEN2_HOME` selects a dedicated profile. Isolated runs without the override get a fresh scratch directory.
 
 ## Command-line options
 
@@ -31,16 +22,17 @@ cargo build --release -p nexus-app     # target/release/EliteNexus (EliteNexus.e
 |---|---|
 | `--page <name>` | Start on a sidebar page (`Dashboard`, `Exploration`, `Exobiology`, `Navigation`, `Market`, `Settings`, …). |
 | `--tab <name>` | Open a tab on that page: Market sections (`abnormal`, `database`, …), the whole-galaxy map (`galaxy`), Exploration's `find`, `history` and `unsold`, Exobiology › Find planets (`untouched`, `known`), Fleet › Where to buy (`buy`), Mining › Where to mine (`where`, `where:<material>` such as `where:Monazite`, `where-route`), Navigation's planners (`carrier`, `exact`, `neutron`; `route-carrier` plots a route for your ship to your carrier on the first frame), HUD & cockpit's `glare` and `cockpit`, or a HUD colours preset to start from (`mocha`, `royalpurple`, …), with `,hue:<degrees>` setting the Colour slider on top of it (`mocha,hue:120`; 0 to 360). |
-| `--journal-dir <dir>` | Read another journal folder (a test run; it never uploads). |
+| `--journal-dir <dir>` | Read an explicit journal folder in isolated mode. |
+| `--isolated` | Use a dedicated fixture profile and explicit or empty journal folder. Speech, service traffic, game discovery, updates and MCP are unavailable. |
 | `--mute` | No voice. |
 | `--demo` | Add a sample Ask conversation, an alert banner and sample alerts in the alert history (for screenshots); with `--tab bell` the history is open, the list under the toolbar's bell. |
 | `--overlay <moment>` | The overlay with sample content: the main window shows the moment compact and expanded, see-through, as its own window (see-through off) and in VR's panel, and (except in a screenshot run) the overlay's own window turns between the two every four seconds. Moments: `jump`, `hyperspace`, `arrival`, `approach`, `sampling`, `close`, `mining`, `trade`, `docking`, `docked`, `carrier`, `two`, `alert`, `quiet`. |
-| `--screenshot <png> [--shot-delay <s>] [--size <w>x<h>]` | Render the page off-screen after loading, save the PNG and exit. The window is never visible and nothing is uploaded. `--size 1000x760` checks a narrow layout (the size is in points: on a display scaled above 100 % the PNG comes out that much larger, with the same layout, and `tools\dev\shot.ps1` says so); `--shot-delay 8` or more waits for the galaxy image or a Spansh search (5 to 20 s). |
+| `--screenshot <png> [--shot-delay <s>] [--size <w>x<h>]` | Render the page off-screen after loading, save the PNG and exit. The window is never visible and nothing is uploaded. `--size 1000x760` checks a narrow layout (the size is in points: on a display scaled above 100 % the PNG comes out that much larger, with the same layout, and `tools\dev\shot.ps1` says so); `--shot-delay 8` or more waits for local page content. |
 | `--install-desktop` / `--uninstall-desktop` | Linux only: add Elite Nexus and its icon to the desktop's app menu, or take it out. |
 | `--updated <version>` | Given by an update's Restart now to the new copy: it waits up to 15 seconds for the old copy to let go of the instance lock, says it was updated from that version, and skips the support card. |
 
 The images in `docs/screenshots/` were made this way, e.g.
-`EliteNexus.exe --page market --tab abnormal --screenshot docs\screenshots\market.png --shot-delay 8 --mute`. Check a
+`EliteNexus-Gen2.exe --page market --tab abnormal --screenshot docs\screenshots\market.png --shot-delay 8 --mute`. Check a
 narrow (1000 px) and a wide window whenever a layout changes.
 
 ## Checks
@@ -73,7 +65,7 @@ Each crate ships examples that work on your own journals and database:
 | `cargo run --release -p nexus-uplink --example validate` | Every upload your journals would produce, checked against the EDDN schemas. Sends nothing. |
 | `cargo run --release -p nexus-galaxy --example seed_journal -- <db>` | Build a galaxy database from your journals. |
 | `cargo run -p nexus-eddn --example live -- <db> <seconds>` | Watch the live EDDN feed flow into a database. |
-| `cargo run -p nexus-update --example update_sign -- manifest <dir> <tag> <date>` | Write a release's `update.json` for the archives in `<dir>`; `sign <file>` signs it with the key in `UPDATE_SIGNING_KEY`, `verify <file>` checks it against the key the app has built in (the release workflow runs all three), `keygen <dir>` makes a new key (only to replace a lost or leaked one: every version already out refuses releases signed with another). |
+| `cargo +1.100.0 run --locked -p nexus-update --example update_sign -- manifest <dir> <tag> <date>` | Write an unsigned Gen2-format manifest for staged test artifacts. Production signing stays disabled. |
 
 **Testing updates.** `ELITE_NEXUS_UPDATE_URL` points a build at a folder (or an address) holding `update.json`,
 `update.json.minisig`, the archives it names and optionally a `CHANGELOG.md`, instead of GitHub; the signature is still
@@ -131,13 +123,15 @@ What works on Linux and what doesn't yet is collected in [discussion #17](https:
 * Contributions are licensed under GPL-3.0-or-later like the rest of the code. Data taken from community sources is
   credited in [NOTICE.md](NOTICE.md); add a row there when you bring in more.
 
-## Releases
+## Releases and upstream review
 
-Pushing a tag such as `v0.7.2` runs `.github/workflows/release.yml`: it builds the Windows exe, the Linux binary (on
-Ubuntu 22.04, so the binary starts on older distributions) and the Apple Silicon Mac app, packs each with the README,
-NOTICE, licence and user guide, and publishes a GitHub Release with that version's `CHANGELOG.md` section as the notes,
-and `update.json` with its signature, which the app reads to offer the release as an update. A hyphenated version
-(`v0.8.0-beta.1`) becomes a pre-release. The steps are in AGENTS.md › Releases.
+Gen2 builds are development artifacts. Publication and automatic updates require an approved Gen2 signing identity and release process. Use signed synthetic manifests and disposable installs to verify update trust and rollback.
+
+Every substantive change includes a cumulative [improvement-register entry](docs/GEN2_IMPROVEMENTS.md) with code and PR links, regression evidence, actual results, known limitations and upstream applicability. Update the changelog, architecture and user guide as applicable. Keep independently useful changes focused.
+
+### Profile migration and rollback
+
+Start with a new Gen2 profile. With both apps closed, keep an untouched backup and copy only explicitly reviewed preferences, exported builds or a compatible database snapshot to a disposable Gen2 profile. Exclude credentials, service consent, queued uploads, installer staging and protected game paths. Use a cleanly closed SQLite source or a consistent backup. Rebuild journal indexes from the original read-only journals. Roll back by closing Gen2 and reopening the original installation with its original profile.
 
 ## Accounts and APIs
 
