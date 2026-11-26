@@ -528,6 +528,25 @@ fn eddn_market_data_waits_until_undocking() {
 }
 
 #[test]
+fn source_change_retires_held_market_and_ignores_quiet_events() {
+    let mut h = Harness::new(eddn_cfg(), RecordingTransport::simulated());
+    h.session();
+    h.send(DOCKED_CARRIER);
+    h.open_carrier_market();
+    assert!(h.wait_for(|r| eddn_bodies(r).iter().any(|b| b["message"]["event"] == "Docked")));
+    h.uplink().source_changed();
+    h.session();
+    h.send(UNDOCKED_CARRIER);
+    let replay = LiveEvent { live: false, ..live_event(FSDJUMP, Timestamp::now()) };
+    h.uplink().on_event(&replay, h.tracker.context());
+    h.uplink().flush();
+    h.settle();
+    let requests = h.transport.requests();
+    assert_eq!(commodity_count(&requests), 0);
+    assert!(!eddn_bodies(&requests).iter().any(|b| b["message"]["event"] == "FSDJump"));
+}
+
+#[test]
 fn eddn_pause_while_docked_keeps_the_market_private() {
     let mut h = Harness::new(eddn_cfg(), RecordingTransport::simulated());
     h.session();

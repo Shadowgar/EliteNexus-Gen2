@@ -2670,6 +2670,28 @@ mod tests {
     }
 
     #[test]
+    fn unknown_position_recovers_only_from_a_matching_local_system() {
+        let fixture = TempDb::new("ai-coordinate-provenance");
+        let db = fixture.db();
+        station(db, ("Beta", 1002, 10.0), "Beta Hub", 5002, json!([]));
+        db.flush().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let mut tools = model_tools(commander(), &rt);
+        tools.db = Some(db.clone());
+        for (name, address, expected) in [
+            ("Unmapped", 1003, None),
+            ("Different system name", 1002, None),
+            ("Beta", 1002, Some([10.0, 0.0, 0.0])),
+        ] {
+            let line = json!({"timestamp": Timestamp::now().to_iso(), "event": "Location", "StarSystem": name, "SystemAddress": address}).to_string();
+            let (ts, kind) = scan_line(&line).unwrap();
+            let event = Event::parse(kind, &line).unwrap();
+            tools.model.write().apply(&EventCtx { ts, name: kind, line: &line, live: false }, &event, &mut Alerts::disabled());
+            assert_eq!(tools.me().unwrap().pos, expected, "{name}");
+        }
+    }
+
+    #[test]
     fn tools_answer_from_the_commanders_data() {
         let t = TempDb::new("ai-tools");
         let db = t.db();

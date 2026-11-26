@@ -257,6 +257,35 @@ fn full_text_search(index: &Arc<RwLock<JournalIndex>>, needle: &str) -> Vec<usiz
     hits
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_journal::index::IndexedObservation;
+    use nexus_journal::{LineSource, Timestamp};
+
+    #[test]
+    fn aggregate_search_keeps_known_and_unknown_owners_at_their_raw_offsets() {
+        let path = std::env::temp_dir().join(format!("nexus-logbook-fixture-{}.log", std::process::id()));
+        let mut journal = vec![0xff, b'\n'];
+        let mut index = JournalIndex::default();
+        let file = index.add_file(path.clone());
+        for (line, fid) in [("marker first", Some("F1")), ("marker second", Some("F2")), ("marker unknown", None)] {
+            let offset = journal.len() as u64;
+            index.push_observation(IndexedObservation {
+                timestamp: Timestamp(1), source: LineSource { file, offset }, scope: 1,
+                fid, name: "Music", line,
+            });
+            journal.extend_from_slice(line.as_bytes());
+            journal.push(b'\n');
+        }
+        std::fs::write(&path, journal).unwrap();
+        let index = Arc::new(RwLock::new(index));
+        let hits = full_text_search(&index, "marker");
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(hits, [0, 1, 2]);
+    }
+}
+
 fn table(ui: &mut Ui, headers: &[&str], rows: usize, mut cell: impl FnMut(usize, usize, &mut Ui)) {
     let mut b = TableBuilder::new(ui).striped(true).resizable(false)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
