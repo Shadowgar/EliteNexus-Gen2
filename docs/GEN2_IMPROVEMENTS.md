@@ -188,7 +188,13 @@ Phase 01C changes are implemented in draft. The verification record below distin
 
 ### ENX-022 — Require separate Inara current-session snapshot consent
 
-**Class and subsystem:** Privacy improvement, user experience improvement. The original live-sync disclosure omitted that current state can come from earlier in the game session. Gen2 describes the data, timing and withdrawal controls in [Accounts](../crates/nexus-app/src/pages/accounts.rs) and requires separate consent. The [uplink](../crates/nexus-uplink/src/service.rs) checks consent, key and pause state for snapshot admission and queueing. Recording-transport tests cover startup state, rekeying, pause, resume and revocation. [Consent commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/e334dda). The disclosure and opt-in design adapt upstream. Current-session sourcing uses ENX-011 ownership. Live Inara and broader persisted queue decisions remain open.
+**Class and subsystem:** Privacy improvement, user experience improvement. The original live-sync disclosure omitted that current state can come from earlier in the game session. Gen2 describes the data, timing and withdrawal controls in [Accounts](../crates/nexus-app/src/pages/accounts.rs) and requires separate consent. The [uplink](../crates/nexus-uplink/src/service.rs) checks consent, key and pause state for snapshot admission and queueing. Recording-transport tests cover startup state, rekeying, pause, resume and revocation. [Consent commit](https://github.com/Shadowgar/EliteNexus-Gen2/commit/e334dda) and [configuration generation follow-up](https://github.com/Shadowgar/EliteNexus-Gen2/commit/a6b6d11). The disclosure and opt-in design adapt upstream. Current-session sourcing uses ENX-011 ownership. Live Inara and broader persisted queue decisions remain open.
+
+### Phase 01C automated verification
+
+[Windows verification head](https://github.com/Shadowgar/EliteNexus-Gen2/commit/a6b6d11fb89c37efff956711ad4d2e0f453d58e4) passed the locked application build, strict workspace Clippy and all workspace tests on exact Rust 1.100.0 and 1.95.0 MSVC. Each toolchain reported 874 passed, zero failures and 18 ignored. The Phase 01B baseline was 858 passed, zero failures and 18 ignored. Focused checks passed for launch recovery (4), Inara (10), isolated updater entry (1), Spansh access (2) and profile separation (1). The update crate passed 28 synthetic manifest, version, archive and installer tests. The Windows binary reports the Gen2 product and filename while retaining upstream copyright.
+
+Native GUI and GPU-device-loss verification, Linux and macOS acceptance, production signing and live service operation remain outstanding. The Phase 01C draft has passed automated Windows checks. Owner acceptance, merge and release are separate statuses.
 
 ## Upstream review opportunities
 
