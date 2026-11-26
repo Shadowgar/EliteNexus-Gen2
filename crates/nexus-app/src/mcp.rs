@@ -394,8 +394,9 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, 
     if !matches!(got, Ok(Ok(n)) if n > 0) {
         return;
     }
+    let epoch = *source_epoch.lock();
     let reply = match serde_json::from_str::<WireCall>(&line) {
-        Ok(call) => answer(call, &jobs).await,
+        Ok(call) => answer(call, &jobs, epoch).await,
         Err(e) => WireReply::Error(format!("Unreadable call: {e}")),
     };
     let mut text = serde_json::to_string(&reply).unwrap_or_else(|_| r#"{"error":"The answer couldn't be written."}"#.to_string());
@@ -405,10 +406,9 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(conn: S, 
 }
 
 /// Hands a call to the worker and waits for it, up to [`DEADLINE`].
-async fn answer(call: WireCall, jobs: &crossbeam_channel::Sender<Call>) -> WireReply {
+async fn answer(call: WireCall, jobs: &crossbeam_channel::Sender<Call>, epoch: u64) -> WireReply {
     let (reply, answered) = tokio::sync::oneshot::channel();
     let args = if call.arguments.is_null() { Value::Object(Default::default()) } else { call.arguments };
-    let epoch = *source_epoch.lock();
     if jobs.try_send(Call { source_epoch: epoch, name: call.tool, args, reply }).is_err() {
         return WireReply::Error("Elite Nexus is busy with other agents' calls: try again in a moment.".into());
     }
