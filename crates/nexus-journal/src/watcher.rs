@@ -428,6 +428,30 @@ mod tests {
     }
 
     #[test]
+    fn append_during_bulk_initialization_is_consumed_once_after_the_fence() {
+        let dir = Fixture::new();
+        std::fs::write(dir.file(1), format!("{ONE}\n")).unwrap();
+        std::fs::write(dir.file(2), format!("{TWO}\n")).unwrap();
+        let initial = list_journal_files(&dir.0).unwrap();
+        let mut resume = Vec::new();
+        crate::reader::load_history(&initial, 1, |file, history| {
+            if file.part == 1 {
+                writeln!(std::fs::OpenOptions::new().append(true).open(dir.file(2)).unwrap(), "{ONE}").unwrap();
+            }
+            assert_eq!(history.events.len(), 1);
+            resume.push(history.checkpoint.unwrap());
+        });
+        let (_watcher, rx) = dir.watcher(initial, resume);
+        let event = next_event(&rx);
+        assert_eq!(&*event.raw.line, ONE);
+        assert_eq!(event.raw.source.offset, (TWO.len() + 1) as u64);
+        assert!(event.live);
+        while let Ok(message) = rx.recv_timeout(Duration::from_millis(100)) {
+            assert!(!matches!(message, WatchMsg::Event(_)));
+        }
+    }
+
+    #[test]
     fn companion_availability_reports_partial_then_safe_recovery() {
         let dir = Fixture::new();
         let mut tracker = CompanionTracker::default();

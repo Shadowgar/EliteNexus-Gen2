@@ -100,21 +100,23 @@ impl SyncService {
     }
 }
 
-/// The current game session (its Fileheader/LoadGame to now) as raw events. Each journal file is
-/// read once and sliced by the index offsets.
+/// Read the current commander's session from verified, generation-bound raw observations.
 fn current_session(core: &Core, model: &nexus_model::Model) -> Vec<RawEvent> {
     let Some(fid) = model.verified_fid() else { return Vec::new() };
-    let session = model.journal_session_start();
+    let scope = model.active_generation();
     let idx = core.index.read();
     if idx.source_generation != model.source_generation() {
         return Vec::new();
     }
-    idx.entries.iter().filter(|e| idx.in_session(e, session) && idx.belongs_to(e, fid))
+    let mut events: Vec<_> = idx.entries.iter().rev().take_while(|e| idx.in_scope(e, scope))
+        .filter(|e| idx.belongs_to(e, fid))
         .filter_map(|e| {
             let line = idx.read_line(e)?;
             RawEvent::new(&line, LineSource::default())
         })
-        .collect()
+        .collect();
+    events.reverse();
+    events
 }
 
 fn forward(rx: Receiver<LiveMsg>, uplink: Arc<Uplink>, attachment: Arc<parking_lot::Mutex<u64>>, owner: u64) {

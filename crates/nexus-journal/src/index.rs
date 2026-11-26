@@ -1,4 +1,4 @@
-//! Compact index of every journal event (EDDiscovery-style journal grid) — 24 bytes per event;
+//! Compact index of every journal event, including the owner and observation scope.
 //! the JSON itself stays on disk and is read on demand.
 
 use crate::time::Timestamp;
@@ -14,7 +14,7 @@ pub struct IndexEntry {
     pub len: u32,
     pub name: u16,
     owner: u32,
-    session: i64,
+    scope: u64,
     fingerprint: Option<u64>,
 }
 
@@ -52,8 +52,8 @@ impl JournalIndex {
         self.owners.get(id as usize).map(String::as_str)
     }
 
-    pub fn in_session(&self, entry: &IndexEntry, session: Timestamp) -> bool {
-        entry.session == session.0
+    pub fn in_scope(&self, entry: &IndexEntry, scope: u64) -> bool {
+        entry.scope == scope
     }
 
     pub fn belongs_to(&self, entry: &IndexEntry, fid: &str) -> bool {
@@ -72,7 +72,7 @@ impl JournalIndex {
     }
 
     pub fn push(&mut self, ts: Timestamp, file: u32, offset: u64, len: usize, name: &str) {
-        self.record(IndexEntry { ts: ts.0, file, offset, len: len as u32, name: 0, owner: 0, session: 0, fingerprint: None }, name);
+        self.record(IndexEntry { ts: ts.0, file, offset, len: len as u32, name: 0, owner: 0, scope: 0, fingerprint: None }, name);
     }
 
     pub fn push_observation(&mut self, observation: IndexedObservation<'_>) {
@@ -89,7 +89,7 @@ impl JournalIndex {
         if let Ok(len) = u32::try_from(len) {
             self.record(IndexEntry {
                 ts: observation.timestamp.0, file: observation.source.file, offset: observation.source.offset,
-                len, name: 0, owner, session: observation.session.0, fingerprint: Some(fingerprint(observation.line)),
+                len, name: 0, owner, scope: observation.scope, fingerprint: Some(fingerprint(observation.line)),
             }, observation.name);
         }
     }
@@ -148,7 +148,7 @@ impl JournalIndex {
 pub struct IndexedObservation<'a> {
     pub timestamp: Timestamp,
     pub source: crate::raw::LineSource,
-    pub session: Timestamp,
+    pub scope: u64,
     pub fid: Option<&'a str>,
     pub name: &'a str,
     pub line: &'a str,

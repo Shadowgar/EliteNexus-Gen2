@@ -1611,10 +1611,10 @@ impl Model {
             self.begin_journal_session(self.session_start);
             return;
         }
-        if self.active().is_some_and(|gs| fid.is_empty() && gs.cmdr.name.eq_ignore_ascii_case(name) && !gs.cmdr.fid.is_empty()) {
+        if self.active().is_some_and(|gs| fid.is_empty() && gs.cmdr.fid.is_empty() && gs.cmdr.name.eq_ignore_ascii_case(name)) {
             return;
         }
-        let key = if fid.is_empty() { format!("\0{}:{name}", self.session_start.0) } else { fid.to_owned() };
+        let key = if fid.is_empty() { format!("\0{}:{name}", self.active_generation) } else { fid.to_owned() };
         if !fid.is_empty()
             && let Some(provisional) = self.tentative_owner.take()
             && self.active.as_deref() == Some(&provisional)
@@ -1660,11 +1660,7 @@ impl Model {
             _ => {}
         }
         if let Some(gs) = self.active_mut() {
-            let previous_fid = matches!(event, Event::LoadGame(l) if l.fid.is_empty()).then(|| gs.cmdr.fid.clone());
             gs.apply(ctx, event, alerts);
-            if let Some(fid) = previous_fid {
-                gs.cmdr.fid = fid;
-            }
         }
     }
 

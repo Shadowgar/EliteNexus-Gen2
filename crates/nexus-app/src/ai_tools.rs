@@ -3626,7 +3626,7 @@ mod tests {
                 let line = json!({"timestamp": ts.to_iso(), "event":"Music", "MusicTrack": format!("marker-{suffix}")}).to_string();
                 index.push_observation(IndexedObservation {
                     timestamp: ts, source: LineSource { file, offset: text.len() as u64 },
-                    session: ts, fid: owner, name: "Music", line: &line,
+                    scope: 1, fid: owner, name: "Music", line: &line,
                 });
                 text.push_str(&line);
                 text.push('\n');

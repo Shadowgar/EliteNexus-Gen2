@@ -489,7 +489,7 @@ fn index_observation(index: &mut JournalIndex, model: &Model, file: u32, offset:
     index.push_observation(IndexedObservation {
         timestamp: ctx.ts,
         source: LineSource { file, offset },
-        session: model.journal_session_start(),
+        scope: model.active_generation(),
         fid: model.verified_fid(),
         name: ctx.name,
         line: ctx.line,
@@ -639,17 +639,20 @@ mod tests {
         apply(&mut model, &mut snapshots, OWNER_A);
         begin_file(&mut model, &mut current, &file(2, start()));
         assert_eq!(model.verified_fid(), Some("F1"));
-        let observation = |line| IndexedObservation {
-            timestamp: start(), source: LineSource::default(), session: start(), fid: Some(line),
-            name: "Commander", line,
-        };
-        index.push_observation(observation(model.verified_fid().unwrap()));
+        let observe = |index: &mut JournalIndex, model: &Model| index.push_observation(IndexedObservation {
+            timestamp: start(), source: LineSource::default(), scope: model.active_generation(),
+            fid: model.verified_fid(), name: "Commander", line: "synthetic fixture",
+        });
+        let scope_a = model.active_generation();
+        observe(&mut index, &model);
         apply(&mut model, &mut snapshots, OWNER_B);
-        index.push_observation(observation(model.verified_fid().unwrap()));
+        observe(&mut index, &model);
         assert_eq!(index.entries.len(), 2);
         assert!(index.belongs_to(&index.entries[0], "F1"));
         assert!(!index.belongs_to(&index.entries[0], "F2"));
         assert!(index.belongs_to(&index.entries[1], "F2"));
+        assert!(index.in_scope(&index.entries[0], scope_a));
+        assert!(!index.in_scope(&index.entries[1], scope_a));
         begin_file(&mut model, &mut current, &file(1, Timestamp(start().0 + 1)));
         assert!(model.active().is_none());
         assert_eq!(index.entries.len(), 2, "the aggregate index retains both owners");
@@ -667,8 +670,13 @@ mod tests {
         assert_eq!(model.verified_fid(), Some("F1"));
         assert_eq!(model.active().unwrap().cmdr.credits, 123);
         assert_eq!(model.commanders.len(), 1);
-        model.begin_journal_session(Timestamp(start().0 + 5));
-        apply(&mut model, &mut snapshots, r#"{"timestamp":"2026-09-05T00:13:35Z","event":"Commander","Name":"One"}"#);
+        let no_fid = r#"{"timestamp":"2026-09-05T00:13:29Z","event":"Commander","Name":"One"}"#;
+        apply(&mut model, &mut snapshots, no_fid);
+        assert!(model.verified_fid().is_none());
+        assert_eq!(model.active().unwrap().cmdr.credits, 0);
+        model.active_mut().unwrap().cmdr.credits = 456;
+        model.begin_journal_session(start());
+        apply(&mut model, &mut snapshots, no_fid);
         assert!(model.verified_fid().is_none());
         assert_eq!(model.active().unwrap().cmdr.credits, 0);
     }
