@@ -2683,7 +2683,7 @@ mod tests {
             ("Different system name", 1002, None),
             ("Beta", 1002, Some([10.0, 0.0, 0.0])),
         ] {
-            let line = json!({"timestamp": Timestamp::now().to_iso(), "event": "Location", "StarSystem": name, "SystemAddress": address}).to_string();
+            let line = json!({"timestamp": nexus_journal::Timestamp::now().to_iso(), "event": "Location", "StarSystem": name, "SystemAddress": address}).to_string();
             let (ts, kind) = scan_line(&line).unwrap();
             let event = Event::parse(kind, &line).unwrap();
             tools.model.write().apply(&EventCtx { ts, name: kind, line: &line, live: false }, &event, &mut Alerts::disabled());
