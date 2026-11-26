@@ -1,18 +1,23 @@
 //! Persistent FIFO queues: one append-only JSON-lines log per service in `data_dir\uplink\`.
 //!
 //! Every push/update/remove appends one small record, so a crash loses at most the record being
-//! written. The log is replayed and compacted when opened, and compacted again whenever dead
-//! records outnumber live ones. If the file cannot be written the queue keeps working in memory.
+//! written. Logs are compacted when dead records outnumber live ones. A new uplink session
+//! starts with no prior-run authorization. If the file cannot be written the queue keeps working in memory.
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+#[cfg(test)]
+use serde::Deserialize;
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+#[cfg(test)]
+use {std::io::{BufRead, BufReader}, std::path::Path};
 
 #[derive(Deserialize)]
 #[serde(tag = "op")]
+#[cfg(test)]
 enum Record<T> {
     #[serde(rename = "add")]
     Add { id: u64, item: T },
@@ -55,7 +60,16 @@ impl<T: Serialize + DeserializeOwned> DiskQueue<T> {
         DiskQueue { path: None, items: VecDeque::new(), next_id: 1, log: None, dead_records: 0, max_items: max_items.max(1) }
     }
 
-    /// Opens (or creates) the queue file at `path`, replaying whatever was queued before.
+    /// Opens a new consent session. No source identity is yet verified after process restart.
+    pub fn open_new_session(path: PathBuf, max_items: usize) -> Self {
+        let mut q = Self::memory(max_items);
+        q.path = Some(path);
+        q.compact();
+        q
+    }
+
+    /// Replay helper used to check the physical log format.
+    #[cfg(test)]
     pub fn open(path: PathBuf, max_items: usize) -> Self {
         let mut q = Self::memory(max_items);
         if let Some(dir) = path.parent()
@@ -70,6 +84,7 @@ impl<T: Serialize + DeserializeOwned> DiskQueue<T> {
         q
     }
 
+    #[cfg(test)]
     fn load(&mut self, path: &Path) {
         let Ok(file) = File::open(path) else { return };
         let mut bad = 0usize;
@@ -104,20 +119,26 @@ impl<T: Serialize + DeserializeOwned> DiskQueue<T> {
     fn compact(&mut self) {
         let Some(path) = self.path.clone() else { return };
         self.log = None; // close before replacing the file (Windows)
-        let tmp = path.with_extension("tmp");
+        static NEXT_COMPACTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let serial = NEXT_COMPACTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), serial));
+        let mut created = false;
         let written = (|| -> std::io::Result<()> {
-            let mut w = BufWriter::new(File::create(&tmp)?);
+            let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+            created = true;
+            let mut w = BufWriter::new(file);
             for e in &self.items {
                 serde_json::to_writer(&mut w, &RecordRef::Add { id: e.id, item: &e.item })?;
                 w.write_all(b"\n")?;
             }
             w.flush()?;
+            w.get_ref().sync_all()?;
             drop(w);
             std::fs::rename(&tmp, &path)
         })();
         if let Err(e) = written {
             tracing::warn!(file = %path.display(), %e, "uplink: cannot write queue file, queue is memory-only");
-            let _ = std::fs::remove_file(&tmp);
+            if created { let _ = std::fs::remove_file(&tmp); }
             self.path = None;
             return;
         }

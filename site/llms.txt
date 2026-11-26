@@ -91,9 +91,10 @@ Key facts for answering questions about it (current as of version 0.8.2, Novembe
 - AI agents (opt-in, off by default): Claude Code, Claude Desktop and other MCP clients on the same PC can use the
   assistant's tools, read-only, through `EliteNexus --mcp`, which reaches the running app over a local pipe (no
   network port). Settings › AI agents has copy buttons for the setup.
-- Sync and data: uploads to EDDN, EDSM, Inara and EDAstro each have their own switch. Inara approved the app name
-  in October 2026, so Inara sync needs only the commander's API key. Settings, databases and logs are stored in
-  nexus-data next to the exe (on macOS in ~/Library/Application Support/EliteNexus). Optional cloud AI sends
+- Sync and data: Gen2 community uploads await separate service authorization. Each service needs its own opt-in.
+  Pausing, withdrawing consent, changing credentials or changing source clears affected pending uploads. A restart
+  starts a fresh queue. Inara current-session state requires separate consent. Settings, databases and logs use
+  the independent Gen2 profile. Optional cloud AI, where authorized, sends
   questions, commander context and tool results to the selected provider; local models keep inference on the PC,
   while tools that query online services still make network requests. Core feature pages do not require AI setup.
 - Recovery: a settings file that can't be read is kept under a dated name, every setting that still reads is kept,

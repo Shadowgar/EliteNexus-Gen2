@@ -20,7 +20,7 @@ use crate::json::{Obj, form_urlencode, gzip, parse_object};
 use crate::queue::DiskQueue;
 use crate::session::Session;
 use crate::status::{Counters, ServiceStatus, UplinkStatus};
-use crate::transport::{FailingTransport, HttpRequest, ReqwestTransport, Transport};
+use crate::transport::{FailingTransport, HttpRequest, HttpResponse, ReqwestTransport, Transport, TransportError};
 use crossbeam_channel::{Receiver, Sender};
 use nexus_journal::{Companion, CompanionKind, LiveEvent, RawEvent, Timestamp};
 use parking_lot::{Mutex, RwLock};
@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
 /// Events older than this (vs. the PC clock) are never uploaded: they are not live.
@@ -137,12 +137,10 @@ pub(crate) struct EddnItem {
 }
 
 enum Input {
-    SourceChanged,
     Event(RawEvent, Box<UploadContext>),
     Companion(Companion, Box<UploadContext>),
     /// The current session for an Inara profile update (see [`Uplink::sync_inara_profile`]).
     InaraSnapshot(Vec<RawEvent>, Box<UploadContext>, u64),
-    Config(Box<UplinkConfig>),
     Flush,
     Stop,
 }
@@ -158,7 +156,7 @@ struct Service<T> {
 impl<T: Serialize + DeserializeOwned> Service<T> {
     fn new(dir: Option<&Path>, file: &str, max_items: usize) -> Self {
         let queue = match dir {
-            Some(d) => DiskQueue::open(d.join(file), max_items),
+            Some(d) => DiskQueue::open_new_session(d.join(file), max_items),
             None => DiskQueue::memory(max_items),
         };
         Service { queue: Mutex::new(queue), notify: Notify::new(), counters: Counters::default(), flush: AtomicBool::new(false) }
@@ -173,6 +171,11 @@ impl<T: Serialize + DeserializeOwned> Service<T> {
 
     fn wake(&self) {
         self.notify.notify_one();
+    }
+
+    fn retire(&self) {
+        self.flush.store(false, Ordering::Relaxed);
+        self.queue.lock().clear();
     }
 }
 
@@ -204,6 +207,9 @@ struct Shared {
     config: RwLock<UplinkConfig>,
     /// Bumped when the configuration changes: services stopped by a rejection resume.
     epoch: AtomicU64,
+    changed: watch::Sender<u64>,
+    source: AtomicU64,
+    admit_since: Mutex<Option<std::time::Instant>>,
     shutdown: AtomicBool,
     transport: Arc<dyn Transport>,
     dir: Option<PathBuf>,
@@ -222,6 +228,37 @@ struct Shared {
 }
 
 impl Shared {
+    fn active_epoch(&self, epoch: u64) -> bool {
+        self.epoch.load(Ordering::Relaxed) == epoch && !self.stopping()
+    }
+
+    // Called while holding the configuration write lock.
+    fn advance(&self) {
+        let epoch = self.epoch.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        self.changed.send_replace(epoch);
+    }
+
+    async fn send(&self, epoch: u64, request: HttpRequest) -> Option<Result<HttpResponse, TransportError>> {
+        let mut changed = self.changed.subscribe();
+        let mut send = {
+            let _authority = self.config.read();
+            if !self.active_epoch(epoch) { return None; }
+            self.transport.send(request)
+        };
+        // Poll under the read lock so a retired snapshot cannot start a transport operation
+        // between the authorization check and its first poll. In-flight requests are canceled
+        // where the transport permits it. Traffic already dispatched cannot be recalled.
+        let poll = std::future::poll_fn(|cx| {
+            let _authority = self.config.read();
+            if !self.active_epoch(epoch) { return std::task::Poll::Ready(None); }
+            send.as_mut().poll(cx).map(Some)
+        });
+        tokio::select! {
+            biased;
+            _ = changed.changed() => None,
+            result = poll => result,
+        }
+    }
     fn stopping(&self) -> bool {
         self.shutdown.load(Ordering::Relaxed)
     }
@@ -315,7 +352,7 @@ impl InaraPacing {
 /// Everything Elite Nexus uploads. Cheap to call from the core thread: `on_event` and
 /// `on_companion` only enqueue; parsing, building and HTTP happen elsewhere.
 pub struct Uplink {
-    tx: Sender<Input>,
+    tx: Sender<(u64, Input)>,
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
 }
@@ -350,6 +387,9 @@ impl Uplink {
         let shared = Arc::new(Shared {
             config: RwLock::new(cfg.clone()),
             epoch: AtomicU64::new(0),
+            changed: watch::channel(0).0,
+            source: AtomicU64::new(0),
+            admit_since: Mutex::new(None),
             shutdown: AtomicBool::new(false),
             transport,
             eddn: Service::new(d, "eddn.jsonl", 5000),
@@ -364,9 +404,6 @@ impl Uplink {
             inara_check_now: AtomicBool::new(false),
             inara_account: Mutex::new(None),
         });
-        // Consent may have been withdrawn while the app was closed.
-        clear_disabled_queues(&shared, &cfg);
-
         let (tx, rx) = crossbeam_channel::unbounded();
         let proc_shared = shared.clone();
         let thread = std::thread::Builder::new()
@@ -383,19 +420,43 @@ impl Uplink {
 
     /// Discard attribution and buffered observations when the app changes journal scope.
     pub fn source_changed(&self) {
-        let _ = self.tx.send(Input::SourceChanged);
+        let s = &self.shared;
+        let _authority = s.config.write();
+        *s.admit_since.lock() = Some(std::time::Instant::now());
+        s.source.fetch_add(1, Ordering::Relaxed);
+        s.eddn.retire();
+        s.edsm.retire();
+        s.inara.retire();
+        s.edastro.retire();
+        s.advance();
+        s.wake_all();
     }
 
     /// Hands over one live journal event (call after the model applied it).
     pub fn on_event(&self, ev: &LiveEvent, ctx: &UploadContext) {
+        self.on_event_at(ev, ctx, std::time::Instant::now());
+    }
+
+    pub fn on_event_at(&self, ev: &LiveEvent, ctx: &UploadContext, observed: std::time::Instant) {
         if ev.live {
-            let _ = self.tx.send(Input::Event(ev.raw.clone(), Box::new(ctx.clone())));
+            self.enqueue(Input::Event(ev.raw.clone(), Box::new(ctx.clone())), observed);
         }
     }
 
     /// Hands over a companion file the watcher read (Status.json, Market.json, …).
     pub fn on_companion(&self, c: &Companion, ctx: &UploadContext) {
-        let _ = self.tx.send(Input::Companion(c.clone(), Box::new(ctx.clone())));
+        self.on_companion_at(c, ctx, std::time::Instant::now());
+    }
+
+    pub fn on_companion_at(&self, c: &Companion, ctx: &UploadContext, observed: std::time::Instant) {
+        self.enqueue(Input::Companion(c.clone(), Box::new(ctx.clone())), observed);
+    }
+
+    fn enqueue(&self, input: Input, observed: std::time::Instant) {
+        let _authority = self.shared.config.read();
+        if self.shared.admit_since.lock().is_none_or(|since| observed >= since) {
+            let _ = self.tx.send((self.shared.epoch.load(Ordering::Relaxed), input));
+        }
     }
 
     /// Replaces the configuration. Disabling or pausing a service discards its queue (consent
@@ -411,11 +472,25 @@ impl Uplink {
             self.shared.inara_check.store(new_key.is_some(), Ordering::Relaxed);
             self.shared.inara_check_now.store(new_key.is_some(), Ordering::Relaxed);
         }
-        *current = cfg.clone();
-        self.shared.epoch.fetch_add(1, Ordering::Relaxed);
+        if *current != cfg {
+            *self.shared.admit_since.lock() = Some(std::time::Instant::now());
+            let identity = current.software() != cfg.software() || current.version() != cfg.version();
+            if identity || current.eddn_enabled() != cfg.eddn_enabled() || current.eddn_force_test() != cfg.eddn_force_test() {
+                self.shared.eddn.retire();
+            }
+            if identity || current.edsm_sending() != cfg.edsm_sending() {
+                self.shared.edsm.retire();
+            }
+            if identity || current.inara_sending() != cfg.inara_sending() || current.inara_profile_consent != cfg.inara_profile_consent {
+                self.shared.inara.retire();
+            }
+            if identity || current.edastro_enabled() != cfg.edastro_enabled() {
+                self.shared.edastro.retire();
+            }
+        }
+        *current = cfg;
+        self.shared.advance();
         drop(current);
-        clear_disabled_queues(&self.shared, &cfg);
-        let _ = self.tx.send(Input::Config(Box::new(cfg)));
         self.shared.wake_all();
     }
 
@@ -441,7 +516,8 @@ impl Uplink {
 
     /// Asks Inara again who the key belongs to (answer in [`Uplink::status`]).
     pub fn check_inara(&self) {
-        if self.shared.config.read().inara_enabled() {
+        let config = self.shared.config.read();
+        if config.inara_enabled() {
             self.shared.inara_check.store(true, Ordering::Relaxed);
             self.shared.inara_check_now.store(true, Ordering::Relaxed);
             self.shared.inara.wake();
@@ -455,42 +531,31 @@ impl Uplink {
     /// earlier in the session goes out (a mission handed in before sync was switched on, or while
     /// it was paused); nothing goes to EDDN, EDSM or EDAstro.
     pub fn sync_inara_profile(&self, session: Vec<RawEvent>, ctx: &UploadContext) {
-        let key = self.shared.config.read().inara_snapshot_key().map(|key| fingerprint(&[key]));
+        let config = self.shared.config.read();
+        let key = config.inara_snapshot_key().map(|key| fingerprint(&[key]));
         if let Some(key) = key {
-            let _ = self.tx.send(Input::InaraSnapshot(session, Box::new(ctx.clone()), key));
+            let epoch = self.shared.epoch.load(Ordering::Relaxed);
+            let _ = self.tx.send((epoch, Input::InaraSnapshot(session, Box::new(ctx.clone()), key)));
         }
     }
 
     /// Closes pending batches and sends everything queued as soon as each service's rate
     /// limit allows (e.g. when the game shuts down or the app exits).
     pub fn flush(&self) {
-        let _ = self.tx.send(Input::Flush);
+        self.enqueue(Input::Flush, std::time::Instant::now());
     }
 }
 
 impl Drop for Uplink {
     fn drop(&mut self) {
-        let _ = self.tx.send(Input::Stop);
+        let _ = self.tx.send((0, Input::Stop));
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+        let _authority = self.shared.config.write();
         self.shared.shutdown.store(true, Ordering::Relaxed);
+        self.shared.advance();
         self.shared.wake_all();
-    }
-}
-
-fn clear_disabled_queues(shared: &Shared, cfg: &UplinkConfig) {
-    if !cfg.eddn_enabled() {
-        shared.eddn.queue.lock().clear();
-    }
-    if !cfg.edsm_enabled() {
-        shared.edsm.queue.lock().clear();
-    }
-    if !cfg.inara_enabled() {
-        shared.inara.queue.lock().clear();
-    }
-    if !cfg.edastro_enabled() {
-        shared.edastro.queue.lock().clear();
     }
 }
 
@@ -509,6 +574,8 @@ struct PendingStub {
 struct Processor {
     shared: Arc<Shared>,
     cfg: UplinkConfig,
+    scope_since: Option<std::time::Instant>,
+    source: u64,
     session: Session,
     eddn: EddnBuilder,
     inara: InaraMapper,
@@ -541,6 +608,8 @@ impl Processor {
             bindings: Bindings::load(shared.dir.as_deref()),
             shared,
             cfg,
+            scope_since: None,
+            source: 0,
             session: Session::new(),
             inara: InaraMapper::new(),
             stub: None,
@@ -560,30 +629,45 @@ impl Processor {
         }
     }
 
-    fn run(mut self, rx: Receiver<Input>) {
-        for input in rx {
+    fn run(mut self, rx: Receiver<(u64, Input)>) {
+        let shared = self.shared.clone();
+        for (epoch, input) in rx {
             if matches!(input, Input::Stop) {
                 break;
             }
+            let config = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
+            self.update_scope(&config);
             // Never let one malformed input kill the uplink.
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.handle(input)));
             if res.is_err() {
                 tracing::error!("uplink: internal error while processing an event (skipped)");
             }
         }
+        let config = shared.config.read();
+        self.update_scope(&config);
         self.release_stub();
+    }
+
+    fn update_scope(&mut self, cfg: &UplinkConfig) {
+        let since = *self.shared.admit_since.lock();
+        if self.scope_since == since { return; }
+        self.scope_since = since;
+        let source = self.shared.source.load(Ordering::Relaxed);
+        if self.source != source {
+            self.source = source;
+            self.session = Session::new();
+            self.last_ctx = UploadContext::default();
+        }
+        self.cfg = cfg.clone();
+        self.eddn = EddnBuilder::new(eddn_options(cfg));
+        self.inara = InaraMapper::new();
+        self.stub = None;
+        self.held.clear();
     }
 
     fn handle(&mut self, input: Input) {
         match input {
-            Input::SourceChanged => {
-                self.session = Session::new();
-                self.eddn = EddnBuilder::new(eddn_options(&self.cfg));
-                self.inara = InaraMapper::new();
-                self.stub = None;
-                self.last_ctx = UploadContext::default();
-                self.held.clear();
-            }
             Input::Event(raw, ctx) => {
                 self.on_event(&raw, &ctx);
                 self.last_ctx = *ctx;
@@ -591,19 +675,6 @@ impl Processor {
             Input::Companion(c, ctx) => {
                 self.on_companion(&c, &ctx);
                 self.last_ctx = *ctx;
-            }
-            Input::Config(cfg) => {
-                self.eddn.set_options(eddn_options(&cfg));
-                self.cfg = *cfg;
-                if !self.cfg.eddn_enabled() {
-                    self.held.clear();
-                }
-                // An EDSM event waiting for its companion file goes with the queue.
-                if !self.cfg.edsm_enabled() {
-                    self.stub = None;
-                }
-                // Anything queued under the old configuration for a now-disabled service goes.
-                clear_disabled_queues(&self.shared, &self.cfg);
             }
             Input::InaraSnapshot(events, ctx, key) => self.inara_snapshot(&events, &ctx, key),
             Input::Flush => {
@@ -919,7 +990,7 @@ fn short(body: &str) -> String {
 }
 
 /// Refreshes a server-provided event list (once, then every 6 h; 10 min after a failure).
-async fn refresh_list(shared: &Shared, list: &RwLock<EventList>, url: &str, cache_file: &str) {
+async fn refresh_list(shared: &Shared, epoch: u64, list: &RwLock<EventList>, url: &str, cache_file: &str) {
     {
         let l = list.read();
         let fresh = l.fetched.is_some_and(|f| Timestamp::now().0 - f.0 < LIST_MAX_AGE_SECS);
@@ -929,7 +1000,9 @@ async fn refresh_list(shared: &Shared, list: &RwLock<EventList>, url: &str, cach
         }
     }
     list.write().last_attempt = Some(Instant::now());
-    let res = shared.transport.send(HttpRequest::get(url, Duration::from_secs(20))).await;
+    let Some(res) = shared.send(epoch, HttpRequest::get(url, Duration::from_secs(20))).await else { return };
+    let _authority = shared.config.read();
+    if !shared.active_epoch(epoch) { return; }
     let events: Option<Vec<String>> = match res {
         Ok(r) if r.is_success() => serde_json::from_str::<Vec<String>>(&r.body).ok().filter(|v| !v.is_empty()),
         Ok(r) => {
@@ -963,8 +1036,10 @@ async fn run_eddn(shared: Arc<Shared>) {
     let mut gate = Gate::new();
     let mut forbidden = 0u32;
     while !shared.stopping() {
-        let enabled = shared.config.read().eddn_enabled();
-        let epoch = shared.epoch.load(Ordering::Relaxed);
+        let (enabled, epoch) = {
+            let config = shared.config.read();
+            (config.eddn_enabled(), shared.epoch.load(Ordering::Relaxed))
+        };
         if !enabled {
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
@@ -975,6 +1050,8 @@ async fn run_eddn(shared: Arc<Shared>) {
         }
         let now = Timestamp::now();
         let next = {
+            let _authority = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
             let mut q = svc.queue.lock();
             let expired = q.retain(|it| it.expires > now);
             if !expired.is_empty() {
@@ -998,41 +1075,46 @@ async fn run_eddn(shared: Arc<Shared>) {
         let req = HttpRequest::post(eddn::UPLOAD_URL, body, Duration::from_secs(10))
             .header("Content-Type", "application/json")
             .header("Content-Encoding", "gzip");
-        match shared.transport.send(req).await {
-            Ok(resp) if resp.is_success() => {
-                svc.queue.lock().remove(id);
-                svc.counters.sent(1);
-                gate.success();
-                forbidden = 0;
-            }
-            Ok(resp) if matches!(resp.status, 400 | 403 | 413 | 426) => {
-                // Never retried (400/403/426), 413 dropped: a bad message must not block the queue.
-                svc.queue.lock().remove(id);
-                let reason = format!("EDDN rejected a {} message: HTTP {} {}", item.schema.path(), resp.status, short(&resp.body));
-                tracing::warn!(%reason);
-                svc.counters.failed(1, reason);
-                if resp.status == 403 {
-                    forbidden += 1;
-                    if forbidden >= 3 {
-                        // Probably a block of this software: stop instead of hammering the gateway.
-                        forbidden = 0;
-                        gate.stop(epoch, &svc.counters, "EDDN refuses uploads from Elite Nexus (HTTP 403)".into());
+        let Some(res) = shared.send(epoch, req).await else { continue };
+        {
+            let _authority = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
+            match res {
+                Ok(resp) if resp.is_success() => {
+                    svc.queue.lock().remove(id);
+                    svc.counters.sent(1);
+                    gate.success();
+                    forbidden = 0;
+                }
+                Ok(resp) if matches!(resp.status, 400 | 403 | 413 | 426) => {
+                    // Never retried (400/403/426), 413 dropped: a bad message must not block the queue.
+                    svc.queue.lock().remove(id);
+                    let reason = format!("EDDN rejected a {} message: HTTP {} {}", item.schema.path(), resp.status, short(&resp.body));
+                    tracing::warn!(%reason);
+                    svc.counters.failed(1, reason);
+                    if resp.status == 403 {
+                        forbidden += 1;
+                        if forbidden >= 3 {
+                            // Probably a block of this software: stop instead of hammering the gateway.
+                            forbidden = 0;
+                            gate.stop(epoch, &svc.counters, "EDDN refuses uploads from Elite Nexus (HTTP 403)".into());
+                        }
                     }
                 }
-            }
-            other => {
-                let reason = match other {
-                    Ok(resp) => format!("EDDN: HTTP {} {}", resp.status, short(&resp.body)),
-                    Err(e) => format!("EDDN: {e}"),
-                };
-                let attempts = item.attempts + 1;
-                if attempts >= EDDN_MAX_ATTEMPTS {
-                    svc.queue.lock().remove(id);
-                    svc.counters.failed(1, format!("{reason} (gave up after {attempts} attempts)"));
-                } else {
-                    svc.queue.lock().update(id, |it| it.attempts = attempts);
+                other => {
+                    let reason = match other {
+                        Ok(resp) => format!("EDDN: HTTP {} {}", resp.status, short(&resp.body)),
+                        Err(e) => format!("EDDN: {e}"),
+                    };
+                    let attempts = item.attempts + 1;
+                    if attempts >= EDDN_MAX_ATTEMPTS {
+                        svc.queue.lock().remove(id);
+                        svc.counters.failed(1, format!("{reason} (gave up after {attempts} attempts)"));
+                    } else {
+                        svc.queue.lock().update(id, |it| it.attempts = attempts);
+                    }
+                    gate.retry(&EDDN_BACKOFF, &svc.counters, reason);
                 }
-                gate.retry(&EDDN_BACKOFF, &svc.counters, reason);
             }
         }
         // One request at a time, at most ~2 per second.
@@ -1049,11 +1131,10 @@ async fn run_edsm(shared: Arc<Shared>) {
     let mut gate = Gate::new();
     let mut last_post: Option<Instant> = None;
     while !shared.stopping() {
-        let (creds, software, version) = {
+        let (creds, software, version, epoch) = {
             let c = shared.config.read();
-            (c.edsm_sending().cloned(), c.software().to_string(), c.version().to_string())
+            (c.edsm_sending().cloned(), c.software().to_string(), c.version().to_string(), shared.epoch.load(Ordering::Relaxed))
         };
-        let epoch = shared.epoch.load(Ordering::Relaxed);
         let Some(creds) = creds else {
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
@@ -1067,11 +1148,13 @@ async fn run_edsm(shared: Arc<Shared>) {
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
         }
-        refresh_list(&shared, &shared.edsm_discard, edsm::DISCARD_URL, "edsm-discard.json").await;
+        refresh_list(&shared, epoch, &shared.edsm_discard, edsm::DISCARD_URL, "edsm-discard.json").await;
         let discard = shared.edsm_discard.read().set.clone();
         let fp = fingerprint(&[&creds.commander_name, &creds.api_key]);
         let now = Timestamp::now();
         let batch: Vec<(u64, EdsmItem)> = {
+            let _authority = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
             let mut q = svc.queue.lock();
             let removed = q.retain(|it| it.cred == fp && !edsm::is_discarded(&discard, &it.event) && now.0 - it.queued_at.0 < EDSM_TTL_SECS);
             let expired = removed.iter().filter(|it| it.cred == fp && now.0 - it.queued_at.0 >= EDSM_TTL_SECS).count();
@@ -1123,7 +1206,10 @@ async fn run_edsm(shared: Arc<Shared>) {
             .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
         last_post = Some(Instant::now());
         let ids: Vec<u64> = batch.iter().map(|(id, _)| *id).collect();
-        match shared.transport.send(req).await {
+        let Some(res) = shared.send(epoch, req).await else { continue };
+        let _authority = shared.config.read();
+        if !shared.active_epoch(epoch) { continue; }
+        match res {
             Err(e) => gate.retry(&EDSM_BACKOFF, &svc.counters, format!("EDSM: {e}")),
             Ok(resp) => {
                 let now = Timestamp::now();
@@ -1225,7 +1311,6 @@ async fn run_inara(shared: Arc<Shared>) {
                 tokio::time::sleep(timing().inara_min_gap - t.elapsed()).await;
                 continue;
             }
-            shared.inara_check_now.store(false, Ordering::Relaxed);
             let header = json!({
                 "appName": software, "appVersion": version, "APIkey": creds.api_key.trim(),
             });
@@ -1235,7 +1320,11 @@ async fn run_inara(shared: Arc<Shared>) {
             last_post = Some(Instant::now());
             pacing.last_post = Some(Timestamp::now());
             pacing.save(&shared);
-            match shared.transport.send(req).await {
+            let Some(res) = shared.send(epoch, req).await else { continue };
+            let _authority = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
+            shared.inara_check_now.store(false, Ordering::Relaxed);
+            match res {
                 Err(e) => gate.retry(&INARA_BACKOFF, &svc.counters, format!("Inara: {e}")),
                 Ok(resp) => match inara::profile_response(&resp) {
                     Ok(account) => {
@@ -1267,6 +1356,8 @@ async fn run_inara(shared: Arc<Shared>) {
         let key = fingerprint(&[&creds.api_key]);
         let now = Timestamp::now();
         let batch: Vec<(u64, InaraItem)> = {
+            let _authority = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
             let mut q = svc.queue.lock();
             let removed = q.retain(|it| it.key == key && now.0 - it.queued_at.0 < INARA_TTL_SECS && now.0 - it.event_time.0 < 29 * 86400);
             let expired = removed.iter().filter(|it| it.key == key).count();
@@ -1323,7 +1414,10 @@ async fn run_inara(shared: Arc<Shared>) {
         pacing.last_post = Some(Timestamp::now());
         pacing.save(&shared);
         let ids: Vec<u64> = batch.iter().map(|(id, _)| *id).collect();
-        match shared.transport.send(req).await {
+        let Some(res) = shared.send(epoch, req).await else { continue };
+        let _authority = shared.config.read();
+        if !shared.active_epoch(epoch) { continue; }
+        match res {
             Err(e) => gate.retry(&INARA_BACKOFF, &svc.counters, format!("Inara: {e}")),
             Ok(resp) => match inara::classify_response(&resp) {
                 InaraOutcome::Done(mut statuses) => {
@@ -1390,11 +1484,10 @@ async fn run_edastro(shared: Arc<Shared>) {
     let mut last_post: Option<Instant> = None;
     let mut attempts = 0u32;
     while !shared.stopping() {
-        let (enabled, software, version) = {
+        let (enabled, software, version, epoch) = {
             let c = shared.config.read();
-            (c.edastro_enabled(), c.software().to_string(), c.version().to_string())
+            (c.edastro_enabled(), c.software().to_string(), c.version().to_string(), shared.epoch.load(Ordering::Relaxed))
         };
-        let epoch = shared.epoch.load(Ordering::Relaxed);
         if !enabled {
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
@@ -1408,10 +1501,12 @@ async fn run_edastro(shared: Arc<Shared>) {
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
         }
-        refresh_list(&shared, &shared.edastro_accepting, edastro::ACCEPTING_URL, "edastro-accepting.json").await;
+        refresh_list(&shared, epoch, &shared.edastro_accepting, edastro::ACCEPTING_URL, "edastro-accepting.json").await;
         let accepting = shared.edastro_accepting.read().set.clone();
         let now = Timestamp::now();
         let batch: Vec<(u64, EdastroItem)> = {
+            let _authority = shared.config.read();
+            if !shared.active_epoch(epoch) { continue; }
             let mut q = svc.queue.lock();
             q.retain(|it| {
                 now.0 - it.queued_at.0 < EDASTRO_TTL_SECS
@@ -1460,7 +1555,10 @@ async fn run_edastro(shared: Arc<Shared>) {
             .header("Content-Type", "application/json");
         last_post = Some(Instant::now());
         let ids: Vec<u64> = batch.iter().map(|(id, _)| *id).collect();
-        let res = shared.transport.send(req).await.map_err(|e| e.0).and_then(|r| edastro::classify_response(&r));
+        let Some(res) = shared.send(epoch, req).await else { continue };
+        let _authority = shared.config.read();
+        if !shared.active_epoch(epoch) { continue; }
+        let res = res.map_err(|e| e.0).and_then(|r| edastro::classify_response(&r));
         match res {
             Ok(()) => {
                 remove_all(&svc.queue, &ids);

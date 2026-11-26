@@ -294,15 +294,15 @@ pub struct MarketItem {
     pub sell_price: i64,
     #[serde(rename = "MeanPrice")]
     pub mean_price: i64,
-    /// 0-3; the game writes `""` for goods the station does not trade in that direction.
-    #[serde(rename = "StockBracket", deserialize_with = "lenient_i64")]
-    pub stock_bracket: i64,
-    #[serde(rename = "DemandBracket", deserialize_with = "lenient_i64")]
-    pub demand_bracket: i64,
-    #[serde(rename = "Stock")]
-    pub stock: i64,
-    #[serde(rename = "Demand")]
-    pub demand: i64,
+    /// An explicit bracket (0–3). Blank and absent brackets carry no numeric value.
+    #[serde(rename = "StockBracket", deserialize_with = "optional_i64")]
+    pub stock_bracket: Option<i64>,
+    #[serde(rename = "DemandBracket", deserialize_with = "optional_i64")]
+    pub demand_bracket: Option<i64>,
+    #[serde(rename = "Stock", deserialize_with = "optional_i64")]
+    pub stock: Option<i64>,
+    #[serde(rename = "Demand", deserialize_with = "optional_i64")]
+    pub demand: Option<i64>,
     #[serde(rename = "Consumer")]
     pub consumer: bool,
     #[serde(rename = "Producer")]
@@ -311,12 +311,12 @@ pub struct MarketItem {
     pub rare: bool,
 }
 
-/// A number that may also arrive as a string (`""` reads as 0).
-fn lenient_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+/// The game can supply a numeric string, a blank, or no value.
+fn optional_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
     Ok(match serde_json::Value::deserialize(d)? {
-        serde_json::Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)).unwrap_or(0),
-        serde_json::Value::String(s) => s.trim().parse().unwrap_or(0),
-        _ => 0,
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
     })
 }
 
@@ -657,6 +657,18 @@ mod tests {
         assert_eq!(commodity_symbol("$superconductors_name;"), "superconductors");
         assert_eq!(commodity_symbol("metaalloys"), "metaalloys");
         assert_eq!(commodity_symbol("Gold"), "gold");
+    }
+
+    #[test]
+    fn market_companion_keeps_blank_and_missing_values_distinct_from_zero() {
+        let file = r#"{"timestamp":"2026-10-12T09:07:40Z","event":"Market","Items":[
+            {"Name":"$gold_name;","Stock":0,"StockBracket":"","DemandBracket":0},
+            {"Name":"$silver_name;","Stock":"","Demand":"12","DemandBracket":"2"}
+        ]}"#;
+        let Companion::Market(market, _) = Companion::parse(CompanionKind::Market, file).unwrap() else { panic!() };
+        let [gold, silver] = market.items.as_slice() else { panic!() };
+        assert_eq!((gold.stock, gold.stock_bracket, gold.demand, gold.demand_bracket), (Some(0), None, None, Some(0)));
+        assert_eq!((silver.stock, silver.stock_bracket, silver.demand, silver.demand_bracket), (None, None, Some(12), Some(2)));
     }
 
     #[test]

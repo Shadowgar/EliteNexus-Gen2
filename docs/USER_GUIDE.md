@@ -202,9 +202,7 @@ Choose the minimum priority in Settings:
 
 ## Data & privacy
 
-Gen2 stores settings, the galaxy database, saved builds and logs in `nexus-gen2-data` next to the executable or its per-user `EliteNexus-Gen2` profile. Nothing is
-uploaded unless you enable it in Accounts & sync; when you do, only live game data is sent (never your history,
-credits or cargo), following each service's published rules. Gen2's updater makes no network requests while [updates are disabled](#updates).
+Gen2 stores settings, the galaxy database, saved builds and logs in `nexus-gen2-data` next to the executable or its per-user `EliteNexus-Gen2` profile. Outbound sync remains disabled pending service authorization. Authorized sync would require an explicit opt-in in Accounts & sync and an active source and commander. Pause, disable, key replacement and source changes clear affected pending uploads. A restarted process starts with a fresh queue. Gen2's updater makes no network requests while [updates are disabled](#updates).
 
 On Linux, when the folder next to the program can't be written to, data goes to `~/.local/share/EliteNexus` (or
 `$XDG_DATA_HOME/EliteNexus`). On macOS, `Elite Nexus.app` keeps its data in `~/Library/Application Support/EliteNexus`

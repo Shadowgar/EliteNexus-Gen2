@@ -89,6 +89,7 @@ pub struct EventContext {
     pub market_id: Option<u64>,
     pub station_name: Option<String>,
     pub ship_id: Option<u64>,
+    pub observed_at: Option<Instant>,
 }
 
 impl EventContext {
@@ -113,6 +114,7 @@ impl EventContext {
             // The journal's own spelling: uploads send what the game wrote.
             station_name: st.map(|s| s.journal_name.clone()),
             ship_id: gs.fleet.current_ship_id,
+            observed_at: Some(Instant::now()),
         }
     }
 }
@@ -135,6 +137,8 @@ pub type Drops = std::collections::BTreeMap<nexus_journal::Timestamp, nexus_mode
 /// How far each commander cleared their unsold exobiology list ([`nexus_model::Model::exobio_cleared`]).
 pub type ExobioCleared = std::collections::BTreeMap<String, nexus_journal::Timestamp>;
 
+type ScopeListener = RwLock<Option<Box<dyn Fn((u64, u64)) + Send + Sync>>>;
+
 pub struct Core {
     pub model: Arc<RwLock<Model>>,
     /// All discovered journal events. Raw reads check the indexed file and line identity.
@@ -142,6 +146,7 @@ pub struct Core {
     pub status: Arc<RwLock<CoreStatus>>,
     pub alerts: Receiver<Alert>,
     subscribers: Arc<RwLock<Vec<Sender<LiveMsg>>>>,
+    scope_listener: Arc<ScopeListener>,
     stop: Arc<AtomicBool>,
 }
 
@@ -155,15 +160,17 @@ impl Core {
         let status = Arc::new(RwLock::new(CoreStatus::default()));
         let subscribers: Arc<RwLock<Vec<Sender<LiveMsg>>>> = Arc::new(RwLock::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
+        let scope_listener = Arc::new(ScopeListener::default());
         let (alert_tx, alert_rx) = crossbeam_channel::unbounded();
         {
             let (model, index, status, subscribers, stop) = (model.clone(), index.clone(), status.clone(), subscribers.clone(), stop.clone());
+            let scope_listener = scope_listener.clone();
             std::thread::Builder::new()
                 .name("nexus-core".into())
-                .spawn(move || run(journal_dir, model, index, status, subscribers, alert_tx, stop, repaint, history_sink, drops, exobio_cleared))
+                .spawn(move || run(journal_dir, model, index, status, subscribers, scope_listener, alert_tx, stop, repaint, history_sink, drops, exobio_cleared))
                 .expect("spawn core thread");
         }
-        Core { model, index, status, alerts: alert_rx, subscribers, stop }
+        Core { model, index, status, alerts: alert_rx, subscribers, scope_listener, stop }
     }
 
     /// Receive every live journal event / companion update (for uploaders etc.).
@@ -171,6 +178,11 @@ impl Core {
         let (tx, rx) = crossbeam_channel::unbounded();
         self.subscribers.write().push(tx);
         rx
+    }
+
+    /// Runs before forwarding observations from a different verified source or commander scope.
+    pub fn on_scope_changed(&self, listener: impl Fn((u64, u64)) + Send + Sync + 'static) {
+        *self.scope_listener.write() = Some(Box::new(listener));
     }
 }
 
@@ -193,6 +205,7 @@ fn run(
     index: Arc<RwLock<JournalIndex>>,
     status: Arc<RwLock<CoreStatus>>,
     subscribers: Arc<RwLock<Vec<Sender<LiveMsg>>>>,
+    scope_listener: Arc<ScopeListener>,
     alert_tx: Sender<Alert>,
     stop: Arc<AtomicBool>,
     repaint: impl Fn(),
@@ -217,7 +230,7 @@ fn run(
         let generation = next_source_generation();
         let live_from = Timestamp::now();
         let found = replay_and_follow(
-            &dir, &model, &index, &status, &subscribers, &alert_tx, &stop, &repaint,
+            &dir, &model, &index, &status, &subscribers, &scope_listener, &alert_tx, &stop, &repaint,
             history_sink.take(), &drops, &exobio_cleared, generation, live_from, local_profile,
         );
         if !found {
@@ -244,6 +257,7 @@ fn replay_and_follow(
     index: &RwLock<JournalIndex>,
     status: &RwLock<CoreStatus>,
     subscribers: &RwLock<Vec<Sender<LiveMsg>>>,
+    scope_listener: &ScopeListener,
     alert_tx: &Sender<Alert>,
     stop: &AtomicBool,
     repaint: &impl Fn(),
@@ -325,7 +339,16 @@ fn replay_and_follow(
     let mut live_file_id = current.as_ref().map(|f| idx.add_file(f.path.clone())).unwrap_or(0);
     // The watcher handles startup snapshots through the same freshness rules as subsequent changes.
     *index.write() = idx;
-    *model.write() = local;
+    let update_scope = |m: &Model| {
+        if let Some(listener) = scope_listener.read().as_ref() {
+            listener((m.source_generation(), m.active_generation()));
+        }
+    };
+    {
+        let mut current = model.write();
+        *current = local;
+        update_scope(&current);
+    }
     {
         let mut st = status.write();
         st.load_ms = started.elapsed().as_secs_f64() * 1e3;
@@ -385,6 +408,7 @@ fn replay_and_follow(
                             continue;
                         }
                         if m.active_generation() != commander_generation {
+                            update_scope(&m);
                             status.write().snapshots.clear();
                         }
                         snapshots.announce(&m, ctx.name, ctx.ts);
@@ -426,6 +450,7 @@ fn replay_and_follow(
                             let previous = m.active_generation();
                             begin_file(&mut m, &mut current, &f);
                             if m.active_generation() != previous {
+                                update_scope(&m);
                                 status.write().snapshots.clear();
                             }
                             live_file_id = index.write().bind_file(f.path.clone(), identity);
@@ -436,6 +461,7 @@ fn replay_and_follow(
                         let mut retired = Model::default();
                         retired.set_source_generation(next_source_generation());
                         *m = retired;
+                        update_scope(&m);
                         *index.write() = JournalIndex::default();
                         return true;
                     }

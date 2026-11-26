@@ -20,34 +20,45 @@ pub struct SyncService {
     uplink: Option<Arc<Uplink>>,
     applied: UplinkConfig,
     /// Send the current session's profile to Inara once the journal history is loaded.
-    inara_due: bool,
-    attachment: Arc<parking_lot::Mutex<u64>>,
+    inara_due: Option<u64>,
+    attachment: Arc<parking_lot::Mutex<Attachment>>,
+}
+
+#[derive(Default)]
+struct Attachment {
+    id: u64,
+    scope: u64,
+    observed: Option<(u64, u64)>,
 }
 
 impl SyncService {
     pub fn start(core: &Core, acc: &Accounts, data_dir: &Path, rt: &tokio::runtime::Handle) -> SyncService {
+        if !OUTBOUND_AUTHORIZED || crate::launch::isolated() { return Self::disabled(); }
         let cfg = config(acc);
         let uplink = Arc::new(Uplink::new(cfg.clone(), data_dir, rt));
         let inara_due = inara_snapshot_due(&UplinkConfig::default(), &cfg);
-        let sync = SyncService { uplink: Some(uplink), applied: cfg, inara_due, attachment: Default::default() };
+        let mut sync = SyncService { uplink: Some(uplink), applied: cfg, inara_due: None, attachment: Default::default() };
         sync.attach(core);
+        sync.inara_due = inara_due.then(|| sync.attachment.lock().scope);
         sync
     }
 
     /// No uploads at all (screenshot / replay runs).
     pub fn disabled() -> SyncService {
-        SyncService { uplink: None, applied: UplinkConfig::default(), inara_due: false, attachment: Default::default() }
+        SyncService { uplink: None, applied: UplinkConfig::default(), inara_due: None, attachment: Default::default() }
     }
 
     /// Call every frame: brings the Inara profile up to date when it is due (at start-up and
     /// when sync is switched on or the key changes) and the journal history has been read.
     pub fn tick(&mut self, core: &Core) {
-        if !self.inara_due || !matches!(core.status.read().phase, Phase::Live) {
+        if self.inara_due.is_none() || !matches!(core.status.read().phase, Phase::Live) {
             return;
         }
-        self.inara_due = false;
+        let due = self.inara_due.take();
         let Some(u) = &self.uplink else { return };
         let model = core.model.read();
+        let attachment = self.attachment.lock();
+        if due != Some(attachment.scope) || attachment.observed != Some((model.source_generation(), model.active_generation())) { return; }
         let events = current_session(core, &model);
         if !events.is_empty() {
             let ctx = upload_context(&EventContext::capture(&model));
@@ -65,10 +76,25 @@ impl SyncService {
     /// Follows a (re)started core. The previous forwarder ends when its core stops.
     pub fn attach(&self, core: &Core) {
         if let Some(u) = &self.uplink {
-            let mut attachment = self.attachment.lock();
-            *attachment = attachment.wrapping_add(1);
-            u.source_changed();
-            forward(core.subscribe(), u.clone(), self.attachment.clone(), *attachment);
+            let model = core.model.read();
+            let owner = {
+                let mut active = self.attachment.lock();
+                active.id = active.id.wrapping_add(1);
+                active.scope = active.scope.wrapping_add(1);
+                active.observed = (model.source_generation() != 0).then(|| (model.source_generation(), model.active_generation()));
+                u.source_changed();
+                active.id
+            };
+            let active = self.attachment.clone();
+            let uplink = u.clone();
+            core.on_scope_changed(move |current| {
+                let mut a = active.lock();
+                if a.id == owner && a.observed != Some(current) && a.observed.replace(current).is_some() {
+                    a.scope = a.scope.wrapping_add(1);
+                    uplink.source_changed();
+                }
+            });
+            forward(core.subscribe(), u.clone(), self.attachment.clone(), owner);
         }
     }
 
@@ -77,7 +103,10 @@ impl SyncService {
         let Some(u) = &self.uplink else { return };
         let cfg = config(acc);
         if cfg != self.applied {
-            self.inara_due = (self.inara_due && snapshot_key(&cfg).is_some()) || inara_snapshot_due(&self.applied, &cfg);
+            let active = self.attachment.lock();
+            let previous_key = snapshot_key(&self.applied);
+            let retained = self.inara_due == Some(active.scope) && previous_key.is_some() && previous_key == snapshot_key(&cfg);
+            self.inara_due = (retained || inara_snapshot_due(&self.applied, &cfg)).then_some(active.scope);
             u.set_config(cfg.clone());
             self.applied = cfg;
         }
@@ -118,24 +147,23 @@ fn current_session(core: &Core, model: &nexus_model::Model) -> Vec<RawEvent> {
     events
 }
 
-fn forward(rx: Receiver<LiveMsg>, uplink: Arc<Uplink>, attachment: Arc<parking_lot::Mutex<u64>>, owner: u64) {
+fn forward(rx: Receiver<LiveMsg>, uplink: Arc<Uplink>, attachment: Arc<parking_lot::Mutex<Attachment>>, owner: u64) {
     let spawned = std::thread::Builder::new().name("nexus-sync".into()).spawn(move || {
         // Watcher order is preserved (EDSM swaps Cargo/ShipLocker events for their companion files).
-        let mut scope = None;
         for msg in rx {
             let active = attachment.lock();
-            if *active != owner { break; }
+            if active.id != owner { break; }
             let context = match &msg {
                 LiveMsg::Event(_, c) | LiveMsg::Companion(_, c) => c,
             };
-            let current = (context.source_generation, context.commander_generation);
-            if scope != Some(current) {
-                uplink.source_changed();
-                scope = Some(current);
-            }
+            if active.observed != Some((context.source_generation, context.commander_generation)) { continue; }
             match msg {
-                LiveMsg::Event(e, c) => uplink.on_event(&e, &upload_context(&c)),
-                LiveMsg::Companion(cmp, c) => uplink.on_companion(&cmp, &upload_context(&c)),
+                LiveMsg::Event(e, c) => {
+                    if let Some(at) = c.observed_at { uplink.on_event_at(&e, &upload_context(&c), at); }
+                }
+                LiveMsg::Companion(cmp, c) => {
+                    if let Some(at) = c.observed_at { uplink.on_companion_at(&cmp, &upload_context(&c), at); }
+                }
             }
         }
     });
@@ -167,7 +195,7 @@ fn snapshot_key(cfg: &UplinkConfig) -> Option<&str> {
 }
 
 fn inara_snapshot_due(previous: &UplinkConfig, next: &UplinkConfig) -> bool {
-    snapshot_key(next).is_some() && snapshot_key(previous) != snapshot_key(next)
+    !previous.inara_profile_consent && snapshot_key(next).is_some()
 }
 
 /// The uplink configuration for the user's choices (keys decrypted here, never logged).
@@ -202,6 +230,34 @@ mod tests {
         assert!(!cfg.any_enabled());
         assert_eq!(cfg.software(), "EliteNexus-Gen2");
         assert!(cfg.user_agent().starts_with("EliteNexus-Gen2/"));
+    }
+
+    #[test]
+    fn production_gate_never_opens_upload_queues() {
+        let fixture = std::env::temp_dir().join(format!("gen2-gated-uplink-{}", std::process::id()));
+        let core = Core::start(Some(fixture.join("journals")), || {}, None, Default::default(), Default::default());
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let acc = Accounts { eddn_upload: true, edastro_enabled: true, ..Default::default() };
+        let sync = SyncService::start(&core, &acc, &fixture, rt.handle());
+        assert!(sync.uplink.is_none() && !sync.any_enabled());
+        assert!(!fixture.join("uplink").exists());
+    }
+
+    #[test]
+    fn inara_snapshot_is_not_reissued_on_resume_or_key_replacement() {
+        let consent = UplinkConfig {
+            inara: Some(InaraCredentials { api_key: "fixture-old".into() }),
+            inara_profile_consent: true,
+            ..UplinkConfig::default()
+        };
+        let paused = UplinkConfig { inara_paused: true, ..consent.clone() };
+        let rekeyed = UplinkConfig { inara: Some(InaraCredentials { api_key: "fixture-new".into() }), ..consent.clone() };
+        let revoked = UplinkConfig { inara_profile_consent: false, ..rekeyed.clone() };
+        assert!(inara_snapshot_due(&UplinkConfig::default(), &consent));
+        assert!(!inara_snapshot_due(&consent, &paused));
+        assert!(!inara_snapshot_due(&paused, &consent));
+        assert!(!inara_snapshot_due(&consent, &rekeyed));
+        assert!(inara_snapshot_due(&revoked, &rekeyed));
     }
 
     #[test]

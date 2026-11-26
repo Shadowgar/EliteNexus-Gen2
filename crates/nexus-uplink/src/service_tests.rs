@@ -201,14 +201,19 @@ fn eddn_repeated_403_stops_until_settings_change() {
 }
 
 #[test]
-fn queue_survives_a_restart() {
+fn prior_run_queue_requires_new_source_authority() {
     let offline = RecordingTransport::new(|_| Err(TransportError("offline".into())));
     let mut h = Harness::new(eddn_cfg(), offline);
     h.session();
     assert!(h.wait_for(|r| !r.is_empty()));
     assert_eq!(h.uplink().status().eddn.queued, 1);
     h.restart(eddn_cfg(), RecordingTransport::simulated());
-    assert!(h.wait_for(|r| eddn_bodies(r).len() == 1), "the queued message is sent after the restart");
+    h.uplink().flush();
+    h.settle();
+    assert!(h.transport.requests().is_empty(), "an unbound prior-run queue has no current source authority");
+    assert_eq!(h.uplink().status().eddn.queued, 0);
+    h.session();
+    assert!(h.wait_for(|r| eddn_bodies(r).len() == 1), "fresh authorized input still sends");
     assert!(h.wait_for(|_| h.uplink().status().eddn.queued == 0));
 }
 
@@ -220,6 +225,23 @@ fn disabling_a_service_discards_its_queue() {
     assert!(h.wait_for(|_| h.uplink().status().eddn.queued == 1));
     h.uplink().set_config(UplinkConfig::default());
     assert_eq!(h.uplink().status().eddn.queued, 0);
+}
+
+#[test]
+fn source_retirement_clears_retries_and_rejects_late_observations() {
+    let offline = RecordingTransport::new(|_| Err(TransportError("offline".into())));
+    let mut h = Harness::new(eddn_cfg(), offline);
+    h.session();
+    assert!(h.wait_for(|r| !r.is_empty()));
+    assert_eq!(h.uplink().status().eddn.queued, 1);
+    let at = std::time::Instant::now();
+    let old = live_event(&FSDJUMP.replace("Synuefe BR-L c24-23", "Retired fixture"), Timestamp::now());
+    h.uplink().source_changed();
+    h.uplink().on_event_at(&old, h.tracker.context(), at);
+    h.uplink().flush();
+    h.settle();
+    assert_eq!(h.uplink().status().eddn.queued, 0);
+    assert!(!eddn_bodies(&h.transport.requests()).iter().any(|b| b["message"]["StarSystem"] == "Retired fixture"));
 }
 
 fn edsm_cfg() -> UplinkConfig {
@@ -301,6 +323,29 @@ fn edsm_bad_credentials_stop_until_settings_change() {
 
 fn inara_cfg() -> UplinkConfig {
     UplinkConfig { inara: Some(InaraCredentials { api_key: "inara-secret".into() }), inara_profile_consent: true, ..UplinkConfig::default() }
+}
+
+#[test]
+fn inara_key_replacement_cannot_reuse_the_retired_batch() {
+    let offline = RecordingTransport::new(|_| Err(TransportError("offline".into())));
+    let mut h = Harness::new(inara_cfg(), offline);
+    h.session();
+    h.uplink().flush();
+    assert!(h.wait_for(|r| r.iter().any(|q| q.url == inara::API_URL)));
+    assert!(h.uplink().status().inara.queued > 0);
+    let replacement = UplinkConfig { inara: Some(InaraCredentials { api_key: "fixture-replacement".into() }), ..inara_cfg() };
+    h.uplink().set_config(replacement);
+    assert_eq!(h.uplink().status().inara.queued, 0);
+    let body = |r: &HttpRequest| serde_json::from_str::<Value>(&r.body_text()).unwrap();
+    assert!(h.wait_for(|r| r.iter().any(|q| q.url == inara::API_URL && body(q)["header"]["APIkey"] == "fixture-replacement")));
+    for request in h.transport.requests_to(inara::API_URL) {
+        let body = body(&request);
+        if body["header"]["APIkey"] == "fixture-replacement" {
+            let events = body["events"].as_array().unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0]["eventName"], "getCommanderProfile");
+        }
+    }
 }
 
 #[test]
@@ -499,7 +544,7 @@ impl Harness {
         let now = Timestamp::now();
         self.send_at(r#""event":"Market", "MarketID":3704011520, "StationName":"B4Z-LQY", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Synuefe BR-L c24-23""#, now);
         let file = format!(
-            r#"{{ "timestamp":"{}", "event":"Market", "MarketID":3704011520, "StationName":"B4Z-LQY", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Synuefe BR-L c24-23", "Items":[ {{ "id":128668547, "Name":"$unknownartifact_name;", "Name_Localised":"Thargoid Sensor", "Category":"$MARKET_category_salvage;", "Category_Localised":"Salvage", "BuyPrice":0, "SellPrice":30418000, "MeanPrice":0, "StockBracket":0, "DemandBracket":2, "Stock":0, "Demand":15, "Consumer":true, "Producer":false, "Rare":false }} ] }}"#,
+            r#"{{ "timestamp":"{}", "event":"Market", "MarketID":3704011520, "StationName":"B4Z-LQY", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Synuefe BR-L c24-23", "Items":[ {{ "id":128668547, "Name":"$unknownartifact_name;", "Name_Localised":"Thargoid Sensor", "Category":"$MARKET_category_salvage;", "Category_Localised":"Salvage", "BuyPrice":0, "SellPrice":30418000, "MeanPrice":0, "StockBracket":"", "DemandBracket":2, "Stock":0, "Demand":15, "Consumer":true, "Producer":false, "Rare":false }} ] }}"#,
             now.to_iso()
         );
         self.companion(CompanionKind::Market, &file);
@@ -525,6 +570,9 @@ fn eddn_market_data_waits_until_undocking() {
     assert_eq!(commodity_count(&h.transport.requests()), 0, "prices are held while docked");
     h.send(UNDOCKED_CARRIER);
     assert!(h.wait_for(|r| commodity_count(r) == 1), "and sent after undocking");
+    let market = eddn_bodies(&h.transport.requests()).into_iter().find(|b| b["$schemaRef"].as_str().is_some_and(|s| s.contains("/commodity/"))).unwrap();
+    assert_eq!(market["message"]["commodities"][0]["stockBracket"], "");
+    assert_eq!(market["message"]["commodities"][0]["stock"], 0);
 }
 
 #[test]
@@ -571,6 +619,29 @@ fn eddn_pause_while_docked_keeps_the_market_private() {
     h.uplink().set_config(paused(false));
     h.send(FSDJUMP);
     assert!(h.wait_for(|r| eddn_bodies(r).len() > before), "sending resumes");
+}
+
+#[test]
+fn rapid_pause_and_resume_retires_buffered_announcements() {
+    let mut h = Harness::new(eddn_cfg(), RecordingTransport::simulated());
+    h.session();
+    h.send(DOCKED_CARRIER);
+    h.open_carrier_market();
+    assert!(h.wait_for(|r| eddn_bodies(r).iter().any(|b| b["message"]["event"] == "Docked")));
+    h.uplink().set_config(paused(true));
+    let at = std::time::Instant::now();
+    let event = live_event(&FSDJUMP.replace("Synuefe BR-L c24-23", "Paused fixture"), Timestamp::now());
+    h.uplink().set_config(paused(false));
+    h.uplink().on_event_at(&event, h.tracker.context(), at);
+    h.send(UNDOCKED_CARRIER);
+    h.uplink().flush();
+    h.settle();
+    let requests = h.transport.requests();
+    assert_eq!(commodity_count(&requests), 0);
+    assert!(!eddn_bodies(&requests).iter().any(|b| b["message"]["StarSystem"] == "Paused fixture"));
+    let before = eddn_bodies(&requests).len();
+    h.send(FSDJUMP);
+    assert!(h.wait_for(|r| eddn_bodies(r).len() > before));
 }
 
 // ---- EDSM, Inara and EDAstro pause ----------------------------------------------------------

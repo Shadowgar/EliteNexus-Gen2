@@ -60,6 +60,8 @@ GPU recovery keeps the original arguments and working directory and pins the res
 
 The galaxy writer distinguishes queued messages, committed transactions, partial row failures and failed checkpoints. Additive schema preparation and one-off repairs commit in a single transaction. A newer schema fails before schema writes. Managed desktop edits snapshot the chosen location and existing contents, stage the replacement, and check the snapshot at commit. The rollback path restores a previously changed file only while it still matches the completed edit.
 
+The upload processor and transport check the same authority generation. Core source and commander handoffs retire mapped observations, pending announcements and retry queues before forwarding the new scope. Consent and credential changes also retire affected queues. Queue files can record current-run retries. A new process cannot attest the previous process's journal generation and starts an empty queue. The application keeps outbound transport unavailable pending separate authorization.
+
 ## Runtime
 
 ```
