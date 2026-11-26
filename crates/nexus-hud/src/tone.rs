@@ -97,6 +97,10 @@ pub const PRESETS: &[TonePreset] = &[
 
 /// The tone-mapping values an override file sets.
 pub fn read(text: &str) -> Result<Tone, HudError> {
+    read_with_defaults(text, &GAME_4_4)
+}
+
+pub fn read_with_defaults(text: &str, defaults: &Defaults) -> Result<Tone, HudError> {
     let num = |name: &'static str| -> Result<Option<f32>, HudError> {
         match read_value(text, &[NODE, name])? {
             None => Ok(None),
@@ -111,22 +115,37 @@ pub fn read(text: &str) -> Result<Tone, HudError> {
     // The curve only means something as a whole: a partial set mixes with the game's values.
     let aces = match (c, d, e) {
         (None, None, None) => None,
-        (c, d, e) => Some([c.unwrap_or(GAME_4_4.aces[0]), d.unwrap_or(GAME_4_4.aces[1]), e.unwrap_or(GAME_4_4.aces[2])]),
+        (c, d, e) => Some([c.unwrap_or(defaults.aces[0]), d.unwrap_or(defaults.aces[1]), e.unwrap_or(defaults.aces[2])]),
     };
     Ok(Tone { glare: num(GLARE)?, percentiles, aces })
 }
 
 /// `text` with these tone-mapping values written (and the ones left `None` removed).
 pub fn write(text: Option<&str>, tone: &Tone) -> Result<String, HudError> {
+    write_fields(text, None, tone)
+}
+
+/// Edits only choices that changed. A partial ACES override keeps inheriting the missing coefficients.
+pub fn write_changed(text: Option<&str>, previous: &Tone, next: &Tone) -> Result<String, HudError> {
+    write_fields(text, Some(previous), next)
+}
+
+fn write_fields(text: Option<&str>, previous: Option<&Tone>, tone: &Tone) -> Result<String, HudError> {
     let mut out = text.unwrap_or("").to_string();
     let mut set = |name: &str, value: Option<String>| -> Result<(), HudError> {
         out = with_value(Some(&out), &[NODE, name], value.as_deref())?;
         Ok(())
     };
-    set(GLARE, tone.glare.map(|g| number(g, 4)))?;
-    set(PERCENTILES, tone.percentiles.map(|p| p.iter().map(|v| number(*v, 3)).collect::<Vec<_>>().join(",")))?;
-    for (i, name) in ACES.iter().enumerate() {
-        set(name, tone.aces.map(|a| number(a[i], 4)))?;
+    if previous.is_none_or(|p| p.glare != tone.glare) {
+        set(GLARE, tone.glare.map(|g| number(g, 4)))?;
+    }
+    if previous.is_none_or(|p| p.percentiles != tone.percentiles) {
+        set(PERCENTILES, tone.percentiles.map(|p| p.iter().map(|v| number(*v, 3)).collect::<Vec<_>>().join(",")))?;
+    }
+    if previous.is_none_or(|p| p.aces != tone.aces) {
+        for (i, name) in ACES.iter().enumerate() {
+            set(name, tone.aces.map(|a| number(a[i], 4)))?;
+        }
     }
     // Nothing set and no file before: stay without one.
     if text.is_none() && out.is_empty() {
@@ -158,6 +177,19 @@ pub fn curve_ratios(cde: [f32; 3], against: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changing_glare_preserves_partially_inherited_aces() {
+        let base = Defaults { aces: [2.2, 0.5, 0.33], ..GAME_4_4 };
+        let text = "<GraphicsConfig><HDRNode_Reference><ACES_C>2.43</ACES_C></HDRNode_Reference></GraphicsConfig>";
+        let previous = read_with_defaults(text, &base).unwrap();
+        assert_eq!(previous.aces, Some([2.43, 0.5, 0.33]));
+        let output = write_changed(Some(text), &previous, &Tone { glare: Some(1.0), ..previous }).unwrap();
+        assert!(output.contains("<ACES_C>2.43</ACES_C>"));
+        assert!(!output.contains("ACES_D") && !output.contains("ACES_E"));
+        let later = Defaults { aces: [2.2, 0.555, 0.36], ..base };
+        assert_eq!(read_with_defaults(&output, &later).unwrap().effective(&later).aces, [2.43, 0.555, 0.36]);
+    }
 
     #[test]
     fn round_trips_through_the_override_file() {

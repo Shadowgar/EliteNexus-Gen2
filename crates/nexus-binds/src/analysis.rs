@@ -956,6 +956,10 @@ mod tests {
             [(Scope::Ship, vec!["YawAxisRaw".into(), "RollAxisRaw".into()])]
         );
         assert_eq!(r.conflicts[0].actions[0].slot, Slot::Axis);
+        let yaw = b.action("YawAxisRaw").unwrap();
+        assert!(yaw.inputs().any(|(slot, _)| r.is_conflicted(&yaw.action, slot)));
+        assert!(!r.is_conflicted(&yaw.action, Slot::Primary));
+        assert!(!r.is_conflicted(&yaw.action, Slot::Secondary));
         assert_eq!(r.devices[0].conflicts, 1);
     }
 

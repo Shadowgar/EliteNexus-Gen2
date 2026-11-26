@@ -6,6 +6,7 @@ The versioned entries through 0.8.2 preserve the original EliteNexus release not
 ## Unreleased
 
 - **Market database:** Report failed writes and incomplete import checkpoints. Compatible older databases upgrade in place. Newer or unreadable databases are preserved for recovery.
+- **HUD and cockpit:** Verify the selected installation and file contents before saving or installing. Preserve inherited tone settings and unmanaged files. The controls list shows axis conflicts when filtered to conflicts.
 
 - GPU recovery preserves original launch options and the resolved Gen2 profile. Isolated runs keep speech, network services, MCP and game-file access disabled across restart.
 - Gen2 uses its own executable, data directory and MCP identity. Existing Elite Nexus profiles stay separate.

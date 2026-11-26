@@ -242,7 +242,7 @@ pub fn show(ui: &mut Ui, st: &mut BindsUi, data_dir: &std::path::Path, game_dir:
         .map(|a| (a, a.info()))
         .filter(|(_, i)| !i.legacy)
         .filter(|(_, i)| st.context.is_none_or(|c| i.context == c))
-        .filter(|(a, _)| !st.only_problems || r.is_conflicted(&a.action, Slot::Primary) || r.is_conflicted(&a.action, Slot::Secondary))
+        .filter(|(a, _)| !st.only_problems || a.inputs().any(|(slot, _)| r.is_conflicted(&a.action, slot)))
         .filter(|(a, i)| {
             f.is_empty()
                 || i.name.to_ascii_lowercase().contains(&f)
@@ -288,7 +288,8 @@ pub fn show(ui: &mut Ui, st: &mut BindsUi, data_dir: &std::path::Path, game_dir:
                 }
                 row.col(|ui| {
                     if let Some(ax) = &a.axis {
-                        ui.label(RichText::new(format!("{}{}", ax.input.display(), if ax.inverted { " (inverted)" } else { "" })).color(pal::CYAN));
+                        let bad = r.is_conflicted(&a.action, Slot::Axis);
+                        ui.label(RichText::new(format!("{}{}", ax.input.display(), if ax.inverted { " (inverted)" } else { "" })).color(if bad { pal::BAD } else { pal::CYAN }));
                     }
                 });
             });

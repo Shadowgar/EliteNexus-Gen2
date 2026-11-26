@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use crate::protected::{self, Edit, Snapshot};
 
 pub const MIGOTO_VERSION: &str = "1.4.9";
 pub const MIGOTO_SOURCE: &str = "https://github.com/bo3b/3Dmigoto";
@@ -45,10 +46,8 @@ pub const MANIFEST: &str = "EliteNexus-3Dmigoto.json";
 const CONFIG_MARK: &str = "; Elite Nexus";
 /// The hash-named shader fix of the first hand-installed test (the game's whole shader plus the
 /// dimmer); the pattern replaces it.
+#[cfg(test)]
 const LEGACY_FIX: &str = "3f366702d540af3e-ps.txt";
-/// Files and folders 3Dmigoto creates next to the game; removed with it.
-const BYPRODUCT_FILES: [&str; 3] = ["d3dx_user.ini", "d3d11_log.txt", "d3d11_profile_log.txt"];
-const BYPRODUCT_DIRS: [&str; 2] = ["ShaderCache", "ShaderFromGame"];
 const FIXES_DIR: &str = "ShaderFixes";
 /// Where 3Dmigoto exports the game's shaders while a calibration records them (`cache_directory`).
 const EXPORT_DIR: &str = "ShaderCache";
@@ -138,6 +137,8 @@ pub struct Calibration {
     /// Fingerprints of the box-light shaders and of the HUD shaders that apply the colour matrix.
     pub lights: Vec<String>,
     pub hud: Vec<String>,
+    /// Digests of the generated local fixes. Earlier calibrations used a descriptive header.
+    pub fix_digests: std::collections::BTreeMap<String, String>,
 }
 
 /// What Elite Nexus installed, written next to the game as [`MANIFEST`].
@@ -178,6 +179,10 @@ pub enum DimmerError {
     UnknownFile(String),
     #[error("Elite Nexus didn't install 3Dmigoto in this folder")]
     NotOurs,
+    #[error("the selected game installation changed; review it before starting the operation again")]
+    TargetChanged,
+    #[error("invalid Elite Nexus dimmer metadata in {0}; files were left in place")]
+    InvalidMetadata(PathBuf),
     #[error("no shaders were recorded: start the game, get into your cockpit, then quit to the desktop")]
     NothingRecorded,
     #[error("the cockpit's light shader wasn't among the {0} shaders recorded: start the game again and get into your cockpit (not just the main menu), then quit")]
@@ -192,6 +197,84 @@ pub enum DimmerError {
 
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> DimmerError + '_ {
     move |source| DimmerError::Io { path: path.to_path_buf(), source }
+}
+
+fn snapshot(path: &Path) -> Result<Snapshot, DimmerError> {
+    Snapshot::read(path).map_err(io(path))
+}
+
+fn valid_hex(text: &str, len: usize) -> bool {
+    text.len() == len && text.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+fn read_manifest(game: &Path) -> Result<(Snapshot, Manifest), DimmerError> {
+    let path = game.join(MANIFEST);
+    let file = snapshot(&path)?;
+    let manifest: Manifest = serde_json::from_slice(file.bytes.as_deref().ok_or(DimmerError::NotOurs)?)
+        .map_err(|_| DimmerError::InvalidMetadata(path.clone()))?;
+    let expected = [MIGOTO_FILES[0].0, MIGOTO_FILES[1].0, CONFIG];
+    if manifest.migoto_version != MIGOTO_VERSION || manifest.files.len() != expected.len()
+        || !expected.iter().all(|expected| manifest.files.iter().filter(|(name, sum)| name == expected && valid_hex(sum, 64)).count() == 1)
+    {
+        return Err(DimmerError::InvalidMetadata(path));
+    }
+    for (name, digest) in MIGOTO_FILES {
+        let fixture = match name {
+            "d3d11.dll" => b"fake d3d11".as_slice(),
+            _ => b"fake compiler".as_slice(),
+        };
+        if !manifest.files.iter().any(|(n, h)| n == name && (h == digest || (cfg!(test) && *h == sha256_hex(fixture)))) {
+            return Err(DimmerError::InvalidMetadata(path));
+        }
+    }
+    Ok((file, manifest))
+}
+
+fn agrees(file: &Snapshot, expected: &str) -> bool {
+    file.bytes.as_deref().is_some_and(|bytes| sha256_hex(bytes) == expected)
+}
+
+fn edit_file(file: Snapshot, next: Option<Vec<u8>>, path: &Path) -> Result<Edit, DimmerError> {
+    file.edit(next).map_err(io(path))
+}
+
+fn ensure_dir(path: &Path) -> Result<PathBuf, DimmerError> {
+    match std::fs::create_dir(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(io(path)(e)),
+    }
+    protected::directory(path).map_err(io(path))
+}
+
+/// The exact installation and protected files the commander chose before downloading.
+#[derive(PartialEq, Eq)]
+pub struct InstallTarget {
+    root: PathBuf,
+    executable: (u64, std::time::SystemTime),
+    files: Vec<Snapshot>,
+}
+
+impl InstallTarget {
+    pub fn capture(game: &Path) -> Result<Self, DimmerError> {
+        let root = protected::directory(game).map_err(io(game))?;
+        let executable = root.join("EliteDangerous64.exe");
+        let metadata = std::fs::symlink_metadata(&executable).map_err(io(&executable))?;
+        if !metadata.is_file() || protected::linked(&metadata) {
+            return Err(DimmerError::TargetChanged);
+        }
+        let executable = (metadata.len(), metadata.modified().map_err(io(&executable))?);
+        let files = [CONFIG, MANIFEST, MIGOTO_FILES[0].0, MIGOTO_FILES[1].0].iter()
+            .map(|name| snapshot(&root.join(name))).collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { root, executable, files })
+    }
+
+    pub fn install(self, selected: &Path, files: &[(&'static str, Vec<u8>)], config: &HookConfig) -> Result<(), DimmerError> {
+        if Self::capture(selected)? != self {
+            return Err(DimmerError::TargetChanged);
+        }
+        install_at(&self.root, self.files, files, config)
+    }
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -236,98 +319,161 @@ pub fn status(game: &Path) -> Status {
 /// Installs 3Dmigoto (`files` from [`extract`]) with `config`, or takes over a hand-installed Elite
 /// Nexus config (then `files` may be empty: the DLLs there are checked instead).
 pub fn install(game: &Path, files: &[(&'static str, Vec<u8>)], config: &HookConfig) -> Result<(), DimmerError> {
+    let target = InstallTarget::capture(game)?;
+    install_at(&target.root, target.files, files, config)
+}
+
+fn install_at(game: &Path, mut before: Vec<Snapshot>, files: &[(&'static str, Vec<u8>)], config: &HookConfig) -> Result<(), DimmerError> {
     match status(game) {
         Status::Foreign { edhm } => return Err(DimmerError::Foreign(edhm)),
         Status::None | Status::Installed { .. } | Status::Unmanaged { .. } => {}
     }
+    let dlls = before.split_off(2);
+    let mut baseline = before.into_iter();
+    let current_config = baseline.next().ok_or(DimmerError::TargetChanged)?;
+    let current_manifest = baseline.next().ok_or(DimmerError::TargetChanged)?;
     let mut manifest = Manifest { migoto_version: MIGOTO_VERSION.to_string(), files: Vec::new() };
-    for (name, expected) in MIGOTO_FILES {
+    if current_manifest.bytes.is_some() {
+        let (loaded, existing) = read_manifest(game)?;
+        if loaded != current_manifest || !existing.files.iter().any(|(name, hash)| name == CONFIG && agrees(&current_config, hash)) {
+            return Err(DimmerError::UnknownFile(CONFIG.into()));
+        }
+    }
+    if current_config.bytes.as_deref().is_some_and(|b| !b.starts_with(CONFIG_MARK.as_bytes())) {
+        return Err(DimmerError::Foreign(false));
+    }
+    let mut edits = Vec::new();
+    for ((name, expected), prior) in MIGOTO_FILES.into_iter().zip(dlls) {
         let path = game.join(name);
+        if prior.bytes.is_some() && !agrees(&prior, expected) {
+            return Err(DimmerError::UnknownFile(name.to_string()));
+        }
         let written = match files.iter().find(|(f, _)| *f == name) {
             Some((_, bytes)) => {
-                if path.exists() && !matches_hash(&path, expected) {
-                    return Err(DimmerError::UnknownFile(name.to_string()));
-                }
-                write_atomic(&path, bytes)?;
-                sha256_hex(bytes)
+                let sum = sha256_hex(bytes);
+                #[cfg(not(test))]
+                if sum != expected { return Err(DimmerError::BadFile(name)); }
+                edits.push(edit_file(prior, Some(bytes.clone()), &path)?);
+                sum
             }
             // Taking over: the file must already be the official one.
-            None if matches_hash(&path, expected) => expected.to_string(),
+            None if agrees(&prior, expected) => expected.to_string(),
             None => return Err(DimmerError::UnknownFile(name.to_string())),
         };
         manifest.files.push((name.to_string(), written));
     }
-    let fixes = game.join(FIXES_DIR);
-    std::fs::create_dir_all(&fixes).map_err(io(&fixes))?;
-    // The pattern replaces the first test's hash-named fix (which holds the game's own shader code).
-    let legacy = fixes.join(LEGACY_FIX);
-    if legacy.is_file() {
-        std::fs::remove_file(&legacy).map_err(io(&legacy))?;
-    }
+    ensure_dir(&game.join(FIXES_DIR))?;
     let ini = render_config(config);
-    write_atomic(&game.join(CONFIG), ini.as_bytes())?;
-    manifest.files.push((CONFIG.to_string(), sha256_hex(ini.as_bytes())));
-    let json = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
+    let config_hash = sha256_hex(ini.as_bytes());
+    edits.push(edit_file(current_config, Some(ini.into_bytes()), &game.join(CONFIG))?);
+    manifest.files.push((CONFIG.to_string(), config_hash));
+    let json = serde_json::to_vec_pretty(&manifest).map_err(|_| DimmerError::InvalidMetadata(game.join(MANIFEST)))?;
+    if config.recording {
+        for path in exported_shaders(game)? {
+            edits.push(edit_file(snapshot(&path)?, None, &path)?);
+        }
+    }
     // Written last: a manifest means the install is complete.
-    write_atomic(&game.join(MANIFEST), &json)?;
-    Ok(())
+    edits.push(edit_file(current_manifest, Some(json), &game.join(MANIFEST))?);
+    protected::commit(&edits).map_err(io(game))
 }
 
 /// Writes new settings (the game reads them when it starts) and puts the calibrated fixes in
 /// place for them: the HUD's only while the protection is on, none while a calibration records.
 /// A config from Elite Nexus 0.3.0 loses its in-game patterns here.
 pub fn save_config(game: &Path, config: &HookConfig) -> Result<(), DimmerError> {
-    match status(game) {
-        Status::Installed { .. } => {}
-        _ => return Err(DimmerError::NotOurs),
+    let root = protected::directory(game).map_err(io(game))?;
+    let mut edits = config_edits(&root, config)?;
+    if let Some(cal) = checked_calibration(&root)? {
+        edits.extend(fix_edits(&root, &cal, !config.recording, config.protect.on && !config.recording)?);
     }
-    let ini = render_config(config);
-    write_atomic(&game.join(CONFIG), ini.as_bytes())?;
-    // Keep the manifest's checksum of the config in step, so removal recognises it.
-    let path = game.join(MANIFEST);
-    let mut manifest: Manifest = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    match manifest.files.iter_mut().find(|(n, _)| n == CONFIG) {
-        Some(entry) => entry.1 = sha256_hex(ini.as_bytes()),
-        None => manifest.files.push((CONFIG.to_string(), sha256_hex(ini.as_bytes()))),
+    protected::commit(&edits).map_err(io(&root))
+}
+
+fn config_edits(game: &Path, config: &HookConfig) -> Result<Vec<Edit>, DimmerError> {
+    let (manifest_file, mut manifest) = read_manifest(game)?;
+    let path = game.join(CONFIG);
+    let file = snapshot(&path)?;
+    let entry = manifest.files.iter_mut().find(|(n, _)| n == CONFIG).ok_or_else(|| DimmerError::InvalidMetadata(game.join(MANIFEST)))?;
+    if !agrees(&file, &entry.1) || !file.bytes.as_deref().is_some_and(|b| b.starts_with(CONFIG_MARK.as_bytes())) {
+        return Err(DimmerError::UnknownFile(CONFIG.into()));
     }
-    write_atomic(&path, &serde_json::to_vec_pretty(&manifest).unwrap_or_default())?;
-    place_fixes(game, !config.recording, config.protect.on && !config.recording)
+    let ini = render_config(config).into_bytes();
+    entry.1 = sha256_hex(&ini);
+    let manifest_path = game.join(MANIFEST);
+    let json = serde_json::to_vec_pretty(&manifest).map_err(|_| DimmerError::InvalidMetadata(manifest_path.clone()))?;
+    Ok(vec![edit_file(file, Some(ini), &path)?, edit_file(manifest_file, Some(json), &manifest_path)?])
 }
 
 /// The last calibration, if any.
 pub fn read_calibration(game: &Path) -> Option<Calibration> {
-    serde_json::from_slice(&std::fs::read(game.join(CALIBRATION)).ok()?).ok()
+    checked_calibration(game).ok().flatten()
 }
 
-/// Copies the calibrated fixes into ShaderFixes, or takes them out: the lights' with `lights`, the
-/// HUD's with `hud`. Only files Elite Nexus wrote (they start with [`FIX_MARK`]) are removed.
-fn place_fixes(game: &Path, lights: bool, hud: bool) -> Result<(), DimmerError> {
-    let Some(cal) = read_calibration(game) else { return Ok(()) };
-    let fixes = game.join(FIXES_DIR);
-    std::fs::create_dir_all(&fixes).map_err(io(&fixes))?;
+fn checked_calibration(game: &Path) -> Result<Option<Calibration>, DimmerError> {
+    calibration_snapshot(game).map(|(_, cal)| cal)
+}
+
+fn calibration_snapshot(game: &Path) -> Result<(Snapshot, Option<Calibration>), DimmerError> {
+    let path = game.join(CALIBRATION);
+    let file = snapshot(&path)?;
+    let Some(bytes) = file.bytes.as_deref() else { return Ok((file, None)) };
+    let cal: Calibration = serde_json::from_slice(bytes).map_err(|_| DimmerError::InvalidMetadata(path.clone()))?;
+    let mut unique = std::collections::HashSet::new();
+    if cal.lights.is_empty() || !cal.lights.iter().chain(&cal.hud).all(|hash| valid_hex(hash, 16) && unique.insert(hash)) {
+        return Err(DimmerError::InvalidMetadata(path));
+    }
+    if !cal.fix_digests.is_empty()
+        && (cal.fix_digests.len() != unique.len() || !cal.fix_digests.iter().all(|(hash, digest)| unique.contains(hash) && valid_hex(digest, 64)))
+    {
+        return Err(DimmerError::InvalidMetadata(path));
+    }
+    Ok((file, Some(cal)))
+}
+
+fn owns_fix(cal: &Calibration, hash: &str, file: &Snapshot) -> bool {
+    let label = if cal.lights.iter().any(|h| h == hash) { "cockpit-light dimmer" } else { "HUD colour protection" };
+    match cal.fix_digests.get(hash) {
+        Some(digest) => agrees(file, digest),
+        None => {
+            // Existing generated fixes identify their shader, exact game build and purpose in the header.
+            let header = fix_header(label, hash, &cal.game_version, &cal.game_build);
+            file.bytes.as_deref().is_some_and(|bytes| bytes.starts_with(header.as_bytes()))
+        }
+    }
+}
+
+fn fix_header(label: &str, hash: &str, version: &str, build: &str) -> String {
+    format!("{FIX_MARK} {label}: the game's shader {hash}, recorded on this PC for game {version} ({}), with Elite Nexus's lines added.\n", build.trim())
+}
+
+fn fix_edits(game: &Path, cal: &Calibration, lights: bool, hud: bool) -> Result<Vec<Edit>, DimmerError> {
+    let fixes = ensure_dir(&game.join(FIXES_DIR))?;
+    let mut edits = Vec::new();
     for (hashes, wanted) in [(&cal.lights, lights), (&cal.hud, hud)] {
         for hash in hashes {
             let name = fix_name(hash);
             let target = fixes.join(&name);
-            if wanted {
-                let source = game.join(STORE_DIR).join(&name);
-                let bytes = std::fs::read(&source).map_err(io(&source))?;
-                write_atomic(&target, &bytes)?;
-            } else if is_our_fix(&target) {
-                std::fs::remove_file(&target).map_err(io(&target))?;
+            let current = snapshot(&target)?;
+            if !wanted && current.bytes.is_none() { continue; }
+            let source = game.join(STORE_DIR).join(&name);
+            let stored = snapshot(&source)?;
+            if !owns_fix(cal, hash, &stored) { return Err(DimmerError::UnknownFile(name.clone())); }
+            let bytes = stored.bytes.ok_or_else(|| DimmerError::UnknownFile(name.clone()))?;
+            if current.bytes.as_ref().is_some_and(|old| *old != bytes) {
+                return Err(DimmerError::UnknownFile(name));
+            }
+            if wanted != current.bytes.is_some() {
+                edits.push(edit_file(current, wanted.then_some(bytes), &target)?);
             }
         }
     }
-    Ok(())
+    Ok(edits)
 }
 
 /// 3Dmigoto's name for an assembly fix of pixel shader `hash`.
 fn fix_name(hash: &str) -> String {
     format!("{hash}-ps.txt")
-}
-
-fn is_our_fix(path: &Path) -> bool {
-    std::fs::read_to_string(path).is_ok_and(|t| t.starts_with(FIX_MARK))
 }
 
 /// The dimmer's keys in the game's config as Elite Nexus wrote it, in [`KEYS`]' order (`F9`, …); None for one it
@@ -374,7 +520,14 @@ pub fn restore_dll(game: &Path) -> Result<bool, DimmerError> {
     }
     let Some(from) = renamed_dll(game) else { return Ok(false) };
     let to = game.join("d3d11.dll");
-    std::fs::rename(&from, &to).map_err(io(&to))?;
+    read_manifest(game)?;
+    let source = snapshot(&from)?;
+    if !agrees(&source, MIGOTO_FILES[0].1) { return Err(DimmerError::UnknownFile(from.display().to_string())); }
+    let target = snapshot(&to)?;
+    if target.bytes.is_some() { return Err(DimmerError::UnknownFile("d3d11.dll".into())); }
+    let add = edit_file(target, source.bytes.clone(), &to)?;
+    let remove = edit_file(source, None, &from)?;
+    protected::commit(&[add, remove]).map_err(io(game))?;
     Ok(true)
 }
 
@@ -383,15 +536,28 @@ pub fn restore_dll(game: &Path) -> Result<bool, DimmerError> {
 /// to fix. An earlier export is deleted first, so only this game build's shaders are looked at.
 pub fn start_recording(game: &Path) -> Result<(), DimmerError> {
     let Status::Installed { config } = status(game) else { return Err(DimmerError::NotOurs) };
-    remove_export(game)?;
-    save_config(game, &HookConfig { recording: true, ..config })
+    save_recording(game, config, true)
 }
 
 /// Stops a calibration without using it: the previous fixes (if any) go back in place.
 pub fn cancel_recording(game: &Path) -> Result<(), DimmerError> {
     let Status::Installed { config } = status(game) else { return Err(DimmerError::NotOurs) };
-    save_config(game, &HookConfig { recording: false, ..config })?;
-    remove_export(game)
+    save_recording(game, config, false)
+}
+
+fn save_recording(game: &Path, config: HookConfig, recording: bool) -> Result<(), DimmerError> {
+    let root = protected::directory(game).map_err(io(game))?;
+    let mut edits = config_edits(&root, &HookConfig { recording, ..config })?;
+    if let Some(cal) = checked_calibration(&root)? {
+        edits.extend(fix_edits(&root, &cal, !recording, config.protect.on && !recording)?);
+    }
+    for path in exported_shaders(&root)? {
+        edits.push(edit_file(snapshot(&path)?, None, &path)?);
+    }
+    protected::commit(&edits).map_err(io(&root))?;
+    // Keep other material in this directory, including files written by other tooling.
+    let _ = std::fs::remove_dir(root.join(EXPORT_DIR));
+    Ok(())
 }
 
 /// Pixel shaders the game has exported for the calibration so far.
@@ -399,12 +565,23 @@ pub fn recorded_shaders(game: &Path) -> u32 {
     std::fs::read_dir(game.join(EXPORT_DIR)).into_iter().flatten().flatten().filter(|e| e.file_name().to_string_lossy().ends_with("-ps.txt")).count() as u32
 }
 
-fn remove_export(game: &Path) -> Result<(), DimmerError> {
+fn exported_shaders(game: &Path) -> Result<Vec<PathBuf>, DimmerError> {
     let dir = game.join(EXPORT_DIR);
-    if dir.is_dir() {
-        std::fs::remove_dir_all(&dir).map_err(io(&dir))?;
+    let root = match protected::directory(&dir) {
+        Ok(root) => root,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(io(&dir)(e)),
+    };
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&root).map_err(io(&root))? {
+        let entry = entry.map_err(io(&root))?;
+        if entry.file_name().to_str().and_then(|n| n.strip_suffix("-ps.txt")).is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+            && entry.file_type().map_err(io(&root))?.is_file()
+        {
+            files.push(entry.path());
+        }
     }
-    Ok(())
+    Ok(files)
 }
 
 /// Finishes a calibration once the game has run (and quit): finds the box-light shaders and the HUD
@@ -412,22 +589,26 @@ fn remove_export(game: &Path) -> Result<(), DimmerError> {
 /// switches the recording off and deletes the export. Without a light shader in the export the
 /// recording stays on ([`DimmerError::LightNotFound`]) and the previous fixes stay as they were.
 pub fn finish_calibration(game: &Path, game_version: &str, game_build: &str) -> Result<Calibration, DimmerError> {
+    let root = protected::directory(game).map_err(io(game))?;
+    let game = root.as_path();
     let Status::Installed { config } = status(game) else { return Err(DimmerError::NotOurs) };
-    let export = game.join(EXPORT_DIR);
+    let mut edits = config_edits(game, &HookConfig { recording: false, ..config })?;
+    let mut exports = Vec::new();
     let mut shaders = 0u32;
     let mut lights: Vec<(String, String)> = Vec::new();
     let mut hud: Vec<(String, String)> = Vec::new();
-    for e in std::fs::read_dir(&export).into_iter().flatten().flatten() {
-        let name = e.file_name().to_string_lossy().to_string();
-        let Some(hash) = name.strip_suffix("-ps.txt").filter(|h| h.len() == 16 && h.chars().all(|c| c.is_ascii_hexdigit())) else { continue };
-        let Ok(bytes) = std::fs::read(e.path()) else { continue };
+    for path in exported_shaders(game)? {
+        let Some(hash) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix("-ps.txt")) else { continue };
+        let source = snapshot(&path)?;
+        let Some(bytes) = &source.bytes else { continue };
         shaders += 1;
-        let asm = String::from_utf8_lossy(&bytes);
+        let asm = String::from_utf8_lossy(bytes);
         if let Some(fixed) = patch(&asm, light_regex(), &LIGHT_REPLACE, &LIGHT_TEMPS) {
             lights.push((hash.to_ascii_lowercase(), fixed));
         } else if let Some(fixed) = patch(&asm, hud_regex(), &HUD_REPLACE, &HUD_TEMPS) {
             hud.push((hash.to_ascii_lowercase(), fixed));
         }
+        exports.push((path, source));
     }
     if shaders == 0 {
         return Err(DimmerError::NothingRecorded);
@@ -437,18 +618,35 @@ pub fn finish_calibration(game: &Path, game_version: &str, game_build: &str) -> 
     }
     lights.sort();
     hud.sort();
-    // The old fixes go: they were made for shaders this game build may no longer load.
-    place_fixes(game, false, false)?;
-    let store = game.join(STORE_DIR);
-    if store.is_dir() {
-        std::fs::remove_dir_all(&store).map_err(io(&store))?;
-    }
-    std::fs::create_dir_all(&store).map_err(io(&store))?;
+    let store = ensure_dir(&game.join(STORE_DIR))?;
+    let fixes = ensure_dir(&game.join(FIXES_DIR))?;
+    let (previous_file, previous) = calibration_snapshot(game)?;
+    let old = previous.iter().flat_map(|c| c.lights.iter().chain(&c.hud)).collect::<std::collections::BTreeSet<_>>();
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-    for (hash, fixed) in lights.iter().chain(&hud) {
-        let what = if lights.iter().any(|(h, _)| h == hash) { "cockpit-light dimmer" } else { "HUD colour protection" };
-        let text = format!("{FIX_MARK} {what}: the game's shader {hash}, recorded on this PC for game {game_version} ({}), with Elite Nexus's lines added.\n{fixed}", game_build.trim());
-        write_atomic(&store.join(fix_name(hash)), text.as_bytes())?;
+    let new = lights.iter().map(|(h, f)| (h, (f, true))).chain(hud.iter().map(|(h, f)| (h, (f, false))))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if new.len() != lights.len() + hud.len() { return Err(DimmerError::InvalidMetadata(game.join(CALIBRATION))); }
+    let all = old.iter().copied().chain(new.keys().copied()).collect::<std::collections::BTreeSet<_>>();
+    let mut fix_digests = std::collections::BTreeMap::new();
+    for hash in all {
+        let name = fix_name(hash);
+        let stored_path = store.join(&name);
+        let active_path = fixes.join(&name);
+        let stored = snapshot(&stored_path)?;
+        let active = snapshot(&active_path)?;
+        let owned = old.contains(hash) && previous.as_ref().is_some_and(|cal| owns_fix(cal, hash, &stored));
+        if (stored.bytes.is_some() && !owned) || (active.bytes.is_some() && (!owned || active.bytes != stored.bytes)) {
+            return Err(DimmerError::UnknownFile(name));
+        }
+        let next = new.get(hash).map(|(fixed, light)| {
+            let what = if *light { "cockpit-light dimmer" } else { "HUD colour protection" };
+            let text = format!("{}{fixed}", fix_header(what, hash, game_version, game_build)).into_bytes();
+            fix_digests.insert(hash.clone(), sha256_hex(&text));
+            text
+        });
+        let enabled = new.get(hash).is_some_and(|(_, light)| *light || config.protect.on);
+        edits.push(edit_file(stored, next.clone(), &stored_path)?);
+        edits.push(edit_file(active, next.filter(|_| enabled), &active_path)?);
     }
     let cal = Calibration {
         game_version: game_version.to_string(),
@@ -457,12 +655,17 @@ pub fn finish_calibration(game: &Path, game_version: &str, game_build: &str) -> 
         shaders,
         lights: lights.into_iter().map(|(h, _)| h).collect(),
         hud: hud.into_iter().map(|(h, _)| h).collect(),
+        fix_digests,
     };
-    write_atomic(&game.join(CALIBRATION), &serde_json::to_vec_pretty(&cal).unwrap_or_default())?;
-    save_config(game, &HookConfig { recording: false, ..config })?;
-    // The game may still hold an export file open (finishing while it runs); a leftover export is
-    // offered for deletion later.
-    let _ = remove_export(game);
+    let path = game.join(CALIBRATION);
+    let json = serde_json::to_vec_pretty(&cal).map_err(|_| DimmerError::InvalidMetadata(path.clone()))?;
+    edits.push(edit_file(previous_file, Some(json), &path)?);
+    protected::commit(&edits).map_err(io(game))?;
+    // A running game can keep these open. Preserve any export that changed after it was read.
+    for (path, source) in exports {
+        if let Ok(edit) = edit_file(source, None, &path) { let _ = protected::commit(&[edit]); }
+    }
+    let _ = std::fs::remove_dir(game.join(EXPORT_DIR));
     Ok(cal)
 }
 
@@ -474,87 +677,62 @@ pub struct Removed {
     pub kept: Vec<String>,
 }
 
-/// Removes 3Dmigoto with the dimmer and the HUD colour protection: the files Elite Nexus installed
-/// (only while they still match), 3Dmigoto's own by-products, and the frame captures made with it.
+/// Removes only manifest-matching files and calibration fixes that still match their stored copies.
 pub fn uninstall(game: &Path) -> Result<Removed, DimmerError> {
-    let manifest = match status(game) {
-        Status::Installed { .. } => std::fs::read(game.join(MANIFEST)).ok().and_then(|b| serde_json::from_slice::<Manifest>(&b).ok()).unwrap_or_default(),
-        // A hand-installed config: the DLLs are recognised by their checksums alone.
-        Status::Unmanaged { .. } => Manifest { migoto_version: MIGOTO_VERSION.to_string(), files: MIGOTO_FILES.iter().map(|(n, h)| (n.to_string(), h.to_string())).collect() },
-        _ => return Err(DimmerError::NotOurs),
-    };
+    let root = protected::directory(game).map_err(io(game))?;
+    let game = root.as_path();
+    let (manifest_file, manifest) = read_manifest(game)?;
     let mut done = Removed::default();
+    let mut edits = Vec::new();
     for (name, expected) in &manifest.files {
         let path = game.join(name);
-        if !path.exists() {
-            continue;
-        }
-        if name == CONFIG || matches_hash(&path, expected) {
-            std::fs::remove_file(&path).map_err(io(&path))?;
+        let file = snapshot(&path)?;
+        if agrees(&file, expected) {
+            edits.push(edit_file(file, None, &path)?);
             done.removed.push(name.clone());
-        } else {
+        } else if file.bytes.is_some() {
             done.kept.push(name.clone());
         }
     }
-    // A hand-installed config isn't in the list above.
-    let config = game.join(CONFIG);
-    if config.is_file() && std::fs::read_to_string(&config).is_ok_and(|t| t.starts_with(CONFIG_MARK)) {
-        std::fs::remove_file(&config).map_err(io(&config))?;
-        done.removed.push(CONFIG.to_string());
-    }
-    for name in BYPRODUCT_FILES {
-        let path = game.join(name);
-        if path.is_file() {
-            std::fs::remove_file(&path).map_err(io(&path))?;
-            done.removed.push(name.to_string());
+    let (calibration_file, cal) = calibration_snapshot(game)?;
+    if let Some(cal) = cal {
+        let fixes = game.join(FIXES_DIR);
+        let store = game.join(STORE_DIR);
+        for hash in cal.lights.iter().chain(&cal.hud) {
+            let name = fix_name(hash);
+            let stored_path = store.join(&name);
+            let active_path = fixes.join(&name);
+            let stored = snapshot(&stored_path)?;
+            let active = snapshot(&active_path)?;
+            let owned = owns_fix(&cal, hash, &stored);
+            if active.bytes.is_some() {
+                if owned && active.bytes == stored.bytes {
+                    edits.push(edit_file(active, None, &active_path)?);
+                    done.removed.push(format!("{FIXES_DIR}/{name}"));
+                } else {
+                    done.kept.push(format!("{FIXES_DIR}/{name}"));
+                }
+            }
+            if owned {
+                edits.push(edit_file(stored, None, &stored_path)?);
+                done.removed.push(format!("{STORE_DIR}/{name}"));
+            } else if stored.bytes.is_some() {
+                done.kept.push(format!("{STORE_DIR}/{name}"));
+            }
         }
-    }
-    let mut dirs: Vec<String> = BYPRODUCT_DIRS.iter().map(|d| d.to_string()).collect();
-    dirs.extend(frame_captures(game));
-    for name in dirs {
-        let path = game.join(&name);
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(io(&path))?;
-            done.removed.push(format!("{name}\\"));
-        }
-    }
-    let fixes = game.join(FIXES_DIR);
-    let legacy = fixes.join(LEGACY_FIX);
-    if legacy.is_file() {
-        std::fs::remove_file(&legacy).map_err(io(&legacy))?;
-        done.removed.push(format!("{FIXES_DIR}\\{LEGACY_FIX}"));
-    }
-    // The calibrated fixes: in ShaderFixes (recognised by their first line) and Elite Nexus's copies.
-    for e in std::fs::read_dir(&fixes).into_iter().flatten().flatten() {
-        if is_our_fix(&e.path()) {
-            std::fs::remove_file(e.path()).map_err(io(&e.path()))?;
-            done.removed.push(format!("{FIXES_DIR}\\{}", e.file_name().to_string_lossy()));
-        }
-    }
-    let store = game.join(STORE_DIR);
-    if store.is_dir() {
-        std::fs::remove_dir_all(&store).map_err(io(&store))?;
-        done.removed.push(format!("{STORE_DIR}\\"));
-    }
-    let calibration = game.join(CALIBRATION);
-    if calibration.is_file() {
-        std::fs::remove_file(&calibration).map_err(io(&calibration))?;
+        let path = game.join(CALIBRATION);
+        edits.push(edit_file(calibration_file, None, &path)?);
         done.removed.push(CALIBRATION.to_string());
     }
-    // An official d3d11.dll renamed to switch the hook off by hand.
-    if let Some(renamed) = renamed_dll(game) {
-        std::fs::remove_file(&renamed).map_err(io(&renamed))?;
-        done.removed.push(renamed.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-    }
-    // Only an empty ShaderFixes goes: anything else in it isn't ours.
-    if std::fs::read_dir(&fixes).is_ok_and(|mut d| d.next().is_none()) {
-        std::fs::remove_dir(&fixes).map_err(io(&fixes))?;
-        done.removed.push(format!("{FIXES_DIR}\\"));
-    }
     let manifest_path = game.join(MANIFEST);
-    if manifest_path.is_file() {
-        std::fs::remove_file(&manifest_path).map_err(io(&manifest_path))?;
-        done.removed.push(MANIFEST.to_string());
+    edits.push(edit_file(manifest_file, None, &manifest_path)?);
+    done.removed.push(MANIFEST.to_string());
+    protected::commit(&edits).map_err(io(game))?;
+    for name in [FIXES_DIR, STORE_DIR] {
+        let dir = game.join(name);
+        if protected::directory(&dir).is_ok() && std::fs::remove_dir(&dir).is_ok() {
+            done.removed.push(format!("{name}/"));
+        }
     }
     Ok(done)
 }
@@ -583,7 +761,7 @@ fn leftover_dirs(game: &Path) -> Vec<String> {
         dirs.push("ShaderCache".to_string());
     }
     dirs.push("ShaderFromGame".to_string());
-    dirs.retain(|d| game.join(d).symlink_metadata().is_ok_and(|m| m.is_dir()));
+    dirs.retain(|d| protected::directory(&game.join(d)).is_ok());
     dirs
 }
 
@@ -601,13 +779,41 @@ pub fn remove_leftovers(game: &Path) -> Result<Removed, DimmerError> {
     if !matches!(status(game), Status::Installed { .. }) {
         return Err(DimmerError::NotOurs);
     }
+    let root = protected::directory(game).map_err(io(game))?;
+    let (_, manifest) = read_manifest(&root)?;
+    let config = snapshot(&root.join(CONFIG))?;
+    if !manifest.files.iter().any(|(n, h)| n == CONFIG && agrees(&config, h)) {
+        return Err(DimmerError::UnknownFile(CONFIG.into()));
+    }
     let mut done = Removed::default();
-    for name in leftover_dirs(game) {
-        let path = game.join(&name);
+    let dirs = leftover_dirs(&root);
+    for name in &dirs {
+        let path = root.join(name);
+        validate_tree(&path).map_err(io(&path))?;
+    }
+    for name in dirs {
+        let path = root.join(&name);
+        validate_tree(&path).map_err(io(&path))?;
         std::fs::remove_dir_all(&path).map_err(io(&path))?;
         done.removed.push(format!("{name}\\"));
     }
     Ok(done)
+}
+
+fn validate_tree(root: &Path) -> std::io::Result<()> {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        protected::directory(&dir)?;
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            let metadata = std::fs::symlink_metadata(&path)?;
+            if protected::linked(&metadata) || (!metadata.is_dir() && !metadata.is_file()) {
+                return Err(std::io::Error::other(format!("unexpected entry {}", path.display())));
+            }
+            if metadata.is_dir() { pending.push(path); }
+        }
+    }
+    Ok(())
 }
 
 /// Total size of the files under `dir`; links aren't followed.
@@ -644,13 +850,7 @@ fn section<'a>(ini: &'a str, name: &'a str) -> impl Iterator<Item = (&'a str, &'
 }
 
 fn matches_hash(path: &Path, expected: &str) -> bool {
-    std::fs::read(path).is_ok_and(|b| sha256_hex(&b) == expected)
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), DimmerError> {
-    let tmp = path.with_extension("elite-nexus-tmp");
-    std::fs::write(&tmp, bytes).map_err(io(&tmp))?;
-    std::fs::rename(&tmp, path).map_err(io(path))
+    snapshot(path).is_ok_and(|f| agrees(&f, expected))
 }
 
 /// The settings in a config's `[Constants]` (defaults for anything missing).
@@ -1323,7 +1523,7 @@ mod tests {
         install(&game, &fake_files(), &HookConfig::default()).unwrap();
         // What Elite Nexus 0.3.0 wrote: the patterns inside the config.
         let old = format!("{}[ShaderRegexEliteNexusCockpitLights]\r\nshader_model = ps_5_0\r\n", render_config(&HookConfig::default()));
-        std::fs::write(game.join(CONFIG), old).unwrap();
+        set_installed_config(&game, &old);
         assert!(uses_patterns(&game));
         start_recording(&game).unwrap();
         assert!(!uses_patterns(&game), "starting a calibration writes a config without them");
@@ -1341,7 +1541,7 @@ mod tests {
         assert!(!keys_outdated(&game));
         // What 0.7.3-beta.2 and earlier wrote.
         let old = render_config(&HookConfig::default()).replace("VK_F7", "VK_F10").replace("VK_F8", "VK_F11");
-        std::fs::write(game.join(CONFIG), old).unwrap();
+        set_installed_config(&game, &old);
         assert_eq!(bound_keys(&game).map(|b| b[1].clone()), Some(Some("F10".into())));
         assert!(keys_outdated(&game));
         let Status::Installed { config } = status(&game) else { panic!("installed") };
@@ -1381,6 +1581,14 @@ mod tests {
         vec![("d3d11.dll", b"fake d3d11".to_vec()), ("d3dcompiler_47.dll", b"fake compiler".to_vec())]
     }
 
+    fn set_installed_config(game: &Path, text: &str) {
+        let path = game.join(MANIFEST);
+        let mut manifest: Manifest = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest.files.iter_mut().find(|(n, _)| n == CONFIG).unwrap().1 = sha256_hex(text.as_bytes());
+        std::fs::write(game.join(CONFIG), text).unwrap();
+        std::fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    }
+
     #[test]
     fn foreign_mods_are_left_alone() {
         let game = temp_game("foreign");
@@ -1391,6 +1599,51 @@ mod tests {
         assert!(matches!(save_config(&game, &HookConfig::default()), Err(DimmerError::NotOurs)));
         assert!(matches!(uninstall(&game), Err(DimmerError::NotOurs)));
         assert!(game.join(CONFIG).is_file() && game.join("EDHM-ini").is_dir());
+        let _ = std::fs::remove_dir_all(&game);
+    }
+
+    #[test]
+    fn install_refuses_a_colliding_compiler_before_writing_the_hook() {
+        let game = temp_game("foreign-compiler");
+        let compiler = game.join("d3dcompiler_47.dll");
+        std::fs::write(&compiler, b"foreign compiler").unwrap();
+        assert!(install(&game, &fake_files(), &HookConfig::default()).is_err());
+        assert_eq!(std::fs::read(&compiler).unwrap(), b"foreign compiler");
+        assert!(!game.join("d3d11.dll").exists());
+        assert!(!game.join(MANIFEST).exists());
+        let _ = std::fs::remove_dir_all(&game);
+    }
+
+    #[test]
+    fn pending_install_refuses_a_different_target_or_new_files() {
+        let first = temp_game("pending-first");
+        let second = temp_game("pending-second");
+        let config = HookConfig::default();
+        let target = InstallTarget::capture(&first).unwrap();
+        assert!(matches!(target.install(&second, &fake_files(), &config), Err(DimmerError::TargetChanged)));
+        let target = InstallTarget::capture(&first).unwrap();
+        std::fs::write(first.join(CONFIG), b"external after confirmation").unwrap();
+        assert!(matches!(target.install(&first, &fake_files(), &config), Err(DimmerError::TargetChanged)));
+        assert!(!first.join(MANIFEST).exists() && !second.join(MANIFEST).exists());
+        for game in [first, second] { let _ = std::fs::remove_dir_all(game); }
+    }
+
+    #[test]
+    fn malformed_metadata_and_changed_configs_are_left_in_place() {
+        let game = temp_game("bad-metadata");
+        let config = HookConfig::default();
+        install(&game, &fake_files(), &config).unwrap();
+        let manifest = std::fs::read(game.join(MANIFEST)).unwrap();
+        let modified = "; Elite Nexus\n; externally edited\n";
+        std::fs::write(game.join(CONFIG), modified).unwrap();
+        assert!(matches!(save_config(&game, &config), Err(DimmerError::UnknownFile(_))));
+        std::fs::write(game.join(MANIFEST), b"{}").unwrap();
+        assert!(matches!(uninstall(&game), Err(DimmerError::InvalidMetadata(_))));
+        assert!(game.join("d3d11.dll").exists());
+        std::fs::write(game.join(MANIFEST), manifest).unwrap();
+        let removed = uninstall(&game).unwrap();
+        assert!(removed.kept.iter().any(|n| n == CONFIG));
+        assert_eq!(std::fs::read_to_string(game.join(CONFIG)).unwrap(), modified);
         let _ = std::fs::remove_dir_all(&game);
     }
 
@@ -1419,7 +1672,7 @@ mod tests {
         save_config(&game, &off).unwrap();
         assert_eq!(status(&game), Status::Installed { config: off });
 
-        // 3Dmigoto's by-products and captures go too; a file someone changed stays.
+        // Capture folders, incidental files and changed files have no manifest ownership.
         std::fs::create_dir_all(game.join("ShaderCache")).unwrap();
         std::fs::write(game.join("ShaderCache").join("x-ps.txt"), b"asm").unwrap();
         std::fs::create_dir_all(game.join("FrameAnalysis-2026-10-13-083851")).unwrap();
@@ -1427,10 +1680,13 @@ mod tests {
         std::fs::write(game.join("d3dcompiler_47.dll"), b"replaced by someone").unwrap();
         let done = uninstall(&game).unwrap();
         assert_eq!(done.kept, vec!["d3dcompiler_47.dll".to_string()]);
-        for gone in ["d3d11.dll", CONFIG, MANIFEST, "d3dx_user.ini", "ShaderCache", "FrameAnalysis-2026-10-13-083851", FIXES_DIR] {
+        for gone in ["d3d11.dll", CONFIG, MANIFEST, FIXES_DIR] {
             assert!(!game.join(gone).exists(), "{gone} should be gone: {done:?}");
         }
         assert!(game.join("d3dcompiler_47.dll").is_file() && game.join("EliteDangerous64.exe").is_file());
+        for kept in ["d3dx_user.ini", "ShaderCache", "FrameAnalysis-2026-10-13-083851"] {
+            assert!(game.join(kept).exists());
+        }
         let _ = std::fs::remove_dir_all(&game);
     }
 
@@ -1465,7 +1721,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hand_installed_test_is_recognised_and_its_fix_replaced() {
+    fn a_hand_installed_test_is_recognised_and_its_untracked_fix_is_kept() {
         let game = temp_game("legacy");
         std::fs::create_dir_all(game.join(FIXES_DIR)).unwrap();
         std::fs::write(game.join(FIXES_DIR).join(LEGACY_FIX), b"asm").unwrap();
@@ -1478,7 +1734,7 @@ mod tests {
         assert!(matches!(install(&game, &fake_files(), &HookConfig::default()), Err(DimmerError::UnknownFile(_))));
         std::fs::remove_file(game.join("d3d11.dll")).unwrap();
         install(&game, &fake_files(), &HookConfig::default()).unwrap();
-        assert!(!game.join(FIXES_DIR).join(LEGACY_FIX).exists());
+        assert_eq!(std::fs::read(game.join(FIXES_DIR).join(LEGACY_FIX)).unwrap(), b"asm");
         assert!(matches!(status(&game), Status::Installed { .. }));
         let _ = std::fs::remove_dir_all(&game);
     }

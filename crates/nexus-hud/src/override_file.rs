@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::HudError;
 use crate::matrix::HudMatrix;
+use crate::protected::{self, Snapshot};
 
 pub const FILE_NAME: &str = "GraphicsConfigurationOverride.xml";
 /// The commander's file as it was before Elite Nexus first changed it.
@@ -27,17 +28,80 @@ pub struct OverrideFile {
     pub path: PathBuf,
     /// `None` when the file doesn't exist (the game then uses its standard colours).
     pub text: Option<String>,
+    baseline: Baseline,
+}
+
+#[derive(Debug, Clone)]
+enum Baseline {
+    File(Snapshot),
+    MissingDirectory { existing: PathBuf, canonical: PathBuf, missing: Vec<std::ffi::OsString> },
+}
+
+impl Baseline {
+    fn load(path: &Path) -> std::io::Result<Self> {
+        match Snapshot::read(path) {
+            Ok(snapshot) => return Ok(Self::File(snapshot)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        let mut dir = path.parent().ok_or_else(|| std::io::Error::other("missing graphics directory"))?;
+        let mut missing = Vec::new();
+        loop {
+            match protected::directory(dir) {
+                Ok(canonical) => return Ok(Self::MissingDirectory { existing: dir.to_path_buf(), canonical, missing }),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+            let name = dir.file_name().ok_or_else(|| std::io::Error::other("invalid graphics directory"))?;
+            missing.push(name.to_owned());
+            dir = dir.parent().ok_or_else(|| std::io::Error::other("missing graphics directory parent"))?;
+        }
+    }
+
+    fn bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::File(snapshot) => snapshot.bytes.as_deref(),
+            Self::MissingDirectory { .. } => None,
+        }
+    }
+
+    fn prepare(&self, path: &Path) -> std::io::Result<Snapshot> {
+        let (existing, canonical, missing) = match self {
+            Self::File(snapshot) => return Ok(snapshot.clone()),
+            Self::MissingDirectory { existing, canonical, missing } => (existing, canonical, missing),
+        };
+        if protected::directory(existing)? != *canonical {
+            return Err(std::io::Error::other("graphics directory changed; reload it before editing"));
+        }
+        let mut dir = canonical.clone();
+        for name in missing.iter().rev() {
+            dir.push(name);
+            std::fs::create_dir(&dir)?;
+            if protected::directory(&dir)? != dir {
+                return Err(std::io::Error::other("graphics directory changed; reload it before editing"));
+            }
+        }
+        if path.parent().map(protected::directory).transpose()?.as_ref() != Some(&dir) {
+            return Err(std::io::Error::other("graphics directory changed; reload it before editing"));
+        }
+        let snapshot = Snapshot::read(path)?;
+        if snapshot.bytes.is_some() {
+            return Err(std::io::Error::other("the graphics override appeared on disk; reload it before editing"));
+        }
+        Ok(snapshot)
+    }
 }
 
 impl OverrideFile {
     /// Reads `FILE_NAME` in `dir`. A missing file is not an error.
     pub fn load(dir: &Path) -> Result<Self, HudError> {
         let path = dir.join(FILE_NAME);
-        match std::fs::read(&path) {
-            Ok(bytes) => Ok(OverrideFile { text: Some(String::from_utf8_lossy(&bytes).into_owned()), path }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(OverrideFile { path, text: None }),
-            Err(source) => Err(HudError::Read { path, source }),
-        }
+        let read_error = |source| HudError::Read { path: path.clone(), source };
+        let baseline = Baseline::load(&path).map_err(read_error)?;
+        let text = baseline.bytes().map(std::str::from_utf8).transpose()
+            .map_err(|e| read_error(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?
+            .map(str::to_owned);
+        Ok(OverrideFile { text, path, baseline })
     }
 
     /// The matrix the game will use: `None` for the standard colours.
@@ -61,24 +125,27 @@ impl OverrideFile {
     /// Replaces the file with `new`, the current text edited (see [`with_matrix`], [`with_value`]).
     /// Copies the commander's original file aside first, once; replaces the file atomically.
     pub fn write(&mut self, new: String) -> Result<(), HudError> {
-        if self.text.as_deref().unwrap_or("") == new {
-            return Ok(());
-        }
+        if !new.is_empty() { parse(&new)?; }
         let werr = |path: &Path| {
             let path = path.to_path_buf();
             move |source| HudError::Write { path, source }
         };
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(werr(dir))?;
-        }
+        let mut edits = Vec::new();
+        if self.baseline.bytes().unwrap_or_default() == new.as_bytes() { return Ok(()); }
+        let mut snapshot = self.baseline.prepare(&self.path).map_err(werr(&self.path))?;
+        let replacement = snapshot.clone().edit(Some(new.as_bytes().to_vec())).map_err(werr(&self.path))?;
         let backup = self.backup_path();
-        if self.text.is_some() && !backup.exists() {
-            std::fs::copy(&self.path, &backup).map_err(werr(&backup))?;
+        if let Some(original) = &snapshot.bytes {
+            let previous = Snapshot::read(&backup).map_err(werr(&backup))?;
+            if previous.bytes.is_none() {
+                edits.push(previous.edit(Some(original.clone())).map_err(werr(&backup))?);
+            }
         }
-        let tmp = self.path.with_extension("xml.elite-nexus-tmp");
-        std::fs::write(&tmp, &new).map_err(werr(&tmp))?;
-        std::fs::rename(&tmp, &self.path).map_err(werr(&self.path))?;
+        edits.push(replacement);
+        protected::commit(&edits).map_err(werr(&self.path))?;
         tracing::info!(path = %self.path.display(), "graphics override written");
+        snapshot.bytes = Some(new.as_bytes().to_vec());
+        self.baseline = Baseline::File(snapshot);
         self.text = Some(new);
         Ok(())
     }
@@ -514,5 +581,25 @@ mod tests {
         f.save(Some(&BLUE)).unwrap();
         assert!(fresh.join(FILE_NAME).exists() && !fresh.join(BACKUP_NAME).exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stale_graphics_edit_preserves_the_external_write() {
+        let dir = std::env::temp_dir().join(format!("nexus-hud-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        let external = "<GraphicsConfig><!-- concurrent game edit --></GraphicsConfig>";
+        std::fs::write(&path, "<GraphicsConfig/>").unwrap();
+        let mut editor = OverrideFile::load(&dir).unwrap();
+        std::fs::write(&path, external).unwrap();
+        let result = editor.write("<GraphicsConfig><!-- stale edit --></GraphicsConfig>".into());
+        let observed = std::fs::read_to_string(&path).unwrap();
+        let backup_exists = editor.backup_path().exists();
+        std::fs::remove_file(&path).unwrap();
+        if backup_exists { std::fs::remove_file(editor.backup_path()).unwrap(); }
+        std::fs::remove_dir(&dir).unwrap();
+        assert!(result.is_err());
+        assert_eq!(observed, external);
+        assert!(!backup_exists);
     }
 }

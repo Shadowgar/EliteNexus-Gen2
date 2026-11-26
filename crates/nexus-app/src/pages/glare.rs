@@ -30,16 +30,16 @@ impl Default for GlareUi {
 impl GlareUi {
     /// Reads the values the override file sets and the game's own from its install.
     pub fn reload(&mut self, file: Option<&Result<OverrideFile, String>>, installs: &[GameInstall]) {
-        self.current = match file {
-            Some(Ok(f)) => f.text.as_deref().map_or(Ok(Tone::default()), |t| tone::read(t).map_err(|e| e.to_string())),
-            Some(Err(e)) => Err(e.clone()),
-            None => Ok(Tone::default()),
-        };
         let base = installs.iter().find(|i| i.is_live()).map(|i| i.folder.join("GraphicsConfiguration.xml"));
         let read = base.as_ref().and_then(|p| std::fs::read(p).ok().and_then(|b| Defaults::from_base(&String::from_utf8_lossy(&b)).ok()).map(|d| (d, p.display().to_string())));
         (self.defaults, self.defaults_from) = match read {
             Some((d, p)) => (d, Some(p)),
             None => (tone::GAME_4_4, None),
+        };
+        self.current = match file {
+            Some(Ok(f)) => f.text.as_deref().map_or(Ok(Tone::default()), |t| tone::read_with_defaults(t, &self.defaults).map_err(|e| e.to_string())),
+            Some(Err(e)) => Err(e.clone()),
+            None => Ok(Tone::default()),
         };
         self.edit = self.current.clone().unwrap_or_default().normalized(&self.defaults);
         self.status = None;
@@ -47,10 +47,12 @@ impl GlareUi {
 
     fn apply(&mut self, file: &mut Option<Result<OverrideFile, String>>) {
         let Some(Ok(f)) = file.as_mut() else { return };
+        let Ok(previous) = &self.current else { return };
         let target = self.edit.normalized(&self.defaults);
-        self.status = Some(match tone::write(f.text.as_deref(), &target).and_then(|t| f.write(t)) {
+        let previous = previous.normalized(&self.defaults);
+        self.status = Some(match tone::write_changed(f.text.as_deref(), &previous, &target).and_then(|t| f.write(t)) {
             Ok(()) => {
-                self.current = Ok(target);
+                self.current = f.text.as_deref().map_or(Ok(Tone::default()), |t| tone::read_with_defaults(t, &self.defaults).map_err(|e| e.to_string()));
                 self.edit = target;
                 (true, if target.is_default() { "Back to the game's own values the next time Elite Dangerous starts.".into() } else { "Saved. Elite Dangerous uses these values the next time it starts.".into() })
             }

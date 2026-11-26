@@ -163,13 +163,16 @@ impl PresetDirectory {
     /// Finds the `.binds` file for preset `name`: this folder first, then each of
     /// `builtin_dirs` (e.g. the game's `ControlSchemes` folder) as `<name>.binds`.
     pub fn resolve(&self, name: &str, builtin_dirs: &[&Path]) -> Option<PathBuf> {
+        if name.is_empty() || matches!(name, "." | "..") || name.contains(['/', '\\', ':']) {
+            return None;
+        }
         if let Some(p) = self.get(name) {
-            return Some(p.path.clone());
+            return std::fs::symlink_metadata(&p.path).ok().filter(|m| m.is_file()).map(|_| p.path.clone());
         }
         builtin_dirs
             .iter()
             .map(|dir| dir.join(format!("{name}.binds")))
-            .find(|p| p.is_file())
+            .find(|p| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file()))
     }
 
     /// Loads the bindings the game actually uses: every category's actions come from the preset
@@ -271,7 +274,7 @@ pub fn find_presets(dir: impl AsRef<Path>) -> Result<PresetDirectory, BindsError
         let entry = entry.map_err(|e| BindsError::io(dir, e))?;
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
-        if !path.is_file() {
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
             continue;
         }
         if let Some(number) = parse_start_file_name(&file_name) {

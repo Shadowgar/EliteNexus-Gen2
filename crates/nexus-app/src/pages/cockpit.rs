@@ -32,6 +32,7 @@ pub struct CockpitUi {
     confirm_install: bool,
     confirm_remove: bool,
     download: Slot<Result<Files, String>>,
+    download_target: Option<dimmer::InstallTarget>,
     /// Bytes of capture files left in the game folder, measured in the background.
     leftovers: Slot<u64>,
     cleanup: Slot<Result<Removed, String>>,
@@ -196,18 +197,19 @@ pub fn show(ui: &mut Ui, st: &mut CockpitUi, installs: &[GameInstall], playing: 
         st.refresh(ui.ctx(), installs);
     }
     if st.download.tick() {
-        match (st.download.last.take(), st.folder.clone()) {
-            (Some(Ok(files)), Some(folder)) => {
-                let config = HookConfig { dimmer: st.edit, ..HookConfig::default() };
+        match (st.download.last.take(), st.download_target.take(), game_folder(installs)) {
+            (Some(Ok(files)), Some(target), Some(folder)) => {
+                let config = HookConfig { dimmer: st.edit, recording: true, ..HookConfig::default() };
                 // A fresh install starts with a calibration: the fixes are made from this game.
-                st.message = Some(match dimmer::install(&folder, &files, &config).and_then(|()| dimmer::start_recording(&folder)) {
+                st.message = Some(match target.install(&folder, &files, &config) {
                     Ok(()) => (true, "Installed. One step left: calibrate (below), so Elite Nexus can find your game's light shader.".into()),
                     Err(e) => (false, e.to_string()),
                 });
                 st.confirm_install = false;
                 st.refresh(ui.ctx(), installs);
             }
-            (Some(Err(e)), _) => st.message = Some((false, format!("The download didn't work: {e}"))),
+            (Some(Err(e)), _, _) => st.message = Some((false, format!("The download didn't work: {e}"))),
+            (Some(Ok(_)), _, _) => st.message = Some((false, dimmer::DimmerError::TargetChanged.to_string())),
             _ => {}
         }
     }
@@ -325,8 +327,15 @@ fn not_installed(ui: &mut Ui, st: &mut CockpitUi, playing: bool, rt: &tokio::run
             ui.label(RichText::new("Downloading and checking 3Dmigoto…").color(pal::DIM));
         } else {
             if widgets::primary_button(ui, &format!("{} Download and install", icon::CHECK)).clicked() {
-                st.message = None;
-                st.download.run_async(ui.ctx(), rt, fetch());
+                let target = st.folder.as_deref().ok_or(dimmer::DimmerError::TargetChanged).and_then(dimmer::InstallTarget::capture);
+                match target {
+                    Ok(target) => {
+                        st.message = None;
+                        st.download_target = Some(target);
+                        st.download.run_async(ui.ctx(), rt, fetch());
+                    }
+                    Err(e) => st.message = Some((false, e.to_string())),
+                }
             }
             if widgets::button(ui, "Cancel").clicked() {
                 st.confirm_install = false;
@@ -451,7 +460,7 @@ fn installed(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameIns
         ui.label(RichText::new("The test version you put in by hand is installed.").font(display(size::BODY)).color(pal::TEXT));
         ui.add(
             egui::Label::new(
-                RichText::new("Let Elite Nexus manage it: it replaces the test's copy of the game's shader with a calibrated fix, keeps your settings and can remove it again. Nothing is downloaded.")
+                RichText::new("Let Elite Nexus manage the recognized hook with your settings. Existing unmanaged shader files stay in place. An overlapping shader must be moved aside before calibration can write its fix.")
                     .color(pal::DIM),
             )
             .wrap(),
@@ -461,7 +470,7 @@ fn installed(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameIns
                 Some(Status::Unmanaged { config }) => config.protect,
                 _ => Default::default(),
             };
-            st.message = Some(match dimmer::install(folder, &[], &HookConfig { dimmer: st.edit, protect, recording: false }).and_then(|()| dimmer::start_recording(folder)) {
+            st.message = Some(match dimmer::install(folder, &[], &HookConfig { dimmer: st.edit, protect, recording: true }) {
                 Ok(()) => (true, "Done: Elite Nexus manages the dimmer now. One step left: calibrate (below).".into()),
                 Err(e) => (false, e.to_string()),
             });

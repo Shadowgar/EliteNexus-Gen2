@@ -58,6 +58,8 @@ The executable, desktop entry, window identifier, update manifest and MCP name a
 
 GPU recovery keeps the original arguments and working directory and pins the resolved profile. Screenshot runs skip respawn. Fixture runs keep their selected source, muted speech, offline policy and disabled MCP and game integration. Production staging requires a signed Gen2 manifest and an approved signing root. The production root is unconfigured.
 
+The galaxy writer distinguishes queued messages, committed transactions, partial row failures and failed checkpoints. Additive schema preparation and one-off repairs commit in a single transaction. A newer schema fails before schema writes. Managed desktop edits snapshot the chosen location and existing contents, stage the replacement, and check the snapshot at commit. The rollback path restores a previously changed file only while it still matches the completed edit.
+
 ## Runtime
 
 ```

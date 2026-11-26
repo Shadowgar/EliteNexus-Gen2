@@ -21,6 +21,7 @@ pub mod matrix;
 pub mod override_file;
 pub mod palette;
 pub mod presets;
+mod protected;
 pub mod tone;
 
 pub use error::HudError;
