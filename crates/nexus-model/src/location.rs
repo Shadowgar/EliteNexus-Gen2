@@ -163,9 +163,11 @@ impl Location {
     pub fn on_arrival(&mut self, a: &ev::SystemArrival, ts: Timestamp, kind: ArrivalKind) {
         let new_system = a.system_address != self.system_address;
         self.system = a.star_system.clone();
+        let same_system = a.system_address != 0 && self.system_address == a.system_address;
         self.system_address = a.system_address;
-        if a.star_pos.is_some() {
-            self.star_pos = a.star_pos;
+        let position = a.star_pos.filter(|p| p.iter().all(|n| n.is_finite()));
+        if position.is_some() || !same_system {
+            self.star_pos = position;
         }
         self.info = SystemInfo::from_arrival(a, ts);
         self.body = a.body.clone();
@@ -234,9 +236,18 @@ impl Location {
         self.landed = false;
         self.supercruise = false;
         self.docking = None;
-        self.system = if d.star_system.is_empty() { self.system.clone() } else { d.star_system.clone() };
+        let changed_name = !d.star_system.is_empty() && !self.system.eq_ignore_ascii_case(&d.star_system);
         if d.system_address != 0 {
+            if self.system_address != d.system_address {
+                self.star_pos = None;
+            }
             self.system_address = d.system_address;
+        } else if changed_name {
+            self.system_address = 0;
+            self.star_pos = None;
+        }
+        if !d.star_system.is_empty() {
+            self.system.clone_from(&d.star_system);
         }
         self.station = Some(StationInfo {
             name: clean_station_name(&d.station_name),
@@ -425,5 +436,23 @@ mod tests {
         assert_eq!(denied_reason("RestrictedAccess"), "access is restricted (a carrier's owner decides who may dock)");
         assert_eq!(denied_reason(""), "no reason given");
         assert_eq!(denied_reason("SomethingNew"), "SomethingNew", "one the game adds later is passed on");
+    }
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+
+    #[test]
+    fn missing_coordinates_are_only_inherited_for_a_matching_address() {
+        let mut location = Location::default();
+        let arrival = |address, coords| ev::SystemArrival { system_address: address, star_pos: coords, ..Default::default() };
+        location.on_arrival(&arrival(12, Some([0.0, 0.0, 0.0])), Timestamp(1), ArrivalKind::Location);
+        location.on_arrival(&arrival(12, None), Timestamp(1), ArrivalKind::Location);
+        assert_eq!(location.star_pos, Some([0.0, 0.0, 0.0]));
+        location.on_arrival(&arrival(13, None), Timestamp(1), ArrivalKind::Location);
+        assert_eq!(location.star_pos, None);
+        location.on_arrival(&arrival(13, Some([1.0, 2.0, 3.0])), Timestamp(1), ArrivalKind::Location);
+        assert_eq!(location.star_pos, Some([1.0, 2.0, 3.0]));
     }
 }

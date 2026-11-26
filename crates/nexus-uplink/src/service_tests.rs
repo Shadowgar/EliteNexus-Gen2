@@ -19,7 +19,7 @@ fn live_event(body: &str, ts: Timestamp) -> LiveEvent {
     let line = format!(r#"{{ "timestamp":"{}", {body} }}"#, ts.to_iso());
     let raw = RawEvent::new(&line, LineSource::default()).expect("test line");
     let event = Event::parse(&raw.name, &raw.line).unwrap_or(Event::Other);
-    LiveEvent { raw, event }
+    LiveEvent { raw, event, live: true }
 }
 
 struct Harness {

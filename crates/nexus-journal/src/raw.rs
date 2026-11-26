@@ -31,56 +31,44 @@ pub fn sanitize_non_finite(line: &str) -> Option<String> {
     const TOKENS: [&str; 10] =
         ["-nan(ind)", "nan(ind)", "-1.#QNAN", "1.#QNAN", "-1.#IND", "1.#IND", "-1.#INF", "1.#INF", "-nan", "-inf"];
     const SHORT: [&str; 3] = ["nan", "inf", "infinity"];
-    let b = line.as_bytes();
+    let bytes = line.as_bytes();
     let mut out = String::with_capacity(line.len());
-    let mut changed = false;
-    let mut in_str = false;
+    let (mut start, mut quoted, mut escaped) = (0, false, false);
     let mut i = 0;
-    while i < b.len() {
-        let c = b[i];
-        if in_str {
-            out.push(c as char);
-            if c == b'\\' && i + 1 < b.len() {
-                out.push(b[i + 1] as char);
-                i += 2;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                quoted = false;
+            }
+        } else if c == b'"' {
+            quoted = true;
+        } else if i == 0 || matches!(bytes[i - 1], b':' | b',' | b'[' | b' ' | b'\r' | b'\n' | b'\t') {
+            let rest = &bytes[i..];
+            let matched = TOKENS.iter().chain(SHORT.iter().rev()).find(|token| {
+                let token = token.as_bytes();
+                rest.get(..token.len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case(token))
+                    && rest.get(token.len()).is_none_or(|next| matches!(next, b',' | b'}' | b']' | b' ' | b'\r' | b'\n' | b'\t'))
+            });
+            if let Some(token) = matched {
+                out.push_str(&line[start..i]);
+                out.push('0');
+                i += token.len();
+                start = i;
                 continue;
             }
-            if c == b'"' {
-                in_str = false;
-            }
-            i += 1;
-            continue;
         }
-        if c == b'"' {
-            in_str = true;
-            out.push('"');
-            i += 1;
-            continue;
-        }
-        let rest = &line[i..];
-        let lower = rest.get(..rest.len().min(10)).unwrap_or("").to_ascii_lowercase();
-        let hit = TOKENS
-            .iter()
-            .find(|t| lower.starts_with(&t.to_ascii_lowercase()))
-            .map(|t| t.len())
-            .or_else(|| {
-                SHORT.iter().rev().find(|t| lower.starts_with(*t)).map(|t| t.len()).filter(|&n| {
-                    // a bare word, not part of a longer identifier
-                    !rest.as_bytes().get(n).is_some_and(|ch| ch.is_ascii_alphanumeric())
-                })
-            });
-        if let Some(n) = hit {
-            out.push('0');
-            changed = true;
-            i += n;
-            continue;
-        }
-        // Copy one UTF-8 char outside strings (all JSON structure is ASCII anyway).
-        let ch = rest.chars().next().unwrap_or('\u{fffd}');
-        out.push(ch);
-        i += ch.len_utf8();
+        i += 1;
     }
-    changed.then_some(out)
+    if start == 0 {
+        return None;
+    }
+    out.push_str(&line[start..]);
+    Some(out)
 }
 
 /// Parses a typed event, retrying once with [`sanitize_non_finite`] if the game wrote NaN/Inf.
@@ -139,10 +127,10 @@ mod tests {
 
     #[test]
     fn sanitizes_nan_outside_strings_only() {
-        let l = r#"{ "timestamp":"2026-10-12T06:25:17Z", "event":"FSSDiscoveryScan", "Progress":-nan(ind), "BodyCount":0, "SystemName":"Nanomam inf", "X":inf, "Y":1.#IND }"#;
+        let l = r#"{ "timestamp":"2026-10-12T06:25:17Z", "event":"FSSDiscoveryScan", "Progress":-nan(ind), "BodyCount":0, "SystemName":"?lan ? inf", "X":inf, "Y":1.#IND }"#;
         let fixed = sanitize_non_finite(l).unwrap();
         assert!(fixed.contains(r#""Progress":0,"#));
-        assert!(fixed.contains(r#""SystemName":"Nanomam inf""#));
+        assert!(fixed.contains(r#""SystemName":"?lan ? inf""#));
         assert!(fixed.contains(r#""X":0,"#));
         assert!(fixed.contains(r#""Y":0 }"#));
         assert!(sanitize_non_finite(r#"{"a":"nan","b":1.5}"#).is_none());

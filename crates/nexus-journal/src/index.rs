@@ -10,15 +10,22 @@ use std::path::PathBuf;
 pub struct IndexEntry {
     pub ts: i64,
     pub file: u32,
-    pub offset: u32,
+    pub offset: u64,
     pub len: u32,
     pub name: u16,
+    owner: u32,
+    session: i64,
+    fingerprint: Option<u64>,
 }
 
 #[derive(Debug, Default)]
 pub struct JournalIndex {
     pub files: Vec<PathBuf>,
+    pub source_generation: u64,
     pub entries: Vec<IndexEntry>,
+    identities: Vec<Option<crate::watcher::FileIdentity>>,
+    owners: Vec<String>,
+    owner_ids: FxHashMap<String, u32>,
     names: Vec<String>,
     name_ids: FxHashMap<String, u16>,
     counts: Vec<u32>,
@@ -30,7 +37,27 @@ impl JournalIndex {
             return i as u32;
         }
         self.files.push(path);
+        self.identities.push(None);
         (self.files.len() - 1) as u32
+    }
+
+    pub fn bind_file(&mut self, path: PathBuf, identity: crate::watcher::FileIdentity) -> u32 {
+        let file = self.add_file(path);
+        self.identities[file as usize] = Some(identity);
+        file
+    }
+
+    pub fn owner(&self, entry: &IndexEntry) -> Option<&str> {
+        let id = entry.owner.checked_sub(1)?;
+        self.owners.get(id as usize).map(String::as_str)
+    }
+
+    pub fn in_session(&self, entry: &IndexEntry, session: Timestamp) -> bool {
+        entry.session == session.0
+    }
+
+    pub fn belongs_to(&self, entry: &IndexEntry, fid: &str) -> bool {
+        self.owner(entry) == Some(fid)
     }
 
     fn intern(&mut self, name: &str) -> u16 {
@@ -45,11 +72,34 @@ impl JournalIndex {
     }
 
     pub fn push(&mut self, ts: Timestamp, file: u32, offset: u64, len: usize, name: &str) {
-        let id = self.intern(name);
-        if let Some(c) = self.counts.get_mut(id as usize) {
-            *c += 1;
+        self.record(IndexEntry { ts: ts.0, file, offset, len: len as u32, name: 0, owner: 0, session: 0, fingerprint: None }, name);
+    }
+
+    pub fn push_observation(&mut self, observation: IndexedObservation<'_>) {
+        let owner = observation.fid.map_or(0, |fid| {
+            if let Some(id) = self.owner_ids.get(fid) {
+                return *id;
+            }
+            self.owners.push(fid.to_owned());
+            let id = self.owners.len() as u32;
+            self.owner_ids.insert(fid.to_owned(), id);
+            id
+        });
+        let len = observation.line.len();
+        if let Ok(len) = u32::try_from(len) {
+            self.record(IndexEntry {
+                ts: observation.timestamp.0, file: observation.source.file, offset: observation.source.offset,
+                len, name: 0, owner, session: observation.session.0, fingerprint: Some(fingerprint(observation.line)),
+            }, observation.name);
         }
-        self.entries.push(IndexEntry { ts: ts.0, file, offset: offset as u32, len: len as u32, name: id });
+    }
+
+    fn record(&mut self, mut entry: IndexEntry, name: &str) {
+        entry.name = self.intern(name);
+        if let Some(count) = self.counts.get_mut(entry.name as usize) {
+            *count += 1;
+        }
+        self.entries.push(entry);
     }
 
     pub fn name(&self, id: u16) -> &str {
@@ -71,10 +121,19 @@ impl JournalIndex {
     pub fn read_line(&self, e: &IndexEntry) -> Option<String> {
         let path = self.files.get(e.file as usize)?;
         let mut f = std::fs::File::open(path).ok()?;
-        f.seek(SeekFrom::Start(u64::from(e.offset))).ok()?;
+        if let Some(identity) = self.identities.get(e.file as usize).copied().flatten()
+            && crate::watcher::file_identity(&f).ok()? != identity
+        {
+            return None;
+        }
+        f.seek(SeekFrom::Start(e.offset)).ok()?;
         let mut buf = vec![0u8; e.len as usize];
         f.read_exact(&mut buf).ok()?;
-        Some(String::from_utf8_lossy(&buf).into_owned())
+        let text = String::from_utf8(buf).ok()?;
+        if e.fingerprint.is_some_and(|expected| fingerprint(&text) != expected) {
+            return None;
+        }
+        Some(text)
     }
 
     pub fn len(&self) -> usize {
@@ -84,4 +143,20 @@ impl JournalIndex {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+pub struct IndexedObservation<'a> {
+    pub timestamp: Timestamp,
+    pub source: crate::raw::LineSource,
+    pub session: Timestamp,
+    pub fid: Option<&'a str>,
+    pub name: &'a str,
+    pub line: &'a str,
+}
+
+fn fingerprint(line: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    line.hash(&mut h);
+    h.finish()
 }

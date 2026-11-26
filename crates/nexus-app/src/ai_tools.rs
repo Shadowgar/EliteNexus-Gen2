@@ -53,15 +53,16 @@ pub struct NexusTools {
 pub struct CommanderScope {
     commander: Option<String>,
     generation: u64,
+    source_generation: u64,
 }
 
 impl CommanderScope {
     pub fn capture(model: &Model) -> Self {
-        Self { commander: model.active.clone(), generation: model.active_generation() }
+        Self { commander: model.active.clone(), generation: model.active_generation(), source_generation: model.source_generation() }
     }
 
     pub fn matches(&self, model: &Model) -> bool {
-        self.commander == model.active && self.generation == model.active_generation()
+        self.commander == model.active && self.generation == model.active_generation() && self.source_generation == model.source_generation()
     }
 }
 
@@ -227,16 +228,28 @@ impl NexusTools {
         let model = self.model_in_scope()?;
         let gs = model.active().ok_or("No commander loaded yet.")?;
         let ship = gs.fleet.current();
-        Ok(Me {
-            pos: gs.location.star_pos,
-            system: gs.location.system.clone(),
+        let pos = gs.location.star_pos;
+        let system_address = gs.location.system_address;
+        let system = gs.location.system.clone();
+        let mut me = Me {
+            pos,
+            system: system.clone(),
             pad: finder::ship_pad(gs),
             cargo_capacity: ship.map(|s| i64::from(s.cargo_capacity)).filter(|c| *c > 0).unwrap_or(0),
             credits: gs.cmdr.credits,
             jump_range: ship.map(|s| s.max_jump_range).unwrap_or(0.0),
             overcharge: overcharges(ship),
             loadout: ship.and_then(|s| s.loadout_json.clone()),
-        })
+        };
+        drop(model);
+        if me.pos.is_none() && system_address != 0
+            && let Some(db) = &self.db
+            && let Ok(Some(known)) = db.system_by_id(system_address)
+            && known.name.eq_ignore_ascii_case(&system)
+        {
+            me.pos = known.pos.filter(|coords| coords.iter().all(|axis| axis.is_finite()));
+        }
+        Ok(me)
     }
 
     /// Position and name of `near_system`, or the commander's, for a tool answering from local data: the local database,
@@ -819,69 +832,120 @@ impl NexusTools {
             Ok(Some(if end { next.0 } else { start.0 }))
         };
         let (from, to) = (bound("from", false)?, bound("to", true)?);
-        let dated = from.is_some() || to.is_some();
-        let in_period = |ts: i64| from.is_none_or(|f| ts >= f) && to.is_none_or(|t| ts < t);
-        // Only the files with events in the period: the index knows every event's time.
-        let (files, first) = {
+        if let Some(scope) = &self.commander_scope {
+            let model = self.model_in_scope()?;
+            let fid = model.verified_fid().ok_or("No verified commander is loaded.")?.to_owned();
+            drop(model);
             let idx = self.index.read();
-            let mut wanted = vec![!dated; idx.files.len()];
-            if dated {
-                for e in idx.entries.iter().filter(|e| in_period(e.ts)) {
-                    if let Some(w) = wanted.get_mut(e.file as usize) {
-                        *w = true;
-                    }
-                }
+            if idx.source_generation != scope.source_generation {
+                return Err("The journal source changed.".into());
             }
-            let files: Vec<_> = idx.files.iter().zip(wanted).filter(|(_, w)| *w).map(|(p, _)| p.clone()).collect();
-            (files, idx.entries.first().map(|e| e.ts))
-        };
-        // Room for the rest of the answer within the caller's length.
-        let budget = self.budget.saturating_sub(1_000);
-        let (mut hits, mut size, mut skipped, mut more) = (Vec::new(), 0, 0, false);
-        'files: for path in files.iter().rev() {
-            let Ok(text) = std::fs::read_to_string(path) else { continue };
-            for line in text.lines().rev() {
+            let mut hits = Vec::new();
+            let mut bytes = 0;
+            let mut matches = 0;
+            let budget = self.budget.saturating_sub(1_000);
+            let mut more = false;
+            let mut searched = 0;
+            for entry in idx.entries.iter().rev().filter(|e| {
+                idx.belongs_to(e, &fid) && from.is_none_or(|f| e.ts >= f) && to.is_none_or(|t| e.ts < t)
+            }) {
+                searched += 1;
+                if searched > 10_000 {
+                    break;
+                }
+                let Some(line) = idx.read_line(entry) else { continue };
                 if !line.to_lowercase().contains(&needle) {
                     continue;
                 }
-                let v: Value = serde_json::from_str(line).unwrap_or(Value::Null);
-                let ts = v["timestamp"].as_str().and_then(Timestamp::parse);
-                if dated {
-                    let Some(ts) = ts else { continue };
-                    if from.is_some_and(|f| ts.0 < f) {
-                        break 'files; // everything further on is older still
-                    }
-                    if !in_period(ts.0) {
-                        continue;
-                    }
-                }
-                if skipped < skip {
-                    skipped += 1;
+                matches += 1;
+                if matches <= skip {
                     continue;
                 }
-                let mut snippet: String = line.chars().take(400).collect();
-                if line.len() > snippet.len() {
-                    snippet.push('…');
-                }
-                let hit = json!({ "time": ts.map(|t| t.to_local_string("%Y-%m-%d %H:%M")), "event": v["event"], "line": snippet });
-                let len = hit.to_string().len() + 1;
-                if hits.len() >= limit || size + len > budget {
+                let mut snippet = line.chars().take(400).collect::<String>();
+                if line.len() > snippet.len() { snippet.push('?'); }
+                let hit = json!({ "time": Timestamp(entry.ts).to_local_string("%Y-%m-%d %H:%M"), "event": idx.name(entry.name), "line": snippet });
+                bytes += hit.to_string().len();
+                if hits.len() >= limit || bytes > budget {
                     more = true;
-                    break 'files;
+                    break;
                 }
-                size += len;
                 hits.push(hit);
             }
+            let next = skip + hits.len();
+            let mut out = json!({ "query": needle, "matches_newest_first": hits });
+            if more { out["more_matches"] = json!(format!("Use skip {next} for the next matching rows.")); }
+            if searched > 10_000 { out["scan_limit_reached"] = json!("Narrow the date range to search older rows."); }
+            return Ok(out);
         }
-        let shown = hits.len();
-        let mut out = json!({ "query": needle, "matches_newest_first": hits });
-        if let Some(t) = first {
-            out["journal_starts"] = json!(Timestamp(t).to_local_string("%Y-%m-%d"));
+        #[cfg(not(test))]
+        return Err("Journal search requires a verified source and commander scope.".into());
+
+        #[cfg(test)]
+        {
+            let dated = from.is_some() || to.is_some();
+            let in_period = |ts: i64| from.is_none_or(|f| ts >= f) && to.is_none_or(|t| ts < t);
+            // Only the files with events in the period: the index knows every event's time.
+            let (files, first) = {
+                let idx = self.index.read();
+                let mut wanted = vec![!dated; idx.files.len()];
+                if dated {
+                    for e in idx.entries.iter().filter(|e| in_period(e.ts)) {
+                        if let Some(w) = wanted.get_mut(e.file as usize) {
+                            *w = true;
+                        }
+                    }
+                }
+                let files: Vec<_> = idx.files.iter().zip(wanted).filter(|(_, w)| *w).map(|(p, _)| p.clone()).collect();
+                (files, idx.entries.first().map(|e| e.ts))
+            };
+            // Room for the rest of the answer within the caller's length.
+            let budget = self.budget.saturating_sub(1_000);
+            let (mut hits, mut size, mut skipped, mut more) = (Vec::new(), 0, 0, false);
+            'files: for path in files.iter().rev() {
+                let Ok(text) = std::fs::read_to_string(path) else { continue };
+                for line in text.lines().rev() {
+                    if !line.to_lowercase().contains(&needle) {
+                        continue;
+                    }
+                    let v: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+                    let ts = v["timestamp"].as_str().and_then(Timestamp::parse);
+                    if dated {
+                        let Some(ts) = ts else { continue };
+                        if from.is_some_and(|f| ts.0 < f) {
+                            break 'files; // everything further on is older still
+                        }
+                        if !in_period(ts.0) {
+                            continue;
+                        }
+                    }
+                    if skipped < skip {
+                        skipped += 1;
+                        continue;
+                    }
+                    let mut snippet: String = line.chars().take(400).collect();
+                    if line.len() > snippet.len() {
+                        snippet.push('…');
+                    }
+                    let hit = json!({ "time": ts.map(|t| t.to_local_string("%Y-%m-%d %H:%M")), "event": v["event"], "line": snippet });
+                    let len = hit.to_string().len() + 1;
+                    if hits.len() >= limit || size + len > budget {
+                        more = true;
+                        break 'files;
+                    }
+                    size += len;
+                    hits.push(hit);
+                }
+            }
+            let shown = hits.len();
+            let mut out = json!({ "query": needle, "matches_newest_first": hits });
+            if let Some(t) = first {
+                out["journal_starts"] = json!(Timestamp(t).to_local_string("%Y-%m-%d"));
+            }
+            if more {
+                out["more_matches"] = json!(format!("Older matches were left out: call again with skip {} (same query and period) for the next ones.", skip + shown));
+            }
+            Ok(out)
         }
-        if more {
-            out["more_matches"] = json!(format!("Older matches were left out: call again with skip {} (same query and period) for the next ones.", skip + shown));
-        }
-        Ok(out)
     }
 
     /// Planets and moons of a system: physics and signals (Spansh, local), discovery and footfall
@@ -1866,6 +1930,9 @@ impl ToolHost for NexusTools {
     }
 
     fn call(&self, name: &str, args: &Value) -> Result<Value, String> {
+        if self.commander_scope.is_some() && !tool(name).is_some_and(|t| t.available_to(self.caller)) {
+            return Err("This tool is unavailable in the current scope.".into());
+        }
         match tool(name) {
             Some(t) if t.offered_to(self.caller) => (t.run)(self, args).map(|v| within(v, self.budget)),
             _ => Err(format!("Unknown tool \"{name}\".")),
@@ -1912,7 +1979,7 @@ impl Tool {
         self.offered_to(caller)
             && self.read_only
             && (caller != Caller::LocalAsk || !self.online)
-            && !matches!(self.name, "journal_search" | "on_foot" | "credit_history" | "system_factions" | "progress")
+            && !matches!(self.name, "on_foot" | "credit_history" | "system_factions" | "progress")
     }
 
     pub fn spec(&self) -> ToolSpec {
@@ -2232,7 +2299,7 @@ pub static TOOLS: &[Tool] = &[
     Tool {
         name: "journal_search",
         title: "Search your journal",
-        description: "Searches the commander's own game journal (every journal file in their journal folder; journal_starts is the first day it holds) for lines with a text, newest first, each with its local time. One call returns up to limit matches, fewer when the lines are long; more_matches says when older ones were left out and how to get them. For a period, such as a week of travel, pass from and to. Event names work as text: FSDJump (jumps), Docked, MarketSell, MissionCompleted. Use for questions about past trips, sales, missions, ships, places visited.",
+        description: "Search journal records attributed to the current verified commander in this journal source. Unknown owners are excluded. Use from/to to narrow a date range.",
         params: || {
             schema(
                 json!({
@@ -3537,6 +3604,43 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn scoped_journal_search_hides_other_and_unknown_owners_from_ask_and_mcp() {
+        use nexus_journal::index::IndexedObservation;
+        use nexus_journal::{LineSource, Timestamp};
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut tools = model_tools(commander(), &rt);
+        let scope = CommanderScope::capture(&tools.model.read());
+        tools.commander_scope = Some(scope);
+        let dir = JournalDir::new("scoped-history");
+        let path = dir.0.join("synthetic.log");
+        let mut text = String::new();
+        {
+            let mut index = tools.index.write();
+            let file = index.add_file(path.clone());
+            let ts = Timestamp::parse("2026-09-05T00:13:29Z").unwrap();
+            for (owner, suffix) in [(Some("F1"), "mine"), (Some("F2"), "other"), (None, "unknown")] {
+                let line = json!({"timestamp": ts.to_iso(), "event":"Music", "MusicTrack": format!("marker-{suffix}")}).to_string();
+                index.push_observation(IndexedObservation {
+                    timestamp: ts, source: LineSource { file, offset: text.len() as u64 },
+                    session: ts, fid: owner, name: "Music", line: &line,
+                });
+                text.push_str(&line);
+                text.push('\n');
+            }
+        }
+        std::fs::write(path, text).unwrap();
+        for caller in [Caller::Ask, Caller::Mcp, Caller::LocalAsk] {
+            tools.caller = caller;
+            let result = tools.call("journal_search", &json!({ "query": "marker" })).unwrap().to_string();
+            assert!(result.contains("marker-mine"), "{result}");
+            assert!(!result.contains("marker-other") && !result.contains("marker-unknown"), "{result}");
+        }
+        tools.model.write().set_source_generation(9);
+        assert!(tools.call("journal_search", &json!({ "query": "marker" })).is_err());
     }
 
     /// An `FSDJump` into Gamma: two factions, the first with a reputation and a pending state.

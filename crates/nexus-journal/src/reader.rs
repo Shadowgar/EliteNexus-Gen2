@@ -10,6 +10,8 @@ use crate::paths::JournalFile;
 use crate::raw::{parse_event_lenient, scan_line};
 use crate::time::Timestamp;
 use rayon::prelude::*;
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::Path;
 
 /// One complete journal line from a bulk load.
@@ -17,11 +19,11 @@ use std::path::Path;
 pub struct LoadedEvent {
     pub ts: Timestamp,
     /// Byte offset of the line within the file.
-    pub offset: u32,
+    pub offset: u64,
     /// Byte length of the line (without the newline).
-    pub len: u32,
-    name_off: u32,
-    name_len: u16,
+    pub len: usize,
+    name_off: usize,
+    name_len: usize,
     pub event: Event,
 }
 
@@ -30,7 +32,8 @@ pub struct LoadedEvent {
 pub struct FileEvents {
     /// Index of the file in the list passed to [`load_history`].
     pub file: u32,
-    pub text: String,
+    bytes: Vec<u8>,
+    pub checkpoint: Option<crate::watcher::Checkpoint>,
     pub events: Vec<LoadedEvent>,
     /// Bytes consumed: everything up to and including the last newline. A partially written
     /// final line (the game is still writing it) is left for the live tailer.
@@ -41,43 +44,58 @@ pub struct FileEvents {
 impl FileEvents {
     #[inline]
     pub fn line(&self, e: &LoadedEvent) -> &str {
-        &self.text[e.offset as usize..(e.offset + e.len) as usize]
+        std::str::from_utf8(&self.bytes[e.offset as usize..e.offset as usize + e.len]).expect("validated journal line")
     }
     #[inline]
     pub fn name(&self, e: &LoadedEvent) -> &str {
-        &self.text[e.name_off as usize..e.name_off as usize + e.name_len as usize]
+        std::str::from_utf8(&self.bytes[e.name_off..e.name_off + e.name_len]).expect("validated journal event name")
     }
 }
 
 /// Parses the complete lines of one journal file.
 pub fn read_journal_file(path: &Path, file: u32) -> std::io::Result<FileEvents> {
-    let bytes = std::fs::read(path)?;
-    let text = match String::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
-    };
-    Ok(parse_journal_text(text, file))
+    read_snapshot(path, file, u64::MAX)
+}
+
+fn read_snapshot(path: &Path, file: u32, limit: u64) -> io::Result<FileEvents> {
+    let handle = File::open(path)?;
+    let identity = crate::watcher::file_identity(&handle)?;
+    let mut bytes = Vec::new();
+    handle.take(limit).read_to_end(&mut bytes)?;
+    let mut events = parse_journal_bytes(bytes, file);
+    events.checkpoint = Some(crate::watcher::Checkpoint::from_bytes(path.to_owned(), identity, &events.bytes, events.consumed));
+    Ok(events)
 }
 
 /// Parses journal text (exposed for tests and replays).
 pub fn parse_journal_text(text: String, file: u32) -> FileEvents {
-    let consumed = text.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    parse_journal_bytes(text.into_bytes(), file)
+}
+
+/// Parse complete UTF-8 records without changing the offsets of the surrounding bytes.
+pub fn parse_journal_bytes(bytes: Vec<u8>, file: u32) -> FileEvents {
+    let consumed = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
     let mut events = Vec::with_capacity(consumed / 300 + 1);
     let mut parse_errors = 0u32;
     let mut pos = 0usize;
-    let base = text.as_ptr() as usize;
+    let base = bytes.as_ptr() as usize;
     while pos < consumed {
-        let end = text[pos..consumed].find('\n').map(|i| pos + i).unwrap_or(consumed);
-        let line = text[pos..end].trim_end_matches('\r');
+        let end = bytes[pos..consumed].iter().position(|&b| b == b'\n').map_or(consumed, |i| pos + i);
+        let Ok(line) = std::str::from_utf8(&bytes[pos..end]) else {
+            parse_errors += 1;
+            pos = end + 1;
+            continue;
+        };
+        let line = line.trim_end_matches('\r');
         if !line.trim().is_empty() {
             if let Some((ts, name)) = scan_line(line) {
                 match parse_event_lenient(name, line) {
                     Ok(event) => events.push(LoadedEvent {
                         ts,
-                        offset: pos as u32,
-                        len: line.len() as u32,
-                        name_off: (name.as_ptr() as usize - base) as u32,
-                        name_len: name.len().min(u16::MAX as usize) as u16,
+                        offset: pos as u64,
+                        len: line.len(),
+                        name_off: name.as_ptr() as usize - base,
+                        name_len: name.len(),
                         event,
                     }),
                     Err(err) => {
@@ -85,10 +103,10 @@ pub fn parse_journal_text(text: String, file: u32) -> FileEvents {
                         tracing::debug!(%err, event = name, "journal line failed typed parse");
                         events.push(LoadedEvent {
                             ts,
-                            offset: pos as u32,
-                            len: line.len() as u32,
-                            name_off: (name.as_ptr() as usize - base) as u32,
-                            name_len: name.len().min(u16::MAX as usize) as u16,
+                            offset: pos as u64,
+                            len: line.len(),
+                            name_off: name.as_ptr() as usize - base,
+                            name_len: name.len(),
                             event: Event::Other,
                         });
                     }
@@ -99,7 +117,7 @@ pub fn parse_journal_text(text: String, file: u32) -> FileEvents {
         }
         pos = end + 1;
     }
-    FileEvents { file, text, events, consumed: consumed as u64, parse_errors }
+    FileEvents { file, bytes, checkpoint: None, events, consumed: consumed as u64, parse_errors }
 }
 
 /// Loads every file in `files` (oldest first), parsing `batch` files concurrently and calling
@@ -110,7 +128,7 @@ pub fn load_history(files: &[JournalFile], batch: usize, mut sink: impl FnMut(&J
         let parsed: Vec<std::io::Result<FileEvents>> = chunk
             .par_iter()
             .enumerate()
-            .map(|(i, f)| read_journal_file(&f.path, (chunk_idx * batch + i) as u32))
+            .map(|(i, f)| read_snapshot(&f.path, (chunk_idx * batch + i) as u32, f.size))
             .collect();
         for (f, res) in chunk.iter().zip(parsed) {
             match res {
@@ -124,6 +142,21 @@ pub fn load_history(files: &[JournalFile], batch: usize, mut sink: impl FnMut(&J
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_utf8_never_moves_a_following_event_offset() {
+        let mut bytes = vec![0xff, b'\n'];
+        let first = bytes.len();
+        let line = "{\"timestamp\":\"2026-09-05T00:13:29Z\",\"event\":\"Commander\",\"FID\":\"F1\",\"Name\":\"Test-?\"}";
+        bytes.extend(line.as_bytes());
+        bytes.extend_from_slice(b"\r\npartial");
+        let fe = parse_journal_bytes(bytes, 0);
+        assert_eq!(fe.parse_errors, 1);
+        assert_eq!(fe.events.len(), 1);
+        assert_eq!(fe.events[0].offset, first as u64);
+        assert_eq!(fe.line(&fe.events[0]), line);
+        assert_eq!(fe.consumed, (first + line.len() + 2) as u64);
+    }
 
     #[test]
     fn leaves_partial_last_line() {
@@ -143,6 +176,6 @@ mod tests {
         assert!(matches!(&fe.events[1].event, Event::Music(m) if m.music_track == "NoTrack"));
         let Event::Commander(c) = &fe.events[0].event else { panic!() };
         assert_eq!(c.name, "Jameson");
-        assert!(fe.consumed < fe.text.len() as u64);
+        assert!(fe.consumed < fe.bytes.len() as u64);
     }
 }

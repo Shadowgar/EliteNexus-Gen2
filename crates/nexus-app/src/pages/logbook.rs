@@ -29,13 +29,23 @@ pub struct LogbookUi {
     pub search: String,
     /// Entry indices matching the full-text search.
     pub search_hits: Slot<Vec<usize>>,
+    source_generation: Option<u64>,
 }
 
 pub fn show(ui: &mut Ui, gs: &GameState, st: &mut LogbookUi, index: &Arc<RwLock<JournalIndex>>) {
+    let generation = index.read().source_generation;
+    if st.source_generation != Some(generation) {
+        st.source_generation = Some(generation);
+        st.selected = None;
+        st.detail = None;
+        st.event = None;
+        st.search.clear();
+        st.search_hits = Slot::default();
+    }
     st.search_hits.tick();
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(12.0, 10.0);
-        if let Some(t) = crate::widgets::tabs(ui, st.tab, &[(Tab::Activity, "Activity"), (Tab::Journal, "Every event"), (Tab::Jumps, "Travel"), (Tab::Docks, "Docking"), (Tab::Ledger, "Credits ledger")]) {
+        if let Some(t) = crate::widgets::tabs(ui, st.tab, &[(Tab::Activity, "Activity"), (Tab::Journal, "All commanders"), (Tab::Jumps, "Travel"), (Tab::Docks, "Docking"), (Tab::Ledger, "Credits ledger")]) {
             st.tab = t;
         }
         if st.tab != Tab::Journal {
@@ -150,9 +160,7 @@ fn journal(ui: &mut Ui, st: &mut LogbookUi, index: &Arc<RwLock<JournalIndex>>) {
         Some(hits) if !st.search.trim().is_empty() => hits.iter().rev().copied().collect(),
         _ => (0..idx.len()).rev().collect(),
     };
-    if let Some(id) = st.event {
-        rows.retain(|&i| idx.entries[i].name == id);
-    }
+    rows.retain(|&i| idx.entries.get(i).is_some_and(|e| st.event.is_none_or(|id| e.name == id)));
     ui.label(RichText::new(format!("{} events", rows.len())).small().color(pal::DIM));
     let detail_w = 460.0;
     ui.horizontal_top(|ui| {
@@ -195,7 +203,7 @@ fn journal(ui: &mut Ui, st: &mut LogbookUi, index: &Arc<RwLock<JournalIndex>>) {
         });
         ui.vertical(|ui| {
             ui.set_width(detail_w);
-            if let Some(i) = st.selected {
+            if let Some(i) = st.selected.filter(|&i| idx.entries.get(i).is_some()) {
                 if st.detail.as_ref().is_none_or(|(di, _)| *di != i) {
                     let text = idx
                         .read_line(&idx.entries[i])
@@ -229,21 +237,20 @@ fn full_text_search(index: &Arc<RwLock<JournalIndex>>, needle: &str) -> Vec<usiz
         let idx = index.read();
         (idx.files.clone(), idx.entries.clone())
     };
-    let mut by_pos: rustc_hash::FxHashMap<(u32, u32), usize> = Default::default();
+    let mut by_pos: rustc_hash::FxHashMap<(u32, u64), usize> = Default::default();
     for (i, e) in entries.iter().enumerate() {
         by_pos.insert((e.file, e.offset), i);
     }
     let mut hits = Vec::new();
     for (fi, path) in files.iter().enumerate() {
         let Ok(bytes) = std::fs::read(path) else { continue };
-        let text = String::from_utf8_lossy(&bytes);
-        let mut pos = 0usize;
-        for line in text.split_inclusive('\n') {
-            if line.to_ascii_lowercase().contains(needle)
-                && let Some(&i) = by_pos.get(&(fi as u32, pos as u32)) {
+        let mut pos = 0u64;
+        for bytes in bytes.split_inclusive(|&b| b == b'\n') {
+            if std::str::from_utf8(bytes).is_ok_and(|line| line.to_ascii_lowercase().contains(needle))
+                && let Some(&i) = by_pos.get(&(fi as u32, pos)) {
                     hits.push(i);
                 }
-            pos += line.len();
+            pos += bytes.len() as u64;
         }
     }
     hits.sort_unstable();

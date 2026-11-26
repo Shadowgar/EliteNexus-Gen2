@@ -349,10 +349,11 @@ mod tests {
     fn scope_policy_hides_history_and_side_effects_from_ai_interfaces() {
         use crate::ai_tools::Caller;
         for caller in [Caller::Ask, Caller::LocalAsk, Caller::Mcp] {
-            for name in ["journal_search", "credit_history", "on_foot", "system_factions", "plan_route", "money_routes"] {
+            for name in ["credit_history", "on_foot", "system_factions", "plan_route", "money_routes"] {
                 assert!(!tool(name).unwrap().available_to(caller), "{name}");
             }
             assert!(tool("knowledge").unwrap().available_to(caller));
+            assert!(tool("journal_search").unwrap().available_to(caller));
         }
         assert!(!tool("system_bodies").unwrap().available_to(Caller::LocalAsk));
     }

@@ -1531,6 +1531,9 @@ pub struct Model {
     pub commanders: BTreeMap<String, GameState>,
     pub active: Option<String>,
     active_generation: u64,
+    source_generation: u64,
+    session_start: Timestamp,
+    tentative_owner: Option<String>,
     pending_header: Option<ev::Fileheader>,
     pub events_applied: u64,
     pub last_event: Timestamp,
@@ -1564,6 +1567,33 @@ impl Model {
         *kept = (*kept).max(upto);
     }
 
+    /// A new source projection must invalidate pending readers even if the same FID is active.
+    pub fn set_source_generation(&mut self, generation: u64) {
+        self.source_generation = generation;
+    }
+
+    pub fn source_generation(&self) -> u64 {
+        self.source_generation
+    }
+
+    /// A new journal session has no inherited active owner. Consecutive multipart files
+    /// of the same session do not call this method.
+    pub fn begin_journal_session(&mut self, start: Timestamp) {
+        self.active = None;
+        self.active_generation = self.active_generation.wrapping_add(1);
+        self.session_start = start;
+        self.tentative_owner = None;
+        self.pending_header = None;
+    }
+
+    pub fn verified_fid(&self) -> Option<&str> {
+        self.active().map(|gs| gs.cmdr.fid.as_str()).filter(|fid| !fid.is_empty())
+    }
+
+    pub fn journal_session_start(&self) -> Timestamp {
+        self.session_start
+    }
+
     pub fn active_generation(&self) -> u64 {
         self.active_generation
     }
@@ -1577,10 +1607,24 @@ impl Model {
     }
 
     fn switch_to(&mut self, fid: &str, name: &str) {
-        let key = if fid.is_empty() { name.to_string() } else { fid.to_string() };
-        if key.is_empty() {
+        if fid.is_empty() && name.is_empty() {
+            self.begin_journal_session(self.session_start);
             return;
         }
+        if self.active().is_some_and(|gs| fid.is_empty() && gs.cmdr.name.eq_ignore_ascii_case(name) && !gs.cmdr.fid.is_empty()) {
+            return;
+        }
+        let key = if fid.is_empty() { format!("{}:{name}", self.session_start.0) } else { fid.to_owned() };
+        if !fid.is_empty()
+            && let Some(provisional) = self.tentative_owner.take()
+            && self.active.as_deref() == Some(&provisional)
+            && self.commanders.get(&provisional).is_some_and(|gs| gs.cmdr.name.eq_ignore_ascii_case(name))
+            && !self.commanders.contains_key(fid)
+            && let Some(gs) = self.commanders.remove(&provisional)
+        {
+            self.commanders.insert(key.clone(), gs);
+        }
+        self.tentative_owner = fid.is_empty().then(|| key.clone());
         let drops = &self.mining_drops;
         let cleared = self.exobio_cleared.get(&key).copied();
         let gs = self.commanders.entry(key.clone()).or_insert_with(|| GameState {
@@ -1605,11 +1649,19 @@ impl Model {
                 self.pending_header = Some((**h).clone());
             }
             Event::Commander(c) | Event::NewCommander(c) => self.switch_to(&c.fid, &c.name),
-            Event::LoadGame(l) => self.switch_to(&l.fid, &l.commander),
+            Event::LoadGame(l) => {
+                self.switch_to(&l.fid, &l.commander);
+                self.session_start = ctx.ts;
+                self.active_generation = self.active_generation.wrapping_add(1);
+            }
             _ => {}
         }
         if let Some(gs) = self.active_mut() {
+            let previous_fid = matches!(event, Event::LoadGame(l) if l.fid.is_empty()).then(|| gs.cmdr.fid.clone());
             gs.apply(ctx, event, alerts);
+            if let Some(fid) = previous_fid {
+                gs.cmdr.fid = fid;
+            }
         }
     }
 

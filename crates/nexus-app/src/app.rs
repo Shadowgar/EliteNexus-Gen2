@@ -87,6 +87,7 @@ pub struct NexusApp {
     missions: pages::missions::MissionsUi,
     combat: pages::combat::CombatUi,
     log: pages::logbook::LogbookUi,
+    navigation_scope: Option<(u64, u64)>,
     map: pages::galaxy_map::MapUi,
     binds: pages::bindings::BindsUi,
     hud: pages::hud::HudUi,
@@ -249,6 +250,7 @@ impl NexusApp {
             missions: pages::missions::MissionsUi::default(),
             combat: pages::combat::CombatUi::new(ov.tab.as_deref()),
             log: Default::default(),
+            navigation_scope: None,
             map,
             binds: Default::default(),
             hud: pages::hud::HudUi::new(ov.tab.as_deref()),
@@ -307,6 +309,9 @@ impl NexusApp {
         let next = {
             let model = self.core.model.read();
             let Some(gs) = model.active() else { return };
+            if self.navigation_scope != Some((model.source_generation(), model.active_generation())) {
+                return;
+            }
             // Arrivals tick off planned waypoints; a carrier route follows its carrier, wherever the commander is.
             if let Some(p) = self.nav.planned.as_mut() {
                 let carrier = p.carrier().and_then(|k| gs.carrier_of(k).system.as_deref());
@@ -981,6 +986,8 @@ impl NexusApp {
         }
         if restart {
             self.assistant.replace_source();
+            self.log = Default::default();
+            self.nav = Default::default();
             self.ask_ui.input.clear();
             self.core = start_core(ctx, self.overrides.journal_dir.as_ref().or(self.settings.journal_dir.as_ref()), self.market.history_sink(), &self.settings);
             self.sync.attach(&self.core);
@@ -1307,6 +1314,17 @@ impl eframe::App for NexusApp {
         self.drain_alerts();
         {
             let model = self.core.model.read();
+            let scope = (model.source_generation(), model.active_generation());
+            if self.navigation_scope != Some(scope) {
+                if self.navigation_scope.is_some_and(|old| old.0 != 0) {
+                    self.nav = Default::default();
+                    self.log = Default::default();
+                    self.colo = Default::default();
+                    self.map = Default::default();
+                }
+                self.navigation_scope = Some(scope);
+                self.last_jump_count = None;
+            }
             if self.assistant.sync_scope(&self.settings.ai, &model) {
                 self.ask_ui.input.clear();
             }

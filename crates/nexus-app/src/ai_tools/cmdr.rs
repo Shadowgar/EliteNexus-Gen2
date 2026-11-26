@@ -319,7 +319,7 @@ fn read_entry(files: &[PathBuf], e: &IndexEntry, open: &mut Option<(u32, std::fs
         *open = Some((e.file, std::fs::File::open(files.get(e.file as usize)?).ok()?));
     }
     let (_, f) = open.as_mut()?;
-    f.seek(SeekFrom::Start(u64::from(e.offset))).ok()?;
+    f.seek(SeekFrom::Start(e.offset)).ok()?;
     let mut buf = vec![0u8; e.len as usize];
     f.read_exact(&mut buf).ok()?;
     Some(String::from_utf8_lossy(&buf).into_owned())

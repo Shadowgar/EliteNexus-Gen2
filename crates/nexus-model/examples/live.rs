@@ -14,19 +14,19 @@ fn main() {
     let files = list_journal_files(&dir).expect("list");
     let mut model = Model::default();
     let mut quiet = Alerts::disabled();
-    let mut resume = None;
-    load_history(&files, 32, |f, fe| {
+    let mut resume = Vec::new();
+    load_history(&files, 32, |_, fe| {
         for e in &fe.events {
             let ctx = EventCtx { ts: e.ts, name: fe.name(e), line: fe.line(e), live: false };
             model.apply(&ctx, &e.event, &mut quiet);
         }
-        resume = Some((f.path.clone(), fe.consumed));
+        resume.extend(fe.checkpoint);
     });
     let out = std::io::stdout();
     let mut out = out.lock();
-    let _ = writeln!(out, "history loaded: {} events; tailing {:?} for {minutes} min", model.events_applied, resume.as_ref().map(|r| &r.0));
+    let _ = writeln!(out, "history loaded: {} events; tailing {:?} for {minutes} min", model.events_applied, resume.last().map(|r| &r.path));
     let (tx, rx) = crossbeam_channel::unbounded();
-    let cfg = WatcherConfig { dir, poll: Duration::from_millis(100), resume, emit_initial_companions: false };
+    let cfg = WatcherConfig { dir, poll: Duration::from_millis(100), resume, initial: files, live_from: nexus_journal::Timestamp::now() };
     let _w = Watcher::spawn(cfg, tx).expect("watcher");
     let end = Instant::now() + Duration::from_secs(minutes * 60);
     let mut unknown = std::collections::BTreeMap::<String, u32>::new();
@@ -36,7 +36,7 @@ fn main() {
         match msg {
             WatchMsg::Event(le) => {
                 let lat_ms = (chrono::Utc::now().timestamp_millis() - le.raw.ts.0 * 1000).max(0);
-                let ctx = EventCtx { ts: le.raw.ts, name: &le.raw.name, line: &le.raw.line, live: true };
+                let ctx = EventCtx { ts: le.raw.ts, name: &le.raw.name, line: &le.raw.line, live: le.live };
                 model.apply(&ctx, &le.event, &mut alerts);
                 let typed = !matches!(le.event, nexus_journal::Event::Other);
                 if !typed && nexus_journal::Event::is_modelled(&le.raw.name) {
@@ -49,15 +49,16 @@ fn main() {
                 let loc = gs.map(|g| format!("{} | {}", g.location.system, g.location.situation())).unwrap_or_default();
                 let _ = writeln!(out, "{} +{:>5}ms {:<28} {}", le.raw.ts.to_local_string("%H:%M:%S"), lat_ms, le.raw.name, loc);
             }
-            WatchMsg::Companion(c) => {
+            WatchMsg::Companion(c, _) => {
                 model.apply_companion(&c, true, &mut alerts);
                 if !matches!(c, nexus_journal::Companion::Status(_)) {
                     let _ = writeln!(out, "         companion {:?}", c.kind());
                 }
             }
-            WatchMsg::FileOpened(f) => {
+            WatchMsg::FileOpened(f, _) => {
                 let _ = writeln!(out, "-- new journal file {}", f.file_name);
             }
+            WatchMsg::Rebuild => break,
             WatchMsg::Error(e) => {
                 let _ = writeln!(out, "!! watcher error: {e}");
             }

@@ -5,6 +5,12 @@ release time that section becomes the new version and the release workflow publi
 
 ## Unreleased
 
+- **Journals:** Keep complete records in order when new parts appear and rebuild local views when a journal is replaced.
+  Logbook's **All commanders** tab shows the aggregate source. Ask and AI agents can search records attributed to
+  the active verified commander. Route-writing tools remain unavailable through AI.
+- **Current state:** Reject old or unqualified companion snapshots and clear coordinates after a move when the destination
+  address has no position. Folder and commander changes retire pending plans and replies.
+
 - **Ask:** Save credentials for each model service address. Earlier keys need explicit confirmation before use.
   Ask starts a fresh conversation when its model connection, key, commander or journal source changes.
   Ask and AI agents offer current-state tools while historical and route-writing tools are unavailable.

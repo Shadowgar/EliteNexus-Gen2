@@ -137,6 +137,7 @@ pub(crate) struct EddnItem {
 }
 
 enum Input {
+    SourceChanged,
     Event(RawEvent, Box<UploadContext>),
     Companion(Companion, Box<UploadContext>),
     /// The current session for an Inara profile update (see [`Uplink::sync_inara_profile`]).
@@ -380,9 +381,16 @@ impl Uplink {
         Uplink { tx, shared, thread }
     }
 
+    /// Discard attribution and buffered observations when the app changes journal scope.
+    pub fn source_changed(&self) {
+        let _ = self.tx.send(Input::SourceChanged);
+    }
+
     /// Hands over one live journal event (call after the model applied it).
     pub fn on_event(&self, ev: &LiveEvent, ctx: &UploadContext) {
-        let _ = self.tx.send(Input::Event(ev.raw.clone(), Box::new(ctx.clone())));
+        if ev.live {
+            let _ = self.tx.send(Input::Event(ev.raw.clone(), Box::new(ctx.clone())));
+        }
     }
 
     /// Hands over a companion file the watcher read (Status.json, Market.json, …).
@@ -563,6 +571,14 @@ impl Processor {
 
     fn handle(&mut self, input: Input) {
         match input {
+            Input::SourceChanged => {
+                self.session = Session::new();
+                self.eddn = EddnBuilder::new(eddn_options(&self.cfg));
+                self.inara = InaraMapper::new();
+                self.stub = None;
+                self.last_ctx = UploadContext::default();
+                self.held.clear();
+            }
             Input::Event(raw, ctx) => {
                 self.on_event(&raw, &ctx);
                 self.last_ctx = *ctx;

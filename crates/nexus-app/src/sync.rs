@@ -9,7 +9,6 @@ use crate::settings::Accounts;
 use crossbeam_channel::Receiver;
 use nexus_uplink::{EdsmCredentials, InaraCredentials, Uplink, UplinkConfig, UplinkStatus, UploadContext};
 use nexus_journal::{LineSource, RawEvent};
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -19,6 +18,7 @@ pub struct SyncService {
     applied: UplinkConfig,
     /// Send the current session's profile to Inara once the journal history is loaded.
     inara_due: bool,
+    attachment: Arc<parking_lot::Mutex<u64>>,
 }
 
 impl SyncService {
@@ -26,14 +26,14 @@ impl SyncService {
         let cfg = config(acc);
         let uplink = Arc::new(Uplink::new(cfg.clone(), data_dir, rt));
         let inara_due = cfg.inara_enabled();
-        let sync = SyncService { uplink: Some(uplink), applied: cfg, inara_due };
+        let sync = SyncService { uplink: Some(uplink), applied: cfg, inara_due, attachment: Default::default() };
         sync.attach(core);
         sync
     }
 
     /// No uploads at all (screenshot / replay runs).
     pub fn disabled() -> SyncService {
-        SyncService { uplink: None, applied: UplinkConfig::default(), inara_due: false }
+        SyncService { uplink: None, applied: UplinkConfig::default(), inara_due: false, attachment: Default::default() }
     }
 
     /// Call every frame: brings the Inara profile up to date when it is due (at start-up and
@@ -44,12 +44,12 @@ impl SyncService {
         }
         self.inara_due = false;
         let Some(u) = &self.uplink else { return };
-        let events = current_session(core);
-        if events.is_empty() {
-            return;
+        let model = core.model.read();
+        let events = current_session(core, &model);
+        if !events.is_empty() {
+            let ctx = upload_context(&EventContext::capture(&model));
+            u.sync_inara_profile(events, &ctx);
         }
-        let ctx = upload_context(&EventContext::capture(&core.model.read()));
-        u.sync_inara_profile(events, &ctx);
     }
 
     /// Asks Inara again who the key belongs to.
@@ -62,7 +62,10 @@ impl SyncService {
     /// Follows a (re)started core. The previous forwarder ends when its core stops.
     pub fn attach(&self, core: &Core) {
         if let Some(u) = &self.uplink {
-            forward(core.subscribe(), u.clone());
+            let mut attachment = self.attachment.lock();
+            *attachment = attachment.wrapping_add(1);
+            u.source_changed();
+            forward(core.subscribe(), u.clone(), self.attachment.clone(), *attachment);
         }
     }
 
@@ -99,30 +102,36 @@ impl SyncService {
 
 /// The current game session (its Fileheader/LoadGame to now) as raw events. Each journal file is
 /// read once and sliced by the index offsets.
-fn current_session(core: &Core) -> Vec<RawEvent> {
+fn current_session(core: &Core, model: &nexus_model::Model) -> Vec<RawEvent> {
+    let Some(fid) = model.verified_fid() else { return Vec::new() };
+    let session = model.journal_session_start();
     let idx = core.index.read();
-    let (Some(load), Some(header)) = (idx.id_of("LoadGame"), idx.id_of("Fileheader")) else {
+    if idx.source_generation != model.source_generation() {
         return Vec::new();
-    };
-    let Some(li) = idx.entries.iter().rposition(|e| e.name == load) else {
-        return Vec::new();
-    };
-    let start = idx.entries[..li].iter().rposition(|e| e.name == header && e.file == idx.entries[li].file).unwrap_or(li);
-    let mut files: HashMap<u32, Vec<u8>> = HashMap::new();
-    idx.entries[start..]
-        .iter()
+    }
+    idx.entries.iter().filter(|e| idx.in_session(e, session) && idx.belongs_to(e, fid))
         .filter_map(|e| {
-            let bytes = files.entry(e.file).or_insert_with(|| idx.files.get(e.file as usize).and_then(|p| std::fs::read(p).ok()).unwrap_or_default());
-            let line = bytes.get(e.offset as usize..(e.offset as usize + e.len as usize))?;
-            RawEvent::new(String::from_utf8_lossy(line).trim_end(), LineSource::default())
+            let line = idx.read_line(e)?;
+            RawEvent::new(&line, LineSource::default())
         })
         .collect()
 }
 
-fn forward(rx: Receiver<LiveMsg>, uplink: Arc<Uplink>) {
+fn forward(rx: Receiver<LiveMsg>, uplink: Arc<Uplink>, attachment: Arc<parking_lot::Mutex<u64>>, owner: u64) {
     let spawned = std::thread::Builder::new().name("nexus-sync".into()).spawn(move || {
         // Watcher order is preserved (EDSM swaps Cargo/ShipLocker events for their companion files).
+        let mut scope = None;
         for msg in rx {
+            let active = attachment.lock();
+            if *active != owner { break; }
+            let context = match &msg {
+                LiveMsg::Event(_, c) | LiveMsg::Companion(_, c) => c,
+            };
+            let current = (context.source_generation, context.commander_generation);
+            if scope != Some(current) {
+                uplink.source_changed();
+                scope = Some(current);
+            }
             match msg {
                 LiveMsg::Event(e, c) => uplink.on_event(&e, &upload_context(&c)),
                 LiveMsg::Companion(cmp, c) => uplink.on_companion(&cmp, &upload_context(&c)),
