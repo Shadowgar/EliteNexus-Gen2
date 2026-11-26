@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn a_short_run_doesnt_restart() {
-        let Some(recovery) = crate::launch::Recovery::capture(&[], std::path::Path::new(".")) else { return };
+        let Some(recovery) = crate::launch::Recovery::capture(&[], std::path::Path::new("."), None) else { return };
         assert!(!restart(Instant::now(), &recovery));
     }
 }

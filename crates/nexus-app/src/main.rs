@@ -41,7 +41,6 @@ mod untouched;
 mod update;
 mod widgets;
 
-use std::path::PathBuf;
 
 fn app_icon() -> egui::IconData {
     // macOS: an app bundle's own icon (Contents/Resources/EliteNexus.icns) is the one in the Dock. An empty icon
@@ -176,7 +175,28 @@ fn main() -> eframe::Result {
     // A panic is written straight to crash.log (nexus.log may not be open, and a release build has no console), with
     // where it happened: the next start says so, and the commander can send the file. Nothing is uploaded.
     let crash_log = data_dir.join("crash.log");
-    let recovery = launch::Recovery::capture(&launch_args, &data_dir);
+    let journal_dir = match launch::journal_argument(&launch_args).and_then(|picked| {
+        if let Some(path) = picked {
+            std::fs::canonicalize(path).map(Some)
+        } else if isolated {
+            let empty = data_dir.join("fixture-journals");
+            std::fs::create_dir_all(&empty)?;
+            let resolved = empty.canonicalize()?;
+            if !resolved.starts_with(&data_dir) {
+                return Err(std::io::Error::other("the fixture journals must stay in the isolated profile"));
+            }
+            Ok(Some(resolved))
+        } else {
+            Ok(None)
+        }
+    }) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("EliteNexus-Gen2 could not open the selected journal directory: {e}");
+            std::process::exit(2);
+        }
+    };
+    let recovery = launch::Recovery::capture(&launch_args, &data_dir, journal_dir.as_deref());
     static REPORTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
@@ -226,15 +246,6 @@ fn main() -> eframe::Result {
     let screenshot_mode = shot.is_some();
     // The overlay's see-through window needs the renderer set up for it now (Settings › Overlay, after a restart).
     let see_through = !screenshot_mode && settings::Settings::overlay_see_through(&data_dir);
-    let mut journal_dir = launch_args.iter().position(|a| a == "--journal-dir").and_then(|i| launch_args.get(i + 1)).filter(|path| !path.to_string_lossy().starts_with("--")).map(PathBuf::from);
-    if isolated && journal_dir.is_none() {
-        let empty = data_dir.join("fixture-journals");
-        if let Err(e) = std::fs::create_dir_all(&empty) {
-            eprintln!("Could not create the isolated journal folder: {e}");
-            std::process::exit(2);
-        }
-        journal_dir = Some(empty);
-    }
     let overrides = app::Overrides {
         journal_dir,
         mute: isolated || args.iter().any(|a| a == "--mute"),
