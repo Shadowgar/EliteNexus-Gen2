@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 33 substantive entries, ENX-001 through ENX-033.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 34 substantive entries, ENX-001 through ENX-034.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -305,11 +305,13 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 
 **Integration:** PR #9 at `b49c3cb`; static review accepted. No additional builds. Historical fallback timestamps remain unidentifiable.
 
-### G2-024B — Deals request identity
+### ENX-034 — Deals request identity (G2-024B)
 
 Desktop Abnormal prices identifies each scan by the commander, system and complete Deals query, including origin, hold capacity and search parameters. Changes and manual refresh retire the current rows and actions immediately. The running worker drains before the next scan starts, and its retired outcome is discarded even if the inputs return to their earlier values.
 
 This is applicable to upstream desktop Deals wherever the same filter-only identity is used. Ask's Deals tool executes a fresh query per call using its captured commander context. Focused application regressions and interactive verification are deferred to 01D-W.
+
+**Evidence:** [PR #10](https://github.com/Shadowgar/Praetorium/pull/10), [`c406bfc`](https://github.com/Shadowgar/Praetorium/commit/c406bfc50fb65eb1ab67362359ad7eea1047a5ad). Static review confirms full request identity and retired-result draining. Owner reports `git diff --check` passed; application check had not completed at handoff. No tests claimed passed. Application check, focused test compilation/execution and runtime acceptance deferred to 01D-W. Existing disconnected-worker behavior remains G2-033, including retired Deals scans. No additional build or CI initiated.
 
 ## Upstream review opportunities
 
