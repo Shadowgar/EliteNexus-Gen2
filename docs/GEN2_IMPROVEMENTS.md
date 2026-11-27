@@ -340,6 +340,12 @@ The committed-update identity is in memory. Market precedence, persisted observa
 
 **Integration:** [PR #13](https://github.com/Shadowgar/Praetorium/pull/13), [`d35248d`](https://github.com/Shadowgar/Praetorium/commit/d35248dd555464279e79352c48fb613ef4f3e574). Scoped static review covered carrier identity, observation authority, cancellation and route progress. Eleven focused model/journal regressions reported passed; application compilation and runtime verification remain deferred to 01D-W. No additional build or CI initiated.
 
+### G2-033 — Market and carrier worker outcomes
+
+- Market queries and Fleet Carrier Navigation plots and administration searches finish with a visible error if their worker exits without an answer. The affected controls permit retry.
+- Market and carrier requests discard results belonging to superseded inputs, commanders, journal sources or carrier selections. Retired Deals scans can finish in the background while a replacement starts.
+- Three shared worker regressions passed in a standalone harness on Rust 1.100.0 with `C:/PraetoriumBuild`. Application compilation, the Deals and Navigation regressions, and runtime acceptance are tracked in 01D-W. The remaining consumers are tracked in 01D-D.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.

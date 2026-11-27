@@ -1009,6 +1009,7 @@ impl NexusApp {
         }
         if restart {
             self.market.set_watch_scope(None);
+            self.market_ui.retire_requests();
             self.assistant.replace_source();
             self.log = Default::default();
             self.nav = Default::default();
@@ -1337,12 +1338,13 @@ impl eframe::App for NexusApp {
                     self.map = Default::default();
                     self.fleet.retire_commander_results();
                     self.combat.retire_commander_results();
-                    let tab = self.market_ui.tab;
-                    self.market_ui = pages::market::MarketUi::new(self.settings.market.clone());
-                    self.market_ui.tab = tab;
+                    self.market_ui.retire_requests();
                 }
                 self.navigation_scope = Some(scope);
                 self.last_jump_count = None;
+            }
+            if let Some(gs) = model.active() {
+                self.nav.sync_carrier_selection(gs, self.settings.carrier, nexus_journal::Timestamp::now());
             }
             if self.assistant.sync_scope(&self.settings.ai, &model) {
                 self.ask_ui.input.clear();

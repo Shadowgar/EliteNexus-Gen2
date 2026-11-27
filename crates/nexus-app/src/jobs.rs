@@ -1,30 +1,57 @@
 //! Tiny background-job helper: run a closure on a worker thread, poll the result each frame.
 //! Keeps the UI thread free of database queries and network calls.
 
-use crossbeam_channel::{Receiver, TryRecvError};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 pub struct Job<T> {
-    rx: Receiver<T>,
+    rx: Receiver<Result<T, String>>,
     started: Instant,
+}
+
+struct Completion<T> {
+    tx: Option<Sender<Result<T, String>>>,
+    ctx: egui::Context,
+}
+
+impl<T> Completion<T> {
+    fn send(self, value: T) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Ok(value));
+        }
+    }
+}
+
+impl<T> Drop for Completion<T> {
+    fn drop(&mut self) {
+        // Disconnect before waking the UI, including when a worker unwinds or its task is dropped.
+        drop(self.tx.take());
+        self.ctx.request_repaint();
+    }
 }
 
 impl<T: Send + 'static> Job<T> {
     pub fn spawn(ctx: &egui::Context, f: impl FnOnce() -> T + Send + 'static) -> Self {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send(f());
+        let completion = Completion { tx: Some(tx.clone()), ctx: ctx.clone() };
+        if let Err(e) = std::thread::Builder::new().spawn(move || completion.send(f())) {
+            let _ = tx.send(Err(format!("Could not start the background worker: {e}")));
             ctx.request_repaint();
-        });
+        }
         Job { rx, started: Instant::now() }
     }
 
     /// The result once finished; afterwards the job is spent (keep the value yourself).
     pub fn poll(&mut self) -> Option<T> {
+        self.poll_outcome()?.ok()
+    }
+
+    /// A terminal outcome, including a worker that exited without returning a value.
+    pub fn poll_outcome(&mut self) -> Option<Result<T, String>> {
         match self.rx.try_recv() {
             Ok(v) => Some(v),
-            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => None,
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err("The background worker exited before returning a result.".into())),
         }
     }
 
@@ -40,12 +67,23 @@ impl<T: Send + 'static> Job<T> {
         F: std::future::Future<Output = T> + Send + 'static,
     {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let ctx = ctx.clone();
+        let completion = Completion { tx: Some(tx), ctx: ctx.clone() };
         rt.spawn(async move {
-            let _ = tx.send(fut.await);
-            ctx.request_repaint();
+            completion.send(fut.await);
         });
         Job { rx, started: Instant::now() }
+    }
+}
+
+impl<T: Send + 'static> Slot<Result<T, String>> {
+    /// Poll a fallible request and publish either its answer or a terminal worker error.
+    pub fn tick_result(&mut self) -> bool {
+        let Some(job) = &mut self.job else { return false };
+        let Some(outcome) = job.poll_outcome() else { return false };
+        self.took = Some(job.elapsed());
+        self.last = Some(outcome.and_then(|result| result));
+        self.job = None;
+        true
     }
 }
 
@@ -90,5 +128,60 @@ impl<T: Send + 'static> Slot<T> {
                 return true;
             }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disconnected_worker_is_terminal_and_the_slot_can_retry() {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let mut slot = Slot { job: Some(Job { rx, started: Instant::now() }), ..Default::default() };
+        assert!(!slot.tick_result());
+        assert!(slot.busy());
+        drop(tx);
+        assert!(slot.tick_result());
+        assert!(!slot.busy());
+        assert!(matches!(slot.last.as_ref(), Some(Err(e)) if e.contains("exited")));
+        assert!(!slot.tick_result());
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        slot.job = Some(Job { rx, started: Instant::now() });
+        tx.send(Ok(Err("query failed".into()))).unwrap();
+        assert!(slot.tick_result());
+        assert_eq!(slot.last.as_ref().and_then(|r| r.as_ref().err()).map(String::as_str), Some("query failed"));
+        assert!(!slot.busy());
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        slot.job = Some(Job { rx, started: Instant::now() });
+        tx.send(Ok(Ok(42))).unwrap();
+        assert!(slot.tick_result());
+        assert_eq!(slot.last, Some(Ok(42)));
+        assert!(!slot.busy());
+    }
+
+    #[test]
+    fn panicked_worker_disconnects_and_repaints() {
+        let ctx = egui::Context::default();
+        let (notify, repaints) = crossbeam_channel::bounded(1);
+        ctx.set_request_repaint_callback(move |_| {
+            let _ = notify.try_send(());
+        });
+        let mut job = Job::<()>::spawn(&ctx, || panic!("synthetic worker panic"));
+        repaints.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(job.poll_outcome(), Some(Err(_))));
+    }
+
+    #[test]
+    fn cancelled_async_worker_disconnects() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut slot = Slot::<Result<(), String>>::default();
+        slot.run_async(&egui::Context::default(), rt.handle(), std::future::pending());
+        drop(rt);
+        assert!(slot.tick_result());
+        assert!(matches!(slot.last, Some(Err(_))));
+        assert!(!slot.busy());
     }
 }

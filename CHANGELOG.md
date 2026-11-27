@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Market and fleet carrier tasks show an error and allow retry if their worker fails or exits early. A new Deals scan can start while a superseded scan finishes.
+
 - Fleet and squadron carrier routes and jump history use verified journal movement for the specific carrier. The desktop and assistant show scheduled destinations and unconfirmed arrivals separately from the last confirmed system.
 
 - Market and assistant quote results distinguish reported open, restricted and unknown carrier docking access. New trade-route destinations, shopping-trip stops and price alerts require carriers reported open to everyone.

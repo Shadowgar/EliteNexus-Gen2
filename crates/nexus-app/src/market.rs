@@ -44,12 +44,15 @@ pub struct MarketService {
     /// The last database counters, counted on a worker thread: the counts scan big tables, which froze the window
     /// for a second or more while the live feed was filling them.
     stats: Option<DbStats>,
-    stats_job: Option<Job<Option<DbStats>>>,
+    stats_job: Option<Job<Result<DbStats, String>>>,
+    stats_error: Option<String>,
     stats_at: Option<Instant>,
     import: Option<ImportJob>,
     watch: WatchState,
     watch_requests: Sender<WatchRequest>,
     watch_results: Receiver<WatchResult>,
+    watch_job: Option<Job<()>>,
+    watch_error: Option<String>,
     ctx: egui::Context,
 }
 
@@ -58,18 +61,16 @@ impl MarketService {
         let (watch_requests, requests) = crossbeam_channel::unbounded();
         let (results, watch_results) = crossbeam_channel::unbounded();
         let (db, db_error) = match GalaxyDb::open(data_dir.join("galaxy.db")) {
-            Ok(db) => {
-                start_watcher(db.clone(), requests, results, ctx.clone());
-                (Some(db), None)
-            }
+            Ok(db) => (Some(db), None),
             Err(e) => {
                 tracing::error!("galaxy database: {e}");
                 (None, Some(format!("Cannot open the market database: {e}")))
             }
         };
+        let watch_job = db.as_ref().map(|db| start_watcher(db.clone(), requests, results, ctx.clone()));
         MarketService {
-            db, db_error, eddn: None, stats: None, stats_job: None, stats_at: None, import: None,
-            watch: WatchState::default(), watch_requests, watch_results, ctx: ctx.clone(),
+            db, db_error, eddn: None, stats: None, stats_job: None, stats_error: None, stats_at: None, import: None,
+            watch: WatchState::default(), watch_requests, watch_results, watch_job, watch_error: None, ctx: ctx.clone(),
         }
     }
 
@@ -101,6 +102,25 @@ impl MarketService {
         for result in self.watch_results.try_iter() {
             self.watch.deliver(result, alerts);
         }
+        if let Some(outcome) = self.watch_job.as_mut().and_then(Job::poll_outcome) {
+            self.watch_job = None;
+            self.watch_error = Some(outcome.err().unwrap_or_else(|| "The price alert worker stopped.".into()));
+        }
+    }
+
+    pub fn watch_error(&self) -> Option<&str> {
+        self.watch_error.as_deref()
+    }
+
+    pub fn retry_watcher(&mut self) {
+        let Some(db) = self.db.clone() else { return };
+        let (watch_requests, requests) = crossbeam_channel::unbounded();
+        let (results, watch_results) = crossbeam_channel::unbounded();
+        self.watch_requests = watch_requests;
+        self.watch_results = watch_results;
+        self.watch_job = Some(start_watcher(db, requests, results, self.ctx.clone()));
+        self.watch_error = None;
+        self.request_watches();
     }
 
     /// Whether a rule's commodity name is known (for the editor).
@@ -177,23 +197,37 @@ impl MarketService {
 
     /// The last database counters; asking counts them again on a worker thread every [`STATS_EVERY`] at most.
     pub fn db_stats(&mut self) -> Option<&DbStats> {
-        if let Some(job) = self.stats_job.as_mut() {
-            if let Some(s) = job.poll() {
-                self.stats_job = None;
-                self.stats = s.or(self.stats.take());
-            } else if job.elapsed() > Duration::from_secs(120) {
-                // Never answered (the thread died): count again.
-                self.stats_job = None;
+        if let Some(outcome) = self.stats_job.as_mut().and_then(Job::poll_outcome) {
+            self.stats_job = None;
+            match outcome.and_then(|result| result) {
+                Ok(stats) => {
+                    self.stats = Some(stats);
+                    self.stats_error = None;
+                }
+                Err(error) => self.stats_error = Some(error),
             }
+        } else if self.stats_job.as_ref().is_some_and(|job| job.elapsed() > Duration::from_secs(120)) {
+            self.stats_job = None;
+            self.stats_error = Some("The market statistics worker timed out.".into());
         }
         if self.stats_job.is_none()
             && self.stats_at.is_none_or(|t| t.elapsed() > STATS_EVERY)
             && let Some(db) = self.db.clone()
         {
             self.stats_at = Some(Instant::now());
-            self.stats_job = Some(Job::spawn(&self.ctx, move || db.stats().ok()));
+            self.stats_job = Some(Job::spawn(&self.ctx, move || db.stats().map_err(|e| e.to_string())));
         }
         self.stats.as_ref()
+    }
+
+    pub fn stats_error(&self) -> Option<&str> {
+        self.stats_error.as_deref()
+    }
+
+    pub fn retry_stats(&mut self) {
+        self.stats_error = None;
+        self.stats_at = None;
+        self.ctx.request_repaint();
     }
 
     pub fn feed_snapshot(&self) -> Option<EddnStatsSnapshot> {
@@ -362,8 +396,9 @@ struct WatchResult {
     matches: Vec<(usize, Alert)>,
 }
 
-fn start_watcher(db: GalaxyDb, requests: Receiver<WatchRequest>, tx: Sender<WatchResult>, ctx: egui::Context) {
-    let spawned = std::thread::Builder::new().name("price-alerts".into()).spawn(move || {
+fn start_watcher(db: GalaxyDb, requests: Receiver<WatchRequest>, tx: Sender<WatchResult>, ctx: egui::Context) -> Job<()> {
+    let notify = ctx.clone();
+    Job::spawn(&ctx, move || {
         let Ok(mut request) = requests.recv() else { return };
         loop {
             // Switch subscriptions before reading any more observations for the old inputs.
@@ -378,15 +413,12 @@ fn start_watcher(db: GalaxyDb, requests: Receiver<WatchRequest>, tx: Sender<Watc
                         if tx.send(result).is_err() {
                             return;
                         }
-                        ctx.request_repaint();
+                        notify.request_repaint();
                     }
                 }
             }
         }
-    });
-    if let Err(e) = spawned {
-        tracing::error!("galaxy: cannot start the price-alert thread: {e}");
-    }
+    })
 }
 
 impl WatchRequest {
@@ -492,6 +524,7 @@ pub struct ImportStatus {
 pub struct ImportJob {
     pub status: Arc<Mutex<ImportStatus>>,
     cancel: Arc<AtomicBool>,
+    worker: Option<Job<Result<ImportSummary, String>>>,
 }
 
 impl ImportJob {
@@ -505,7 +538,13 @@ impl ImportJob {
 }
 
 impl MarketService {
-    pub fn import(&self) -> Option<&ImportJob> {
+    pub fn import(&mut self) -> Option<&ImportJob> {
+        if let Some(import) = &mut self.import
+            && let Some(outcome) = import.worker.as_mut().and_then(Job::poll_outcome)
+        {
+            import.worker = None;
+            import.status.lock().finished = Some(outcome.and_then(|result| result));
+        }
         self.import.as_ref()
     }
 
@@ -513,7 +552,7 @@ impl MarketService {
     /// markets the database already has newer data for are skipped).
     pub fn start_import(&mut self, src: ImportSource, ctx: &egui::Context, rt: &tokio::runtime::Handle) {
         let Some(db) = self.db.clone() else { return };
-        if self.import.as_ref().is_some_and(ImportJob::running) {
+        if self.import().is_some_and(ImportJob::running) {
             return;
         }
         let label = match &src {
@@ -522,8 +561,8 @@ impl MarketService {
         };
         let status = Arc::new(Mutex::new(ImportStatus { source: label, started: Some(Instant::now()), ..Default::default() }));
         let cancel = Arc::new(AtomicBool::new(false));
-        let (st, stop, ctx, rt) = (status.clone(), cancel.clone(), ctx.clone(), rt.clone());
-        let spawned = std::thread::Builder::new().name("galaxy-import".into()).spawn(move || {
+        let (st, stop, progress_ctx, rt) = (status.clone(), cancel.clone(), ctx.clone(), rt.clone());
+        let worker = Job::spawn(ctx, move || {
             let opened: Result<(Box<dyn Read + Send>, Option<u64>), String> = match src {
                 ImportSource::Url(url) => http_reader(&url, &rt).map(|(r, n)| (Box::new(r) as Box<dyn Read + Send>, n)),
                 ImportSource::File(path) => std::fs::File::open(&path)
@@ -537,7 +576,7 @@ impl MarketService {
                 st.lock().total_bytes = total;
                 db.import_spansh_dump(reader, |p| {
                     st.lock().progress = p.clone();
-                    ctx.request_repaint();
+                    progress_ctx.request_repaint();
                     !stop.load(Ordering::Relaxed)
                 })
                 .map_err(|e| e.to_string())
@@ -545,13 +584,9 @@ impl MarketService {
             if let Err(e) = &result {
                 tracing::warn!("galaxy import failed: {e}");
             }
-            st.lock().finished = Some(result);
-            ctx.request_repaint();
+            result
         });
-        match spawned {
-            Ok(_) => self.import = Some(ImportJob { status, cancel }),
-            Err(e) => tracing::error!("galaxy: cannot start the import thread: {e}"),
-        }
+        self.import = Some(ImportJob { status, cancel, worker: Some(worker) });
     }
 }
 

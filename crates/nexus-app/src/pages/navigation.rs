@@ -138,8 +138,6 @@ const ADMIN_LIST: usize = 8;
 /// The nearest stations with Fleet Carrier Administration, as found.
 #[derive(Debug, Clone)]
 struct AdminList {
-    /// What the list was searched around.
-    key: (Near, String),
     /// Nearest first.
     stations: Vec<AdminStation>,
     /// How many stations Spansh lists with the service; None when the list came from the local database.
@@ -162,10 +160,17 @@ struct AdminStation {
 struct AdminSearch {
     near: Near,
     /// What the list was searched around; another place searches again.
-    key: Option<(Near, String)>,
+    key: Option<(Near, String, Place)>,
     job: Slot<Result<AdminList, String>>,
     /// The station picked in the list (by name and system); the nearest until another is clicked.
     picked: Option<(String, String)>,
+}
+
+#[derive(PartialEq)]
+struct CarrierPlot {
+    from: String,
+    to: String,
+    load: Option<(i64, i64)>,
 }
 
 pub struct NavUi {
@@ -188,7 +193,10 @@ pub struct NavUi {
     auto_overcharge: bool,
     /// Exact plotter options (as on spansh.co.uk/exact-plotter).
     pub exact: ExactOptions,
-    pub job: Slot<Result<PlannedRoute, String>>,
+    job: Slot<Result<PlannedRoute, String>>,
+    carrier_selection: Option<(CarrierKind, Option<u64>)>,
+    carrier_plot: Option<CarrierPlot>,
+    ship_to_carrier: bool,
     pub planned: Option<PlannedRoute>,
     /// A link to another page was clicked.
     pub goto: Option<Goto>,
@@ -247,14 +255,41 @@ impl NavUi {
     /// Plots a route for the current ship from where it is to `system` at once: the exact plotter, or the neutron
     /// planner when the ship's loadout isn't known yet.
     pub fn route_ship_to(&mut self, system: &str) {
+        self.retire_carrier_plot();
+        self.ship_to_carrier = false;
         self.pick(Planner::Exact);
         self.to = system.to_string();
         self.from.clone_from(&self.auto_from);
         self.autoplot = Some(Planner::Exact);
     }
 
+    fn route_ship_to_carrier(&mut self, system: &str) {
+        self.route_ship_to(system);
+        self.ship_to_carrier = true;
+    }
+
+    fn retire_carrier_plot(&mut self) {
+        if self.carrier_plot.take().is_some() {
+            self.job = Slot::default();
+        }
+    }
+
+    pub fn sync_carrier_selection(&mut self, gs: &GameState, choice: CarrierKind, now: Timestamp) {
+        let selection = crate::pages::carrier::pick(gs, choice, now).map(|kind| (kind, gs.carrier_of(kind).id));
+        if selection != self.carrier_selection {
+            self.carrier_selection = selection;
+            self.retire_carrier_plot();
+            if self.ship_to_carrier || self.autoplot == Some(Planner::Carrier) {
+                self.autoplot = None;
+                self.ship_to_carrier = false;
+            }
+            self.admin = AdminSearch { near: self.admin.near, ..Default::default() };
+        }
+    }
+
     /// Plots the carrier's jumps from where it is to `system` at once.
     fn route_carrier_to(&mut self, system: &str) {
+        self.retire_carrier_plot();
         self.pick(Planner::Carrier);
         self.carrier_to = system.to_string();
         self.carrier_from.clone_from(&self.auto_carrier_from);
@@ -264,7 +299,9 @@ impl NavUi {
     /// Shows another planner: a one-click route still waiting for it is dropped.
     pub fn pick(&mut self, planner: Planner) {
         if planner != self.planner {
+            self.retire_carrier_plot();
             self.autoplot = None;
+            self.ship_to_carrier = false;
             self.fell_back = false;
         }
         self.planner = planner;
@@ -287,6 +324,9 @@ impl Default for NavUi {
             auto_overcharge: false,
             exact: ExactOptions::default(),
             job: Slot::default(),
+            carrier_selection: None,
+            carrier_plot: None,
+            ship_to_carrier: false,
             planned: None,
             goto: None,
             autoplot: None,
@@ -389,15 +429,13 @@ pub fn active_route(gs: &GameState, planned: Option<&PlannedRoute>) -> Vec<Waypo
 /// commanders with their own and a squadron carrier. `db` is the local galaxy database, if it opened.
 #[allow(clippy::too_many_arguments)]
 pub fn show(ui: &mut Ui, gs: &GameState, st: &mut NavUi, auto_copy: &mut bool, carrier: &mut CarrierKind, spansh: &Spansh, db: Option<&GalaxyDb>, rt: &tokio::runtime::Handle) -> bool {
-    if st.job.tick()
+    let now = Timestamp::now();
+    st.sync_carrier_selection(gs, *carrier, now);
+    if st.carrier_plot.is_none() && st.job.tick()
         && let Some(Ok(route)) = &st.job.last
     {
         st.planned = Some(route.clone());
     }
-    if st.admin.job.tick() {
-        st.admin.picked = None;
-    }
-    let now = Timestamp::now();
     // Ship routes start where you are, carrier routes where the carrier is, until something else is typed.
     follow(&mut st.from, &mut st.auto_from, &gs.location.system);
     let picked = crate::pages::carrier::pick(gs, *carrier, now);
@@ -406,7 +444,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, st: &mut NavUi, auto_copy: &mut bool, c
     if std::mem::take(&mut st.route_to_carrier)
         && let Some(sys) = picked.and_then(|k| gs.carrier_of(k).system.clone())
     {
-        st.route_ship_to(&sys);
+        st.route_ship_to_carrier(&sys);
     }
     crate::tours::follow_range(&mut st.range, &mut st.auto_range, gs);
     follow_switch(&mut st.overcharge, &mut st.auto_overcharge, overcharges(gs.fleet.current()));
@@ -452,13 +490,13 @@ fn page(ui: &mut Ui, gs: &GameState, st: &mut NavUi, auto_copy: &mut bool, carri
     });
     ui.add_space(GAP);
     let now = Timestamp::now();
-    let picked = crate::pages::carrier::pick(gs, *carrier, now);
     if st.planner == Planner::Carrier {
         changed |= carrier_panel(ui, gs, st, carrier, spansh, db, rt);
         ui.add_space(GAP);
     }
+    let picked = crate::pages::carrier::pick(gs, *carrier, now);
     if st.planner != Planner::InGame {
-        planner_form(ui, gs, st, crate::pages::carrier::pick(gs, *carrier, now), spansh, rt);
+        planner_form(ui, gs, st, picked, spansh, rt);
         ui.add_space(GAP);
     }
     // The carrier's countdown or cooldown while one runs, and its route's progress: for the carrier picked for the
@@ -495,8 +533,10 @@ fn planner_form(ui: &mut Ui, gs: &GameState, st: &mut NavUi, carrier: Option<Car
     // A one-click route without the ship's loadout: the exact plotter can't plan it, the neutron planner can.
     let loadout = gs.fleet.current().and_then(|s| s.loadout_json.as_ref()).is_some();
     if st.autoplot == Some(Planner::Exact) && st.planner == Planner::Exact && !loadout {
+        let ship_to_carrier = st.ship_to_carrier;
         st.pick(Planner::Neutron);
         st.autoplot = Some(Planner::Neutron);
+        st.ship_to_carrier = ship_to_carrier;
         st.fell_back = true;
     }
     let for_carrier = st.planner == Planner::Carrier;
@@ -517,7 +557,23 @@ fn planner_form(ui: &mut Ui, gs: &GameState, st: &mut NavUi, carrier: Option<Car
                 ui.label(RichText::new(icon::ARROW_RIGHT).size(16.0).color(pal::DIM));
                 field(ui, "To", &mut st.to, "Destination system");
             }
-            let busy = st.job.busy();
+            let request = (for_carrier || st.ship_to_carrier).then(|| {
+                let (from, to) = route_endpoints(gs, st, carrier);
+                let load = carrier.filter(|_| for_carrier).map(|kind| {
+                    let c = gs.carrier_of(kind);
+                    (c.fuel, c.space.cargo)
+                });
+                CarrierPlot { from, to, load }
+            });
+            if st.carrier_plot.is_some() && st.carrier_plot != request {
+                st.retire_carrier_plot();
+            }
+            if st.carrier_plot.is_some() && st.job.tick_result()
+                && let Some(Ok(route)) = &st.job.last
+            {
+                st.planned = Some(route.clone());
+            }
+            let busy = st.job.busy() && (request.is_none() || st.carrier_plot.is_some());
             let label = if busy { format!("{} Plotting…", icon::HOURGLASS) } else { "Plot route".to_string() };
             let clicked = ui.add_enabled_ui(!busy, |ui| widgets::primary_button(ui, &label)).inner.clicked();
             // A one-click route waits for a plot still running, and is for its own planner only.
@@ -526,6 +582,10 @@ fn planner_form(ui: &mut Ui, gs: &GameState, st: &mut NavUi, carrier: Option<Car
                 st.autoplot = None;
             }
             if (clicked || auto) && !busy {
+                if request.is_some() {
+                    st.job = Slot::default();
+                }
+                st.carrier_plot = request;
                 match make_request(gs, st, carrier, spansh) {
                     Some(fut) => st.job.run_async(ui.ctx(), rt, fut),
                     None => {
@@ -608,7 +668,9 @@ fn planner_form(ui: &mut Ui, gs: &GameState, st: &mut NavUi, carrier: Option<Car
             }
             Planner::Carrier | Planner::InGame => {}
         }
-        if let Some(Err(e)) = &st.job.last {
+        if (!for_carrier || st.carrier_plot.is_some())
+            && let Some(Err(e)) = &st.job.last
+        {
             ui.add_space(4.0);
             ui.add(egui::Label::new(RichText::new(format!("{} {e}", icon::WARNING_CIRCLE)).color(pal::BAD)).wrap());
         }
@@ -626,7 +688,10 @@ fn carrier_panel(ui: &mut Ui, gs: &GameState, st: &mut NavUi, carrier: &mut Carr
         changed |= crate::pages::carrier::carrier_switch(ui, gs, carrier, now);
         ui.add_space(GAP);
     }
+    st.sync_carrier_selection(gs, *carrier, now);
     let kind = crate::pages::carrier::pick(gs, *carrier, now);
+    let carrier_at = kind.map_or(gs.location.system.as_str(), |k| gs.carrier_of(k).system.as_deref().unwrap_or_default());
+    follow(&mut st.carrier_from, &mut st.auto_carrier_from, carrier_at);
     cards(ui, 2, 340.0, |col| {
         col.add(|ui| carrier_card(ui, gs, st, kind));
         col.add(|ui| admin_card(ui, gs, st, kind, spansh, db, rt));
@@ -691,12 +756,12 @@ fn carrier_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<Carrie
                     .on_hover_text(format!("Plots a route from {} to {sys} for your ship: every jump with the exact plotter, or with Neutron while your ship's loadout isn't known.", gs.location.system))
                     .clicked()
             {
-                st.route_ship_to(&sys);
+                st.route_ship_to_carrier(&sys);
             }
             if let Some(next) = &leaving
                 && widgets::button(ui, &format!("{} Route to {next}", icon::ARROW_FAT_RIGHT)).on_hover_text("Scheduled destination. Carrier arrival is unconfirmed.").clicked()
             {
-                st.route_ship_to(next);
+                st.route_ship_to_carrier(next);
             }
             if widgets::button(ui, &format!("{} Copy", icon::COPY)).on_hover_text(format!("Copies {sys}, to paste into the galaxy map")).clicked() {
                 ui.ctx().copy_text(sys.clone());
@@ -723,27 +788,27 @@ fn carrier_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<Carrie
 /// there for your ship or the carrier.
 fn admin_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<CarrierKind>, spansh: &Spansh, db: Option<&GalaxyDb>, rt: &tokio::runtime::Handle) {
     let carrier = kind.map(|k| gs.carrier_of(k)).filter(|c| c.system.is_some());
-    // Without a carrier whose place is known the list is measured from you; the switch keeps its own setting.
-    let near = if carrier.is_some() { st.admin.near } else { Near::Me };
-    let (reference, place) = match (near, carrier) {
-        (Near::Carrier, Some(c)) => (c.system.clone().unwrap_or_default(), Place { pos: c.system_address.and_then(|a| system_pos(gs, a)), address: c.system_address }),
-        _ => (gs.location.system.clone(), Place { pos: gs.location.star_pos, address: Some(gs.location.system_address) }),
-    };
-    // Searches when the card first shows, and again when the place it's measured from changes.
-    let key = (near, reference.clone());
-    if !reference.is_empty() && st.admin.key.as_ref() != Some(&key) && !st.admin.job.busy() {
-        st.admin.key = Some(key.clone());
-        st.admin.job.run_async(ui.ctx(), rt, find_admin(spansh.clone(), key.clone(), db.cloned(), place));
-    }
     card_tinted(ui, icon::BUILDINGS, ADMIN, pal::TEAL, |ui| {
         if let Some(c) = carrier {
             let label = format!("Near {}", crate::pages::carrier::carrier_name(kind.unwrap_or_default(), c));
             widgets::segmented(ui, &mut st.admin.near, &[(Near::Carrier, label.as_str()), (Near::Me, "Near me")]);
             ui.add_space(6.0);
         }
-        // A list searched around another place (you jumped, or the switch moved) waits for the new one.
-        let current = matches!(&st.admin.job.last, Some(Ok(l)) if l.key == key);
-        if st.admin.job.busy() || (!current && matches!(&st.admin.job.last, Some(Ok(_)))) {
+        let (near, reference, place) = match (st.admin.near, carrier) {
+            (Near::Carrier, Some(c)) => (Near::Carrier, c.system.clone().unwrap_or_default(), Place { pos: c.system_address.and_then(|a| system_pos(gs, a)), address: c.system_address }),
+            _ => (Near::Me, gs.location.system.clone(), Place { pos: gs.location.star_pos, address: Some(gs.location.system_address) }),
+        };
+        let key = (near, reference.clone(), place);
+        if st.admin.key.as_ref() != Some(&key) {
+            st.admin.job = Slot::default();
+            st.admin.picked = None;
+            st.admin.key = Some(key);
+            if !reference.is_empty() {
+                st.admin.job.run_async(ui.ctx(), rt, find_admin(spansh.clone(), reference.clone(), db.cloned(), place));
+            }
+        }
+        st.admin.job.tick_result();
+        if st.admin.job.busy() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(RichText::new(format!("Asking Spansh for the stations nearest {reference}…")).size(size::FOOTNOTE).color(pal::DIM));
@@ -753,6 +818,7 @@ fn admin_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<CarrierK
         let retry = |ui: &mut Ui, st: &mut NavUi| {
             if !st.admin.job.busy() && widgets::button(ui, &format!("{} Try Spansh again", icon::ARROWS_CLOCKWISE)).clicked() {
                 st.admin.key = None;
+                ui.ctx().request_repaint();
             }
         };
         let list = match &st.admin.job.last {
@@ -762,7 +828,6 @@ fn admin_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<CarrierK
                 retry(ui, st);
                 return;
             }
-            Some(Ok(_)) if !current => return,
             Some(Ok(list)) => list.clone(),
         };
         if list.stations.is_empty() {
@@ -792,7 +857,7 @@ fn admin_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<CarrierK
                     .on_hover_text(format!("Plots a route to {} for your ship: every jump with the exact plotter, or with Neutron while your ship's loadout isn't known.", a.system))
                     .clicked()
             {
-                st.route_ship_to(&a.system);
+                st.route_ship_to_carrier(&a.system);
             }
             let carrier_there = carrier.is_some_and(|c| c.system.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(&a.system)));
             if !carrier_there
@@ -853,7 +918,7 @@ fn admin_row(ui: &mut Ui, a: &AdminStation, picked: bool) -> egui::Response {
 
 /// Where the list is measured from, for the local database: the system's position when the commander's own travels
 /// know it, else its address to look it up by.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Place {
     pos: Option<[f64; 3]>,
     address: Option<u64>,
@@ -863,8 +928,8 @@ struct Place {
 /// knows every station reported with the service; when Spansh can't be reached, the local database, which learns the
 /// service from the Spansh galaxy import (a database fed only by journals and EDDN held no station with it, in
 /// November 2026, though it held stations Spansh lists with it).
-async fn find_admin(spansh: Spansh, key: (Near, String), db: Option<GalaxyDb>, place: Place) -> Result<AdminList, String> {
-    let q = ServiceQuery::named(ADMIN, key.1.as_str()).include_carriers(false).size(ADMIN_LIST as u32);
+async fn find_admin(spansh: Spansh, reference: String, db: Option<GalaxyDb>, place: Place) -> Result<AdminList, String> {
+    let q = ServiceQuery::named(ADMIN, reference.as_str()).include_carriers(false).size(ADMIN_LIST as u32);
     let why = match spansh.service_search(&q).await {
         Ok(r) => {
             let stations = r
@@ -872,7 +937,7 @@ async fn find_admin(spansh: Spansh, key: (Near, String), db: Option<GalaxyDb>, p
                 .iter()
                 .map(|s| AdminStation { name: s.name.clone(), system: s.system_name.clone(), distance: s.distance, kind: s.station_type.clone(), large_pad: s.has_large_pad })
                 .collect();
-            return Ok(AdminList { key, stations, total: Some(r.count), offline: None });
+            return Ok(AdminList { stations, total: Some(r.count), offline: None });
         }
         Err(e) => e.to_string(),
     };
@@ -882,10 +947,10 @@ async fn find_admin(spansh: Spansh, key: (Near, String), db: Option<GalaxyDb>, p
     // The position of the system the list is measured from, looked up here, off the UI thread, if need be.
     let origin = place.pos.or_else(|| place.address.filter(|&a| a != 0)
         .and_then(|a| db.system_by_id(a).ok().flatten())
-        .filter(|s| s.name.eq_ignore_ascii_case(&key.1))
+        .filter(|s| s.name.eq_ignore_ascii_case(&reference))
         .and_then(|s| s.pos));
     let Some(origin) = origin else {
-        return Err(format!("Spansh couldn't be reached ({why}), and the local database doesn't know where {} is.", key.1));
+        return Err(format!("Spansh couldn't be reached ({why}), and the local database doesn't know where {reference} is."));
     };
     let q = StationQuery { origin, services: Services::CARRIER_ADMINISTRATION, limit: ADMIN_LIST, ..Default::default() };
     let hits = db.stations_near(&q).map_err(|e| format!("Spansh couldn't be reached ({why}), and the local database failed: {e}"))?;
@@ -893,7 +958,7 @@ async fn find_admin(spansh: Spansh, key: (Near, String), db: Option<GalaxyDb>, p
         .into_iter()
         .map(|h| AdminStation { name: h.station.name, system: h.station.system, distance: Some(h.distance_ly), kind: h.station.station_type, large_pad: h.station.max_pad.map(|p| p == 'L') })
         .collect();
-    Ok(AdminList { key, stations, total: None, offline: Some(why) })
+    Ok(AdminList { stations, total: None, offline: Some(why) })
 }
 
 /// The carrier's jump countdown or cooldown next to the fleet carrier planner; with a route for
@@ -960,9 +1025,7 @@ fn note(ui: &mut Ui, text: &str) {
 
 type PlanFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<PlannedRoute, String>> + Send>>;
 
-/// `carrier` is the carrier the fleet carrier planner plans for, if the commander has one.
-fn make_request(gs: &GameState, st: &NavUi, carrier: Option<CarrierKind>, spansh: &Spansh) -> Option<PlanFuture> {
-    let sp = spansh.clone();
+fn route_endpoints(gs: &GameState, st: &NavUi, carrier: Option<CarrierKind>) -> (String, String) {
     let (from, to, start) = match st.planner {
         Planner::Carrier => (&st.carrier_from, &st.carrier_to, carrier.map_or(gs.location.system.clone(), |k| gs.carrier_of(k).system.clone().unwrap_or_default())),
         _ => (&st.from, &st.to, gs.location.system.clone()),
@@ -971,7 +1034,13 @@ fn make_request(gs: &GameState, st: &NavUi, carrier: Option<CarrierKind>, spansh
         "" => start,
         f => f.to_string(),
     };
-    let to = to.trim().to_string();
+    (from, to.trim().to_string())
+}
+
+/// `carrier` is the carrier the fleet carrier planner plans for, if the commander has one.
+fn make_request(gs: &GameState, st: &NavUi, carrier: Option<CarrierKind>, spansh: &Spansh) -> Option<PlanFuture> {
+    let sp = spansh.clone();
+    let (from, to) = route_endpoints(gs, st, carrier);
     if from.is_empty() || to.is_empty() {
         return None;
     }
@@ -1244,6 +1313,31 @@ mod tests {
         assert_eq!(st.autoplot, None);
         st.pick(Planner::Neutron);
         assert_eq!(st.planner, Planner::Neutron);
+    }
+
+    #[test]
+    fn carrier_selection_retires_pending_plots_and_admin_searches() {
+        let mut gs = GameState::default();
+        gs.carrier.id = Some(1);
+        gs.squadron_carrier.id = Some(2);
+        let now = Timestamp(1);
+        let mut st = NavUi::default();
+        st.pick(Planner::Carrier);
+        st.sync_carrier_selection(&gs, CarrierKind::Personal, now);
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let ctx = egui::Context::default();
+        st.carrier_plot = Some(CarrierPlot { from: "Sol".into(), to: "Leesti".into(), load: Some((0, 0)) });
+        st.job.run_async(&ctx, rt.handle(), std::future::pending());
+        st.admin.job.run_async(&ctx, rt.handle(), std::future::pending());
+
+        st.sync_carrier_selection(&gs, CarrierKind::Personal, now);
+        assert!(st.job.busy());
+        assert!(st.admin.job.busy());
+        st.sync_carrier_selection(&gs, CarrierKind::Squadron, now);
+        st.sync_carrier_selection(&gs, CarrierKind::Personal, now);
+        assert!(!st.job.busy());
+        assert!(!st.admin.job.busy());
+        assert!(st.carrier_plot.is_none());
     }
 
     #[test]

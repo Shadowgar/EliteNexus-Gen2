@@ -40,6 +40,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 
 ## 01D-W — Comprehensive gameplay regression testing
 
+- [ ] G2-033 (market/carrier scope): compile Praetorium and run the Deals and Navigation worker regressions. Verify terminal errors and retry in Market and Fleet Carrier Navigation, and change commander, journal source and selected carrier during requests.
+
 - [ ] G2-025: compile Praetorium and exercise Fleet carrier, Navigation, Dashboard, overlay, Ask and MCP with personal and squadron journal fixtures. Replay a cancellation, reschedule, unrelated location and duplicate arrival. Check that elapsed estimates preserve the last confirmed system and that only a matching carrier's verified movement advances its route, including in isolated mode.
 
 - [ ] G2-024D: compile the application and verify Market quotes, Deals, routes, shopping trips, price alerts, Ask and MCP using synthetic carriers with open, restricted, missing and unrecognized access. Confirm public recommendations require reported open access and that a route can start at the commander's current docked market. Check that changing access during a pending alert retires the earlier result.

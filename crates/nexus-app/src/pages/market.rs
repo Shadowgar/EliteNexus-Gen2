@@ -420,23 +420,15 @@ impl DealsScan {
     fn update(&mut self, current: &DealsRequest, refresh: bool) {
         if refresh || self.request.as_ref() != Some(current) {
             self.request = None;
-        }
-        if self.request.is_some() {
-            self.slot.tick();
+            // Retire the receiver immediately so a previous scan cannot hold up the current one.
+            self.slot = Slot::default();
         } else {
-            self.slot.last = None;
-            self.slot.took = None;
-            // Drain a retired scan without publishing it, keeping database scans single-flight.
-            if let Some(job) = &mut self.slot.job
-                && job.poll().is_some()
-            {
-                self.slot.job = None;
-            }
+            self.slot.tick_result();
         }
     }
 
     fn start(&mut self, ctx: &egui::Context, request: DealsRequest, db: &GalaxyDb) {
-        if self.request.is_none() && !self.slot.busy() && (request.query.max_distance_ly.is_none() || request.query.origin.is_some()) {
+        if self.request.is_none() && (request.query.max_distance_ly.is_none() || request.query.origin.is_some()) {
             let q = request.query.clone();
             let db = db.clone();
             self.slot.run(ctx, move || db.price_deals(&q).map_err(|e| e.to_string()));
@@ -522,7 +514,6 @@ pub struct MarketUi {
     trip_unknown: Option<String>,
     trip: Slot<Result<finder::Trip, String>>,
     trip_key: Option<String>,
-    trip_for: Option<String>,
     /// Search on the next frame: Trade routes (screenshot runs: `--tab routes`), or Mining hotspots (opened from a
     /// "where to get it" panel).
     pub autorun: bool,
@@ -532,7 +523,7 @@ pub struct MarketUi {
     stations: Slot<Res<StationHit>>,
     /// What the Services list was searched for: (service, system, pad, carriers, planetary, how many). It searches again
     /// when that changes.
-    services_key: Option<(usize, u64, Option<char>, bool, bool, usize)>,
+    services_key: Option<(usize, [f64; 3], Option<char>, bool, bool, usize)>,
     /// How many of the nearest stations Services lists (Show more adds [`SERVICES_STEP`]).
     services_limit: usize,
     hotspots: Slot<Res<HotspotHit>>,
@@ -541,7 +532,7 @@ pub struct MarketUi {
     import_path: String,
     sell: Slot<Result<SellPlan, String>>,
     /// (cargo snapshot time, tonnes, system, how far, how old a price may be): re-plan when any of them changes.
-    sell_key: (i64, i64, u64, u64, u64),
+    sell_key: Option<(i64, Vec<finder::Line>, [f64; 3], Option<char>, f64, f64)>,
     /// The rule being composed in "Price alerts", and the prices it's measured against (with what they were found for).
     new_watch: PriceWatch,
     alert_ref: Slot<Result<AlertRef, String>>,
@@ -557,7 +548,6 @@ pub struct MarketUi {
     here_key: Option<(u64, Vec<String>)>,
     /// What the shown answer was asked for, and when: it's asked again every minute (the import or the live feed may
     /// have added stations).
-    here_for: Option<(u64, Vec<String>)>,
     here_at: Option<std::time::Instant>,
     plan_key: Option<String>,
     /// A run the commander chose to follow: the app moves it to the Navigation page.
@@ -571,6 +561,12 @@ impl Default for MarketUi {
 }
 
 impl MarketUi {
+    pub fn retire_requests(&mut self) {
+        let tab = self.tab;
+        *self = Self::new(self.prefs.clone());
+        self.tab = tab;
+    }
+
     pub fn new(prefs: MarketPrefs) -> Self {
         let prefs = prefs.sanitized();
         MarketUi {
@@ -605,7 +601,6 @@ impl MarketUi {
             trip_unknown: None,
             trip: Slot::default(),
             trip_key: None,
-            trip_for: None,
             autorun: false,
             browse: false,
             service: 0,
@@ -616,7 +611,7 @@ impl MarketUi {
             hotspot_prices: Slot::default(),
             import_path: String::new(),
             sell: Slot::default(),
-            sell_key: (0, 0, 0, 0, 0),
+            sell_key: None,
             new_watch: PriceWatch::default(),
             alert_ref: Slot::default(),
             alert_ref_key: None,
@@ -627,7 +622,6 @@ impl MarketUi {
             plan: Slot::default(),
             here: Slot::default(),
             here_key: None,
-            here_for: None,
             here_at: None,
             plan_key: None,
             follow: None,
@@ -1162,25 +1156,20 @@ fn vs_average(ui: &mut Ui, price: i64, average: Option<i64>, buying: bool) {
 
 /// Returns true when the price-alert rules changed (settings to save).
 pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut MarketUi, rt: &tokio::runtime::Handle, watches: &mut Vec<PriceWatch>) -> bool {
-    st.page.tick();
-    st.detail.tick();
-    st.tiles_live.tick();
-    st.station_found.tick();
-    st.routes.tick();
-    st.stations.tick();
-    st.hotspots.tick();
-    st.hotspot_prices.tick();
-    st.sell.tick();
-    st.pins_live.tick();
-    st.alert_ref.tick();
-    st.plan.tick();
-    if st.trip.tick() {
-        st.trip_for.clone_from(&st.trip_key);
-    }
-    // An answer is for the question asked last: no new one is asked while one runs.
-    if st.here.tick() {
-        st.here_for.clone_from(&st.here_key);
-    }
+    st.page.tick_result();
+    st.detail.tick_result();
+    st.tiles_live.tick_result();
+    st.station_found.tick_result();
+    st.routes.tick_result();
+    st.stations.tick_result();
+    st.hotspots.tick_result();
+    st.hotspot_prices.tick_result();
+    st.sell.tick_result();
+    st.pins_live.tick_result();
+    st.alert_ref.tick_result();
+    st.plan.tick_result();
+    st.trip.tick_result();
+    st.here.tick_result();
     // The Station tab keeps the market you're docked at, and opens a market the moment you open it in the game.
     st.docked_market = gs.location.station.as_ref().filter(|s| gs.location.docked && s.market_id != 0).map(|s| s.market_id);
     if let Some(m) = gs.market.as_ref().filter(|m| m.market_id != 0)
@@ -1337,6 +1326,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                 };
                 st.routes_from = from.map(|s| s.name.clone());
                 let db = db.clone();
+                st.routes = Slot::default();
                 st.routes.run(&ctx, move || db.trade_routes(&q).map_err(|e| e.to_string()));
             }
             // The game writes a station's prices (Market.json) when its commodity market is opened.
@@ -1379,11 +1369,17 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
             ui.add_space(6.0);
             // Searches by itself: when the tab opens, when a service or filter is picked, and after every jump.
             match origin {
-                None => empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are."),
+                None => {
+                    st.stations = Slot::default();
+                    st.services_key = None;
+                    empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
+                }
                 Some(o) => {
                     let p = &st.prefs;
-                    let key = (st.service, gs.location.system_address, p.min_pad, p.services_carriers, p.services_planetary, st.services_limit);
-                    if st.services_key != Some(key) && !st.stations.busy() {
+                    let key = (st.service, o, p.min_pad, p.services_carriers, p.services_planetary, st.services_limit);
+                    let retry = st.services_key == Some(key) && retry_failed(ui, &st.stations);
+                    if st.services_key != Some(key) || retry {
+                        st.stations = Slot::default();
                         st.services_key = Some(key);
                         let q = StationQuery { include_carriers: p.services_carriers, include_planetary: p.services_planetary, limit: st.services_limit, ..service_query(SERVICES[st.service].1, o, p.min_pad) };
                         let db = db.clone();
@@ -1441,6 +1437,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                 let p = &st.prefs;
                 let q = HotspotQuery { origin: o, signal: p.hotspot_signal.clone(), max_distance_ly: Some(p.max_dist), min_count: p.hotspot_min, limit: 50 };
                 let db2 = db.clone();
+                st.hotspots = Slot::default();
                 st.hotspots.run(&ctx, move || db2.hotspots_near(&q).map_err(|e| e.to_string()));
                 let pq = CommodityQuery {
                     commodity: p.hotspot_signal.clone(),
@@ -1452,6 +1449,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                     ..Default::default()
                 };
                 let db3 = db.clone();
+                st.hotspot_prices = Slot::default();
                 st.hotspot_prices.run(&ctx, move || db3.search_commodity(&pq).map_err(|e| e.to_string()));
             }
             ui.add_space(4.0);
@@ -1572,19 +1570,16 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
     ui.ctx().request_repaint_after(QUOTE_REFRESH);
     let refresh_due = |last: Option<std::time::Instant>| last.is_none_or(|t| t.elapsed() >= QUOTE_REFRESH);
     let changed = st.page_key.as_ref() != Some(&key);
-    if (changed || refresh_due(st.page_at)) && !st.page.busy() {
-        if changed {
-            st.page.last = None;
-        }
+    let retry = !changed && retry_failed(ui, &st.page);
+    if changed || retry {
+        st.page = Slot::default();
+    }
+    if changed || retry || (refresh_due(st.page_at) && !st.page.busy()) {
         st.page_key = Some(key.clone());
         st.page_at = Some(std::time::Instant::now());
         let db = db.clone();
         let request = key.clone();
         st.page.run(ui.ctx(), move || load_page(&db, request.0, &request.1).map_err(|e| e.to_string()));
-    }
-    if st.page_key.as_ref() != Some(&key) {
-        ui.spinner();
-        return None;
     }
     let page = match &st.page.last {
         None => {
@@ -1642,7 +1637,11 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
     if let Some((id, symbol)) = st.pick.clone() {
         let key = (id, symbol.clone());
         let changed = st.detail_key.as_ref() != Some(&key);
-        if (changed || refresh_due(st.detail_at)) && !st.detail.busy() {
+        let retry = !changed && retry_failed(ui, &st.detail);
+        if changed || retry {
+            st.detail = Slot::default();
+        }
+        if changed || retry || (refresh_due(st.detail_at) && !st.detail.busy()) {
             st.detail_at = Some(std::time::Instant::now());
             st.detail_key = Some(key.clone());
             let db = db.clone();
@@ -1658,7 +1657,11 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
             (Some(Ok(d)), true) => match pick_card(ui, d, (&symbol, &row_name(page, &st.commodities, &symbol)), origin, &st.prefs, st.side == Side::Sell) {
                 PickAction::None => {}
                 PickAction::Pin(p) => st.prefs.toggle_pin(p),
-                PickAction::Close => st.pick = None,
+                PickAction::Close => {
+                    st.pick = None;
+                    st.detail_key = None;
+                    st.detail = Slot::default();
+                }
                 PickAction::Open(id) => nav = Some(Nav::Station(id)),
             },
             (Some(Err(e)), true) => {
@@ -2621,11 +2624,17 @@ fn refresh_pins(ctx: &egui::Context, gs: &GameState, db: &GalaxyDb, st: &mut Mar
     ids.sort_unstable();
     ids.dedup();
     if ids.is_empty() {
+        st.pins_key = None;
+        st.pins_live = Slot::default();
         return;
     }
     let key = (ids.clone(), gs.location.last_arrival.0);
     let stale = st.pins_at.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(30));
-    if (st.pins_key.as_ref() != Some(&key) || stale) && !st.pins_live.busy() {
+    let changed = st.pins_key.as_ref() != Some(&key);
+    if changed {
+        st.pins_live = Slot::default();
+    }
+    if changed || (stale && !st.pins_live.busy()) {
         st.pins_key = Some(key);
         st.pins_at = Some(std::time::Instant::now());
         let db = db.clone();
@@ -2672,6 +2681,13 @@ fn pins_panel(ui: &mut Ui, gs: &GameState, st: &mut MarketUi) -> Option<Nav> {
     });
     if !st.prefs.pins_open {
         return None;
+    }
+    if let Some(Err(e)) = &st.pins_live.last {
+        ui.label(RichText::new(e).color(pal::BAD));
+        if retry_failed(ui, &st.pins_live) {
+            st.pins_at = None;
+            ui.ctx().request_repaint();
+        }
     }
     let listed = carriers_here(gs);
     let live = match &st.pins_live.last {
@@ -2728,7 +2744,7 @@ fn pins_panel(ui: &mut Ui, gs: &GameState, st: &mut MarketUi) -> Option<Nav> {
                                 .on_hover_text(format!("Its latest market has no {} {} it. It was {} when pinned.", if p.sell_here { "demand for" } else { "stock of" }, p.name, cr(p.price)));
                         }
                         None => {
-                            ui.label(RichText::new(cr(p.price)).color(pal::DIM)).on_hover_text("The price when pinned (loading the latest)");
+                            ui.label(RichText::new(cr(p.price)).color(pal::DIM)).on_hover_text("The price when pinned");
                         }
                     });
                     let system = match &now {
@@ -2823,6 +2839,8 @@ fn plan_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
         return None;
     }
     let Some(origin) = gs.location.star_pos else {
+        st.plan = Slot::default();
+        st.plan_key = None;
         empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
         return None;
     };
@@ -2858,6 +2876,8 @@ fn plan_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
     let orders: Vec<Order> =
         p.pins.iter().filter(|x| x.in_plan).map(|x| Order { market_id: x.market_id, symbol: x.symbol.clone(), name: x.name.clone(), sell_here: x.sell_here }).collect();
     if orders.is_empty() {
+        st.plan = Slot::default();
+        st.plan_key = None;
         empty(ui, icon::PUSH_PIN, "No pin in the run", "Tick the pins the run should fill (the box in front of each).");
         return None;
     }
@@ -2877,7 +2897,8 @@ fn plan_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
     };
     // Re-plan when anything it depends on changes (a purchase changes the hold and the credits).
     let key = format!("{:?}", (&input.orders, input.origin, input.cargo_used, input.credits, &input.hold, input.use_hold, input.min_pad, input.carriers, input.radius, input.cheapest, input.max_age_h, capacity));
-    if (again || st.plan_key.as_deref() != Some(key.as_str())) && !st.plan.busy() {
+    if again || st.plan_key.as_deref() != Some(key.as_str()) {
+        st.plan = Slot::default();
         st.plan_key = Some(key);
         let db = db.clone();
         st.plan.run(ui.ctx(), move || runplan::plan(&db, &input));
@@ -2894,9 +2915,6 @@ fn plan_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
         }
         Some(Ok(plan)) => plan,
     };
-    if st.plan.busy() {
-        ui.spinner();
-    }
     let mut nav = None;
     let stats = !plan.stops.is_empty();
     ui.horizontal_wrapped(|ui| {
@@ -3105,16 +3123,14 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
         });
         bar.field("", "", |ui| again = crate::widgets::button(ui, &format!("{} Plan again", icon::ARROWS_CLOCKWISE)).on_hover_text("With the latest prices and stock").clicked());
     });
-    // Asked again: planned once the run under way (if any) is done.
-    if again {
-        st.trip_key = None;
-    }
     if let Some(t) = &st.trip_unknown {
         ui.add_space(6.0);
         ui.label(RichText::new(format!("{} No commodity called \"{t}\". Pick one from the suggestions as you type.", icon::WARNING)).color(pal::WARN));
     }
     ui.add_space(8.0);
     if st.prefs.trip.is_empty() {
+        st.trip = Slot::default();
+        st.trip_key = None;
         empty(
             ui,
             icon::SHOPPING_CART,
@@ -3124,12 +3140,16 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
         return None;
     }
     let Some(origin) = gs.location.star_pos else {
+        st.trip = Slot::default();
+        st.trip_key = None;
         empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
         return None;
     };
     let p = &st.prefs;
     let lines = trip_lines(&p.trip, aboard);
     if lines.is_empty() {
+        st.trip = Slot::default();
+        st.trip_key = None;
         empty(ui, icon::CHECK_CIRCLE, "It's all aboard", "Your hold has every good on the list, in the tonnes set for it.");
         return None;
     }
@@ -3140,14 +3160,12 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
     // A good set to an amount (more than 1 t); 1 t is any amount, whatever is still to buy.
     let amount = |symbol: &str| p.trip.iter().any(|g| g.tonnes > 1 && g.symbol.eq_ignore_ascii_case(symbol));
     let to_buy: i64 = lines.iter().filter(|l| amount(&l.0)).map(|l| l.2).sum();
-    if st.trip_key.as_deref() != Some(key.as_str()) && !st.trip.busy() {
+    if again || st.trip_key.as_deref() != Some(key.as_str()) {
+        st.trip = Slot::default();
         st.trip_key = Some(key.clone());
         let db = db.clone();
         st.trip.run(ui.ctx(), move || finder::shopping_trip(&db, origin, &lines, &filters));
     }
-    // The trip shown is for what's set now, or else for what was set before it changed.
-    let fresh = st.trip_for.as_deref() == Some(key.as_str());
-    let busy = st.trip.busy();
     let trip = match &st.trip.last {
         None => {
             ui.spinner();
@@ -3162,13 +3180,6 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
     let mut nav = None;
     // Everything under the filters scrolls: the page doesn't.
     egui::ScrollArea::vertical().id_salt("trip-stops").auto_shrink([false, false]).show(ui, |ui| {
-        if !fresh || busy {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(RichText::new("Planning again; the trip below is the one before.").color(pal::DIM));
-            });
-            ui.add_space(4.0);
-        }
         let spend: i64 = trip.stops.iter().flat_map(|s| &s.buys).filter(|b| amount(&b.symbol)).map(|b| b.tonnes * b.price).sum();
         if !trip.stops.is_empty() {
             ui.horizontal_wrapped(|ui| {
@@ -3208,9 +3219,10 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            let follow = ui.add_enabled_ui(fresh, |ui| crate::widgets::primary_button(ui, &format!("{} Follow this trip", icon::PATH))).inner;
-            let tip = if fresh { "Shows the stops on the Navigation page; after each jump the next stop's system goes to the clipboard (if that's on there)" } else { "Wait for the trip planned for what's set now" };
-            if follow.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
+            if crate::widgets::primary_button(ui, &format!("{} Follow this trip", icon::PATH))
+                .on_hover_text("Shows the stops on the Navigation page; after each jump the next stop's system goes to the clipboard (if that's on there)")
+                .clicked()
+            {
                 st.follow = Some(finder::trip_route(trip));
             }
             if let Some(first) = trip.stops.first()
@@ -3359,6 +3371,10 @@ fn status_bar(ui: &mut Ui, rect: egui::Rect, svc: &mut MarketService) -> bool {
         bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| text(ui, format!("{} {h}", icon::BROADCAST), pal::FAINT));
     }
     resp.clicked()
+}
+
+fn retry_failed<T>(ui: &mut Ui, slot: &Slot<Result<T, String>>) -> bool {
+    !slot.busy() && matches!(&slot.last, Some(Err(_))) && crate::widgets::button(ui, "Retry").clicked()
 }
 
 fn status<T>(ui: &mut Ui, slot: &Slot<Res<T>>) -> bool {
@@ -3729,7 +3745,6 @@ const FLASH: f32 = 1.6;
 /// The Station tab: on the left a list of markets to open (a search, the station you're docked at, this system's
 /// stations and carriers, the ones opened lately); on the right up to eight markets side by side, tiled to the window.
 fn station_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Option<Nav> {
-    refresh_tiles(ui.ctx(), db, st);
     let full = ui.available_rect_before_wrap();
     let gap = crate::widgets::GAP;
     let list = st.prefs.tiles_list;
@@ -3741,6 +3756,7 @@ fn station_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) ->
     }
     let tiles = if list { egui::Rect::from_min_max(egui::pos2(full.left() + list_w + gap, full.top()), full.max) } else { full };
     let mut c = ui.new_child(egui::UiBuilder::new().id_salt("station-tiles").max_rect(tiles).layout(egui::Layout::top_down(egui::Align::Min)));
+    refresh_tiles(ui.ctx(), db, st);
     let nav = market_tiles(&mut c, gs, st);
     ui.advance_cursor_after_rect(full);
     nav
@@ -3750,6 +3766,8 @@ fn station_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) ->
 /// [`show`]).
 fn refresh_tiles(ctx: &egui::Context, db: &GalaxyDb, st: &mut MarketUi) {
     if st.prefs.tiles.is_empty() {
+        st.tiles_key = None;
+        st.tiles_live = Slot::default();
         return;
     }
     let ids = st.prefs.tiles.clone();
@@ -3759,7 +3777,11 @@ fn refresh_tiles(ctx: &egui::Context, db: &GalaxyDb, st: &mut MarketUi) {
     if let Some(t) = st.tiles_again.filter(|t| *t > now) {
         ctx.request_repaint_after(t - now);
     }
-    if (st.tiles_key.as_ref() != Some(&ids) || stale || again) && !st.tiles_live.busy() {
+    let changed = st.tiles_key.as_ref() != Some(&ids);
+    if changed {
+        st.tiles_live = Slot::default();
+    }
+    if changed || ((stale || again) && !st.tiles_live.busy()) {
         if again {
             st.tiles_again = None;
         }
@@ -3932,27 +3954,31 @@ fn market_list(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) {
 /// The search at the top of the Station tab's list: any station or carrier the database knows, by the start of its name
 /// (a carrier goes by its ID, such as J7F-10F). Returns the market picked.
 fn station_search(ui: &mut Ui, db: &GalaxyDb, st: &mut MarketUi) -> Option<u64> {
-    let typed = st.station_find.trim().to_string();
-    if typed.chars().count() >= 2 && typed != st.station_found_for && !st.station_found.busy() {
-        st.station_found_for.clone_from(&typed);
-        let db = db.clone();
-        st.station_found.run(ui.ctx(), move || db.find_stations(&typed, 12).map_err(|e| e.to_string()));
-    }
+    let retry = if st.station_find.trim() == st.station_found_for
+        && let Some(Err(e)) = &st.station_found.last
+    {
+        ui.label(RichText::new(e).color(pal::BAD));
+        retry_failed(ui, &st.station_found)
+    } else {
+        false
+    };
     let found: &[StationInfo] = match &st.station_found.last {
         Some(Ok(v)) => v,
         _ => &[],
     };
+    let searched = &st.station_found_for;
     let width = ui.available_width();
     // Names repeat across systems: each suggestion carries its system, so the one picked is the one opened.
     let label = |s: &StationInfo| format!("{} ({})", s.name, s.system);
     let c = crate::widgets::autocomplete(ui, "station-find", &mut st.station_find, "Open a station or carrier ID…", width, |t| {
-        let q = t.trim().to_lowercase();
-        if q.chars().count() < 2 {
+        let q = t.trim();
+        if q != searched.as_str() {
             return Vec::new();
         }
+        let prefix = q.to_lowercase();
         found
             .iter()
-            .filter(|s| s.name.to_lowercase().starts_with(&q))
+            .filter(|s| s.name.to_lowercase().starts_with(&prefix))
             .map(|s| {
                 let what = if s.market_updated_unix > 0 || s.commodity_count > 0 { format!("{} goods", s.commodity_count) } else { "no market".to_string() };
                 Suggestion { text: label(s), detail: what, starred: false }
@@ -3962,6 +3988,16 @@ fn station_search(ui: &mut Ui, db: &GalaxyDb, st: &mut MarketUi) -> Option<u64> 
     let picked = c.picked.and_then(|p| found.iter().find(|s| label(s) == p).map(|s| s.market_id));
     if picked.is_some() {
         st.station_find.clear();
+    }
+    let typed = st.station_find.trim();
+    if typed != st.station_found_for || retry {
+        st.station_found = Slot::default();
+        st.station_found_for = typed.to_string();
+        if typed.chars().count() >= 2 {
+            let db = db.clone();
+            let query = st.station_found_for.clone();
+            st.station_found.run(ui.ctx(), move || db.find_stations(&query, 12).map_err(|e| e.to_string()));
+        }
     }
     picked
 }
@@ -3973,7 +4009,11 @@ fn here_list(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, dock
     let listed = carriers_here(gs);
     let key = (gs.location.system_address, listed.iter().map(|(_, c)| c.clone()).collect::<Vec<_>>());
     let stale = st.here_at.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60));
-    if (st.here_key.as_ref() != Some(&key) || stale) && !st.here.busy() {
+    let changed = st.here_key.as_ref() != Some(&key);
+    if changed {
+        st.here = Slot::default();
+    }
+    if changed || (stale && !st.here.busy()) {
         st.here_key = Some(key.clone());
         st.here_at = Some(std::time::Instant::now());
         let db = db.clone();
@@ -3990,15 +4030,21 @@ fn here_list(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, dock
         });
     }
     let system = if gs.location.system.is_empty() { "this system".to_string() } else { gs.location.system.clone() };
-    // Only this system's answer (right after a jump the last one is still the previous system's); while the same question
-    // is asked again, the answer before stays.
     let view = match &st.here.last {
-        Some(Ok(v)) if st.here_for.as_ref() == Some(&key) => Some(v),
+        Some(Ok(v)) => Some(v),
         _ => None,
     };
     let Some((known, recorded)) = view else {
         list_heading(ui, &format!("In {system}"), |ui| {
-            ui.spinner();
+            if let Some(Err(e)) = &st.here.last {
+                ui.label(RichText::new(e).color(pal::BAD));
+                if retry_failed(ui, &st.here) {
+                    st.here_at = None;
+                    ui.ctx().request_repaint();
+                }
+            } else if st.here.busy() {
+                ui.spinner();
+            }
         });
         return;
     };
@@ -4122,6 +4168,7 @@ fn best_prices(live: Option<&FxHashMap<u64, Option<StationMarket>>>, tiles: &[u6
 
 /// What every market tile needs to know besides its own market.
 struct TileCtx<'a> {
+    loading: bool,
     origin: Option<[f64; 3]>,
     prefs: &'a MarketPrefs,
     /// The goods filter, lower case.
@@ -4201,6 +4248,10 @@ fn market_tiles(ui: &mut Ui, gs: &GameState, st: &mut MarketUi) -> Option<Nav> {
     };
     if let Some(Err(e)) = &st.tiles_live.last {
         ui.label(RichText::new(e).color(pal::BAD));
+        if retry_failed(ui, &st.tiles_live) {
+            st.tiles_at = None;
+            ui.ctx().request_repaint();
+        }
     }
     let tiles = st.prefs.tiles.clone();
     let best = best_prices(live, &tiles);
@@ -4212,7 +4263,7 @@ fn market_tiles(ui: &mut Ui, gs: &GameState, st: &mut MarketUi) -> Option<Nav> {
     if flash.is_some() {
         ui.ctx().request_repaint();
     }
-    let cx = TileCtx { origin: gs.location.star_pos, prefs: &st.prefs, filter: &filter, best: &best, docked: st.docked_market, flash };
+    let cx = TileCtx { loading: st.tiles_live.busy(), origin: gs.location.star_pos, prefs: &st.prefs, filter: &filter, best: &best, docked: st.docked_market, flash };
     let area = ui.available_rect_before_wrap();
     let gap = 12.0;
     let cols = tile_columns(n, area.width(), area.height(), gap);
@@ -4280,8 +4331,10 @@ fn market_tile(ui: &mut Ui, id: u64, m: Option<&Option<StationMarket>>, cx: &Til
                 }
                 None => {
                     tile_close_only(ui, &mut action);
-                    ui.add_space(40.0);
-                    ui.vertical_centered(|ui| ui.spinner());
+                    if cx.loading {
+                        ui.add_space(40.0);
+                        ui.vertical_centered(|ui| ui.spinner());
+                    }
                 }
             }
         });
@@ -4615,6 +4668,12 @@ fn database_tab(ui: &mut Ui, svc: &mut MarketService, st: &mut MarketUi, rt: &to
                 ui.label(RichText::new("No statistics yet.").color(pal::DIM));
             }
         });
+        if let Some(e) = svc.stats_error() {
+            ui.label(RichText::new(e).color(pal::BAD));
+            if crate::widgets::button(ui, "Retry statistics").clicked() {
+                svc.retry_stats();
+            }
+        }
         ui.add_space(8.0);
         card(ui, "Live feed (EDDN)", |ui| match svc.feed_snapshot() {
             Some(f) => {
@@ -4781,10 +4840,14 @@ fn import_progress(ui: &mut Ui, job: &ImportJob) {
 fn sell_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Option<Nav> {
     let hold = finder::sellable_hold(gs);
     if hold.is_empty() {
+        st.sell = Slot::default();
+        st.sell_key = None;
         empty(ui, icon::PACKAGE, "Nothing to sell", "No sellable cargo in your hold (mission cargo, stolen goods and limpets are left out).");
         return None;
     }
     let Some(origin) = gs.location.star_pos else {
+        st.sell = Slot::default();
+        st.sell_key = None;
         empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
         return None;
     };
@@ -4822,13 +4885,10 @@ fn sell_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
         });
     });
     ui.add_space(10.0);
-    let key = (gs.inventory.cargo.updated.0, tons, gs.location.system_address, st.prefs.sell_radius.to_bits(), st.prefs.max_age_h.to_bits());
-    // Asked to plan again while it plans: once it's done (the key it remembers no longer matches).
-    if search {
-        st.sell_key.0 = i64::MIN;
-    }
-    if key != st.sell_key && !st.sell.busy() {
-        st.sell_key = key;
+    let key = (gs.inventory.cargo.updated.0, hold.clone(), origin, pad, st.prefs.sell_radius, st.prefs.max_age_h);
+    if search || st.sell_key.as_ref() != Some(&key) {
+        st.sell = Slot::default();
+        st.sell_key = Some(key);
         let (db, radius, age_h) = (db.clone(), st.prefs.sell_radius, st.prefs.max_age_h);
         st.sell.run(ui.ctx(), move || finder::sell_plan(&db, origin, &hold, pad, radius, age_h));
     }
@@ -5063,8 +5123,18 @@ pub struct AlertRef {
 /// (with its filters), each a click away from being the alert's price.
 fn alert_reference(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) {
     let w = &st.new_watch;
-    let key = format!("{:?}", (w.commodity.trim().to_lowercase(), w.sell, w.max_ly.round() as i64, w.min_pad, w.carriers, w.min_qty, gs.location.system_address));
-    if st.alert_ref_key.as_deref() != Some(key.as_str()) && !st.alert_ref.busy() {
+    let key = format!("{:?}", (w.commodity.trim().to_lowercase(), w.sell, w.max_ly, w.min_pad, w.carriers, w.min_qty, gs.location.star_pos));
+    let changed = st.alert_ref_key.as_deref() != Some(key.as_str());
+    if changed {
+        st.alert_ref = Slot::default();
+    }
+    let retry = if let Some(Err(e)) = &st.alert_ref.last {
+        ui.label(RichText::new(e).color(pal::BAD));
+        retry_failed(ui, &st.alert_ref)
+    } else {
+        false
+    };
+    if changed || retry {
         st.alert_ref_key = Some(key);
         let (db, origin) = (db.clone(), gs.location.star_pos);
         let q = CommodityQuery {
@@ -5081,6 +5151,7 @@ fn alert_reference(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi
             limit: 1,
             sort: Sort::BestPrice,
         };
+        st.alert_ref = Slot::default();
         st.alert_ref.run(ui.ctx(), move || {
             let average = db.commodity_summary(&q.commodity, q.max_age_hours).map_err(|e| e.to_string())?.and_then(|s| s.average);
             let best = db.search_commodity(&q).map_err(|e| e.to_string())?.into_iter().next();
@@ -5126,7 +5197,7 @@ fn alert_reference(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi
 }
 
 /// Rules checked against every live market update. Returns true when the rules changed.
-fn alerts_tab(ui: &mut Ui, gs: &GameState, svc: &MarketService, db: &GalaxyDb, st: &mut MarketUi, watches: &mut Vec<PriceWatch>) -> bool {
+fn alerts_tab(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, db: &GalaxyDb, st: &mut MarketUi, watches: &mut Vec<PriceWatch>) -> bool {
     let mut changed = false;
     if st.commodities.is_empty() {
         st.commodities = db.commodities();
@@ -5142,6 +5213,12 @@ fn alerts_tab(ui: &mut Ui, gs: &GameState, svc: &MarketService, db: &GalaxyDb, s
         )
         .wrap(),
     );
+    if let Some(e) = svc.watch_error() {
+        ui.label(RichText::new(format!("Price alerts stopped. {e}")).color(pal::BAD));
+        if crate::widgets::button(ui, "Restart price alerts").clicked() {
+            svc.retry_watcher();
+        }
+    }
     crate::widgets::section(ui, "New alert");
     let known = !st.new_watch.commodity.trim().is_empty() && svc.resolves(st.new_watch.commodity.trim());
     let mut add = false;
@@ -5290,29 +5367,32 @@ mod tests {
         gs.location.system_address = 1;
         scan.update(&DealsRequest::new(&gs, &prefs), false);
         assert!(scan.slot.last.is_none());
-        assert!(scan.slot.busy(), "keep the running worker until it finishes");
+        assert!(!scan.slot.busy(), "a retired worker cannot hold up the next scan");
 
         gs.location.system_address = 0;
         let current = DealsRequest::new(&gs, &prefs);
-        release.send(()).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while scan.slot.busy() {
-            scan.update(&current, false);
-            assert!(std::time::Instant::now() < deadline, "superseded worker did not finish");
-            std::thread::yield_now();
-        }
+        scan.update(&current, false);
         assert!(scan.request.is_none());
-        assert!(scan.slot.last.is_none());
-        assert!(scan.slot.took.is_none());
 
         scan.request = Some(DealsRequest::new(&gs, &prefs));
+        scan.slot.run(&ctx, || Err("current scan failed".into()));
+        let wait_for_scan = |scan: &mut DealsScan| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while scan.slot.busy() {
+                scan.update(&current, false);
+                assert!(std::time::Instant::now() < deadline, "current worker did not finish");
+                std::thread::yield_now();
+            }
+        };
+        wait_for_scan(&mut scan);
+        assert!(matches!(&scan.slot.last, Some(Err(e)) if e == "current scan failed"));
+
+        scan.update(&current, true);
+        scan.request = Some(DealsRequest::new(&gs, &prefs));
         scan.slot.run(&ctx, || Ok(Vec::new()));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while scan.slot.busy() {
-            scan.update(&current, false);
-            assert!(std::time::Instant::now() < deadline, "current worker did not finish");
-            std::thread::yield_now();
-        }
+        wait_for_scan(&mut scan);
+        release.send(()).unwrap();
+        scan.update(&current, false);
         assert!(matches!(scan.slot.last, Some(Ok(_))));
         scan.update(&current, true);
         assert!(scan.request.is_none());
