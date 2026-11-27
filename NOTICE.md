@@ -1,6 +1,8 @@
 # Third-party data & credits
 
 Elite Nexus is original code, licensed under the GNU General Public License, version 3 or later (see `LICENSE`).
+Praetorium incorporates Elite Nexus and preserves these credits. See `docs/THIRD-PARTY-LICENSES.txt` for binary package notices.
+
 It derives **data** (facts, names, numbers) from the community sources below.
 Each source's licence text and exact commit are kept next to the data in `data/*/` (`LICENSE`, `SOURCE.txt`).
 
@@ -12,8 +14,8 @@ Each source's licence text and exact commit are kept next to the data in `data/*
 | jixxed/ed-journal-schemas (`data/journal-schemas`) | reference for undocumented journal events (Colonisation, Powerplay 2.0, Flags2 bits) | Apache-2.0 | |
 | EDCD coriolis-data (`data/coriolis`) | ship hulls, their slots, module figures, and engineering's figures (blueprint ranges, experimental effects) for Fleet › Plan a loadout | data: Frontier Developments plc, under Frontier's terms; code: MIT | As coriolis-data's `LICENSE.md` says (copied next to the data). Its files are put together unchanged by `crates/nexus-data/examples/convert_coriolis.rs`; the commit is in `data/coriolis/SOURCE.txt`. |
 | EDRefCard by Richard Buckle | cross-check for binding action groupings/names (`crates/nexus-binds`) | MIT | Licence reproduced in `crates/nexus-binds/README.md`. |
-| Spansh, EDSM, Inara, EDDN, EDAstro | live services the app talks to (uploads opt-in) | their own terms | See `docs/research/` for each API's usage rules. The optional Spansh station import streams Spansh's public daily dump into the local database. |
-| EDDN JSON schemas + READMEs (EDCD/EDDN, `docs/research/eddn-schemas`) | validating every upload in tests | BSD-3-Clause | Test-only; not in the binary. Add EDDN's `LICENSE` file there before sharing the source. |
+| Spansh, EDSM, Inara, EDDN, EDAstro | services covered by the integration policy | their own terms | See `docs/research/` for each API's usage rules. The optional Spansh station import streams Spansh's public daily dump into the local database. |
+| EDDN JSON schemas + READMEs (EDCD/EDDN, `docs/research/eddn-schemas`) | validating every upload in tests | BSD-3-Clause | Test-only; not in the binary. The EDCD BSD license is preserved beside the schemas. |
 | Inter by Rasmus Andersson (`data/fonts/inter`) | interface typeface, compiled into the exe | SIL Open Font License 1.1 | Licence text in `data/fonts/inter/LICENSE.txt`; ship it with binaries (the release zip includes this NOTICE). |
 | Phosphor Icons (egui-phosphor) | UI icons | MIT | |
 | egui's default fonts (epaint_default_fonts) | fallback glyphs and emoji | Ubuntu Font Licence 1.0 / SIL OFL 1.1 | Font data compiled into the exe; each font keeps its own licence. |
