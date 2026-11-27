@@ -1,8 +1,6 @@
-# Working on Elite Nexus
+# Working on Praetorium
 
-Elite Nexus is a native Rust (egui) companion for Elite Dangerous: one executable for Windows, Linux (where the game
-runs under Proton or Wine) and macOS that replaces the pile of tools and websites commanders run side by side. This
-file is for anyone changing the code. Read it before your first change; several rules protect players' games and data.
+Praetorium is a native Rust (egui) development project for Windows, Linux and macOS, based on Elite Nexus by CMDR Alka Uruskan and contributors. The following rules protect players' games and data.
 
 ## Read first
 
@@ -12,10 +10,9 @@ file is for anyone changing the code. Read it before your first change; several 
 * `docs/USER_GUIDE.md`: what every page does. It's compiled into the in-app assistant's knowledge base, together
   with `crates/nexus-ai/knowledge/*.md`, so the assistant tells users whatever it says. When behaviour changes,
   update it in the same commit.
-* `site/`: the website (GitHub Pages, `.github/workflows/pages.yml`) and its `llms.txt`, which AI assistants read.
+* `site/`: the local website preview validated by `.github/workflows/pages.yml` and its `llms.txt`, which AI assistants read.
   They describe features too: keep them true when behaviour changes.
-* `CHANGELOG.md`: what changed in each release. Add your user-visible changes under "Unreleased" as you go; the
-  release workflow publishes each version's section as its release notes.
+* `CHANGELOG.md`: what changed in each release. Add your user-visible changes under "Unreleased" as you go; historical release notes preserve their original attribution.
 * `docs/research/`: verified specs (EDDN, EDSM, Inara, CAPI, Spansh, the journal, engineering, exploration, HUD
   colours and cockpit lights). Check them before touching an integration; the live EDDN service differs from its
   GitHub docs, for one.
@@ -23,9 +20,9 @@ file is for anyone changing the code. Read it before your first change; several 
 
 ## Hard rules
 
-* **External services require Gen2 authorization and user opt-in.** Production uploads and updates are disabled in development drafts. Inara current-session profile state requires separate consent after service approval.
+* **External services require Praetorium authorization and user opt-in.** Production uploads and updates are disabled in development drafts. Inara current-session profile state requires separate consent after service approval.
 * **Protect game files.** Ordinary cockpit and HUD operations keep their explicit controls and surgical writes. Isolated runs suppress discovery and protected operations. Use synthetic journals and isolated profiles for verification. Keep Frontier shader exports outside Git.
-* **Preserve app boundaries.** Use Gen2 file and platform identities. Do not copy a user's upstream credentials or app profile. Never commit application data directories, databases, logs or keys.
+* **Preserve app boundaries.** Use Praetorium file and platform identities. Do not copy a user's upstream credentials or app profile. Never commit application data directories, databases, logs or keys.
 
 * Never panic on external data: no `unwrap()` on I/O or network data, `#[serde(default)]` on external structs.
 * **Be honest in the UI.** Say where data comes from and what it can't show (the Exobiology bonus hunt explains why

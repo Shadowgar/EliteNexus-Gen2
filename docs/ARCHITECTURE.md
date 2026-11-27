@@ -1,4 +1,4 @@
-# Elite Nexus — Architecture
+# Praetorium — Architecture
 
 Native Rust (edition 2024, Rust 1.100.0 for development, 1.95.0 minimum verified on Windows MSVC) desktop companion for Elite Dangerous that replaces
 EDDiscovery, ED Market Connector, Odyssey Materials Helper, Observatory, Exploration Buddy, EDCoPilot-style
@@ -9,14 +9,14 @@ with one fast app.
 
 ```powershell
 cargo +1.100.0 run --locked -p nexus-app                # debug build (deps optimised, fast enough)
-cargo +1.100.0 build --locked --release -p nexus-app    # → target\release\EliteNexus-Gen2.exe
+cargo +1.100.0 build --locked --release -p nexus-app    # → target\release\Praetorium.exe
 cargo test --workspace
 ```
 
 On Windows, `tools\dev\cargo.ps1` runs cargo at BelowNormal priority (logs in `target\cc\`) so a game on the same PC
 isn't slowed, and `tools\dev\shot.ps1` checks the UI with off-screen screenshots; `AGENTS.md` has the working rules.
 Parallel builds: set your own `CARGO_TARGET_DIR` (e.g. `target-agents\<name>`) to avoid lock contention.
-`EliteNexus-Gen2.exe --page Exploration --screenshot out.png` renders a page after loading and saves a PNG (used for UI checks;
+`Praetorium.exe --page Exploration --screenshot out.png` renders a page after loading and saves a PNG (used for UI checks;
 the window is placed off-screen and never takes focus). `--size 1000x700` tests responsive layouts, `--tab <name>` opens
 a Market section (`abnormal`, `database`, …; `routes` finds trade routes on the first frame, `station` opens four markets side by side, `browse` opens Find commodity's whole list), the whole-galaxy map (`galaxy`), an Exploration tab (`find`, `history`,
 `unsold`), Exobiology › Find planets (`untouched`, `known`; these three searches start on the first frame of a
@@ -31,7 +31,7 @@ HUD & cockpit's tabs (`glare`, `cockpit`) or a HUD colours preset to start from 
 `royalpurple`, …), `--demo` adds a sample Ask conversation, an alert banner and sample alerts in the alert history
 (`--tab bell` opens it), `--overlay <moment>` shows an overlay
 moment compact and expanded with sample content (`overlay::DEMOS`), `--shot-delay 8` waits longer (the
-galaxy image paints in the background, Spansh searches take 5–20 s). `ELITE_NEXUS_GEN2_GAME_DIR` points HUD & cockpit at
+galaxy image paints in the background, Spansh searches take 5–20 s). `PRAETORIUM_GAME_DIR` points HUD & cockpit at
 another game folder (one holding `EliteDangerous64.exe`): test the Cockpit lights installer against a copy, never
 a real install.
 
@@ -40,27 +40,29 @@ a real install.
 | crate | role | depends on |
 |---|---|---|
 | `nexus-journal` | journal + companion-file I/O: typed events (`Event::parse`), `load_history` (parallel bulk load), `Watcher` (100 ms live tail), NaN-sanitising parser | — |
-| `nexus-gen2-data` | static game knowledge compiled in: ranks, ships, exploration values, exobiology, commodities/modules/materials names (FDevIDs), engineering blueprints & engineers, material-trader maths, ship fitting (`fitting`: hulls, slots and module figures from coriolis-data; a build's jump range, speed, shields, armour, power, mass and cost) | — |
+| `praetorium-data` | static game knowledge compiled in: ranks, ships, exploration values, exobiology, commodities/modules/materials names (FDevIDs), engineering blueprints & engineers, material-trader maths, ship fitting (`fitting`: hulls, slots and module figures from coriolis-data; a build's jump range, speed, shields, armour, power, mass and cost) | — |
 | `nexus-model` | pure state machine: `Model` (all CMDRs) → `GameState` (location, fleet, inventory, missions + massacre stacks, exploration, exobio, mining, carrier, colonisation, history ledger with time in the game and timestamped deeds, session, feed) + `Alerts`; `career`: the game's own statistics in plain words (labels and units for every figure, earnings and spending, records, milestones); `period`: what the commander did over a period, from the journals (money by category with trade counted by its profit, time in the game, per-day series, journal records); `ships`: the same ship by ship, each journal line going to the ship the commander was in (`History::aboard`); `context`: what the commander is doing right now (docked, supercruise, charging a jump, near a body, landed, SRV, on foot, …, the GuiFocus screen, danger), from Status.json and the journal, for anything that follows the game | journal, data |
 | `nexus-galaxy` | local SQLite (WAL) galaxy/market DB: one writer thread, pooled read connections, in-memory station index; commodity search, trade routes, nearest services, hotspots, conflicts near a point (each system's `Conflicts[]` kept with its factions; faction states stand in where a report lacked the list), streaming Spansh dump import | journal |
 | `nexus-eddn` | EDDN **subscriber** (ZeroMQ relay → decoder thread → galaxy DB), dedupe, watchdog + reconnect, stats & headlines | galaxy |
-| `nexus-uplink` | **uploads**: EDDN (schema-validated, strictly compliant), EDSM journal sync, Inara, EDAstro; persistent retry queues (`nexus-gen2-data\uplink\*.jsonl`), per-service rate limits | journal |
+| `nexus-uplink` | **uploads**: EDDN (schema-validated, strictly compliant), EDSM journal sync, Inara, EDAstro; persistent retry queues (`praetorium-data\uplink\*.jsonl`), per-service rate limits | journal |
 | `nexus-spansh` | Spansh API client: neutron/galaxy/carrier/riches/exobio/trade plotters, system/station/body search | — |
 | `nexus-binds` | `.binds` parser, conflicts/missing essentials, printable reference card | — |
-| `nexus-hud` | HUD colour matrix: maths and previews (linear light), surgical edits of `GraphicsConfigurationOverride.xml` (only the `<Matrix…>` rows, backup once, atomic), credited community presets, friend/foe readability checks, game install and EDHM detection, tone mapping (glare, ACES curve, auto-exposure targets in `<HDRNode_Reference>`), Elite Nexus's graphics hook (`dimmer`: 3Dmigoto from its official release with pinned SHA-256s and a pure-Rust 7z reader; `[ShaderRegex]` patterns that patch the game's box-light shader at load (cockpit-light dimmer) and, when switched on, the HUD shaders that apply the colour matrix (keep hostile red, friendly green and shield blue; `palette::is_hud_orange` is the same rule in Rust for previews); install / settings / removal tracked by a manifest in the game folder) | — |
+| `nexus-hud` | HUD colour matrix: maths and previews (linear light), surgical edits of `GraphicsConfigurationOverride.xml` (only the `<Matrix…>` rows, backup once, atomic), credited community presets, friend/foe readability checks, game install and EDHM detection, tone mapping (glare, ACES curve, auto-exposure targets in `<HDRNode_Reference>`), Praetorium's graphics hook (`dimmer`: 3Dmigoto from its official release with pinned SHA-256s and a pure-Rust 7z reader; `[ShaderRegex]` patterns that patch the game's box-light shader at load (cockpit-light dimmer) and, when switched on, the HUD shaders that apply the colour matrix (keep hostile red, friendly green and shield blue; `palette::is_hud_orange` is the same rule in Rust for previews); install / settings / removal tracked by a manifest in the game folder) | — |
 | `nexus-ai` | built-in assistant: providers (Gemini via its OpenAI-compatible endpoint, Claude Messages API with prompt caching, local/other OpenAI-compatible), tool-calling loop, embedded knowledge base (`knowledge/*.md` + `docs/USER_GUIDE.md`, BM25 search) | — |
 | `nexus-update` | updates: release versions in semver's order, the signed release manifest (`update.json` + its minisign signature, checked against `src/minisign.pub`), what to take from a release archive (the program and its documents, by name), staging the new program beside the old one and swapping it in at exit, the changelog's sections for What's new; `examples/update_sign.rs` makes the key and writes and signs a release's manifest (release.yml) | — |
 | `nexus-app` | egui 0.36 / eframe (wgpu) GUI, services wiring, TTS, toasts; `update.rs` checks for updates, downloads and stages them, and `main.rs` swaps the program once the window has closed | everything |
 
-## Gen2 boundaries
+## Application boundaries
 
-The executable, desktop entry, window identifier, update manifest and MCP name are Gen2-specific. Ordinary runs may share read-only game journals with upstream. Settings, credentials, databases, caches and logs resolve through the Gen2 profile. See the [improvement register](GEN2_IMPROVEMENTS.md) and [migration procedure](../CONTRIBUTING.md#profile-migration-and-rollback).
+The executable, desktop entry, window identifier, update manifest and MCP name are Praetorium-specific. Ordinary runs may share read-only game journals with upstream. Settings, credentials, databases, caches and logs resolve through the Praetorium profile. See the [improvement register](GEN2_IMPROVEMENTS.md) and [migration procedure](../CONTRIBUTING.md#profile-migration-and-rollback).
 
-GPU recovery keeps the original arguments and working directory and pins the resolved profile. Screenshot runs skip respawn. Fixture runs keep their selected source, muted speech, offline policy and disabled MCP and game integration. Production staging requires a signed Gen2 manifest and an approved signing root. The production root is unconfigured.
+GPU recovery keeps the original arguments and working directory and pins the resolved profile. Screenshot runs skip respawn. Fixture runs keep their selected source, muted speech, offline policy and disabled MCP and game integration. Production staging requires a signed Praetorium manifest and an approved signing root. The production root is unconfigured.
 
 The galaxy writer distinguishes queued messages, committed transactions, partial row failures and failed checkpoints. Additive schema preparation and one-off repairs commit in a single transaction. A newer schema fails before schema writes. Managed desktop edits snapshot the chosen location and existing contents, stage the replacement, and check the snapshot at commit. The rollback path restores a previously changed file only while it still matches the completed edit.
 
 The upload processor and transport check the same authority generation. Core source and commander handoffs retire mapped observations, pending announcements and retry queues before forwarding the new scope. Consent and credential changes also retire affected queues. Queue files can record current-run retries. A new process cannot attest the previous process's journal generation and starts an empty queue. The application keeps outbound transport unavailable pending separate authorization.
+
+Phase 01E centralized the display name, app ID and portable profile in `nexus-app/src/identity.rs`. The update trust boundary in `nexus-update` accepts the future repository identity and leaves the production signing key unset. Desktop, bundle and MCP identities are independent. Historical Elite Nexus and EliteNexus-Gen2 profile names are reserved. See the [explicit migration procedure](PROFILE_MIGRATION.md).
 
 ## Runtime
 
@@ -86,7 +88,7 @@ UI pages ──► background jobs (jobs.rs) ──► galaxy read pool / Spansh
   gives each section a share and cuts a long one to the lines about the question. `NexusTools::call` cuts anything
   still over the budget (`within`), saying so. A tool marked offline answers an agent from local data only: `origin()`
   looks an unknown system up on Spansh for Ask, never for an agent. `mcp.rs` is
-  Settings › AI agents: `EliteNexus-Gen2 --mcp` (`mcp/stdio.rs`, started by the agent, before any window, lock or log)
+  Settings › AI agents: `Praetorium --mcp` (`mcp/stdio.rs`, started by the agent, before any window, lock or log)
   speaks MCP on stdin/stdout, both the 2026-07-28 revision (`server/discover`, `_meta` on every request) and the
   `initialize` revisions before it, and hands each call to the running app as one line of JSON over a named pipe named
   by the user's SID (`mcp/win.rs`: created with the user as owner and an owner-only DACL, opened at identification
@@ -135,7 +137,7 @@ UI pages ──► background jobs (jobs.rs) ──► galaxy read pool / Spansh
   (Windows: the process list; Linux: /proc) and `App::watch_game` sets `GameState::game_gone` (`game_process::gone`):
   `Process` when it was seen here and has gone, or, on Windows with the journal folder found automatically, isn't
   running while the journal has been quiet since start; `Quiet` when nothing has been written since start and for
-  15 minutes; never once the game has written while Elite Nexus runs (other cases), nor in test runs.
+  15 minutes; never once the game has written while Praetorium runs (other cases), nor in test runs.
   `GameState::game_running` and `nexus_model::context` read it; `GameState::game_stopped` (a `Shutdown` or `Process`)
   is what the cockpit lights' calibration waits for.
 * Follow my flight (`follow.rs`, Settings › Exploration): `Follower::step` reduces `nexus_model::context` to the
@@ -168,7 +170,7 @@ UI pages ──► background jobs (jobs.rs) ──► galaxy read pool / Spansh
 * History is folded with alerts **disabled**; only live events raise alerts or get uploaded. Never upload history.
   Test runs (`--journal-dir`, `--screenshot`) never upload at all.
 * The UI never blocks: long work (DB queries, HTTP) runs off-thread and results are polled each frame.
-* Data dir: `nexus-gen2-data\` next to the exe (portable) — fallback `%LOCALAPPDATA%\EliteNexus-Gen2`, override `ELITE_NEXUS_GEN2_HOME`.
+* Data dir: `praetorium-data\` next to the exe (portable) — fallback `%LOCALAPPDATA%\Praetorium`, override `PRAETORIUM_HOME`.
   Contents: `settings.json` (API keys DPAPI-sealed), `galaxy.db` (+ WAL), `uplink\` queues and caches.
 * The galaxy DB only keeps what queries use: EDDN jumps into unpopulated systems are dropped (populated systems,
   carrier jumps, docked arrivals, stations, markets and ring hotspots are kept); the commander's own journal is kept whole.
@@ -187,9 +189,9 @@ UI pages ──► background jobs (jobs.rs) ──► galaxy read pool / Spansh
 
 ## Licensing notes
 
-* Elite Nexus is free software under GPL-3.0-or-later (`LICENSE`); third-party data and fonts are listed in `NOTICE.md`
+* Praetorium incorporates Elite Nexus by CMDR Alka Uruskan and its contributors and is free software under GPL-3.0-or-later (`LICENSE`); third-party data and fonts are listed in `NOTICE.md`
   with their licences.
 * EDEngineer data (MIT), EDDiscovery sources (Apache-2.0), ed-journal-schemas (Apache-2.0): attribution in data/*/SOURCE.txt.
 * coriolis-data (`data/coriolis`): the data is Frontier's, under Frontier's terms, its code MIT (`LICENSE.md` copied next
-  to it). EDSY's data is CC BY-NC and is not bundled: Elite Nexus links to EDSY instead.
+  to it). EDSY's data is CC BY-NC and is not bundled: Praetorium links to EDSY instead.
 * Exobiology dataset is a factual compilation incl. facts from GPL tools — no GPL code is copied.

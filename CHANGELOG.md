@@ -5,6 +5,8 @@ The versioned entries through 0.8.2 preserve the original EliteNexus release not
 
 ## Unreleased
 
+- **Identity:** Praetorium is the new development name. It uses original icons, an independent executable, application ID, profile and MCP transport. Settings shows the Elite Nexus attribution. The optional profile migration copies supported local data while preserving the earlier installations. Production updates and publication remain disabled.
+
 - **Market database:** Report failed writes and incomplete import checkpoints. Compatible older databases upgrade in place. Newer or unreadable databases are preserved for recovery.
 - **HUD and cockpit:** Verify the selected installation and file contents before saving or installing. Preserve inherited tone settings and unmanaged files. The controls list shows axis conflicts when filtered to conflicts.
 - **Outbound sync:** Retire queued observations at consent, source and commander boundaries. Previous-run queues require fresh observations in the new session. Production uploads remain disabled.

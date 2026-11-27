@@ -225,6 +225,14 @@ On November 26, 2026, the owner accepted the first Windows gameplay milestone af
 - **Regression evidence and upstream applicability.** Recording-transport fixtures exercise restart, source retirement, rapid pause and resume, and fresh authorized sends, including the actual typed Market companion. The retirement behavior can be reviewed upstream independently of Gen2 authorization. Upstream would need to choose an explicit policy for cross-process queue resume.
 - **Profile snapshot follow-up.** An explicitly authorized Inara snapshot uses the identity from its own replay, checked against the verified current context. A stale observation of an empty queue can no longer defer a newly queued snapshot. A recording-transport test covers a live session that has processed its file header while the login event was retired during a configuration change.
 
+## Phase 01E ? Praetorium identity
+
+### ENX-026 ? Independent identity, attribution and profile migration
+
+**Class and subsystem:** Project identity, attribution and local data protection. Praetorium introduces its own executable, OS IDs, original icon, profile and transport identifiers. It identifies Elite Nexus as its source in the app and in distribution notices. The [copy-based migration](PROFILE_MIGRATION.md) preserves the source profile and limits what can be carried forward. Update and service authorization remain independently gated. The visual identity is specific to Praetorium. Reserved profile paths and scope-limited migration are adaptable upstream.
+
+The transition starts at the verified [Phase 01D-A draft](https://github.com/Shadowgar/EliteNexus-Gen2/pull/4) at `c873bbb7af2e392489e491e19060222b6030145a`. Its [hosted matrix](https://github.com/Shadowgar/EliteNexus-Gen2/actions/runs/45940440246) passed all nine jobs. Earlier ENX entries retain their development-era names and evidence.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.

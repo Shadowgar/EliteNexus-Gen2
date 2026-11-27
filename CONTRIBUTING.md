@@ -1,11 +1,11 @@
-# Contributing to Elite Nexus
+# Contributing to Praetorium
 
-This page is for anyone who wants to build Elite Nexus from the source, report a bug well, or change the code. If you
+This page is for anyone who wants to build Praetorium from the source, report a bug well, or change the code. If you
 just want to use the app, the [README](README.md) and the [user guide](docs/USER_GUIDE.md) are for you.
 
 ## Building from source
 
-Use exact Rust **1.100.0** for Gen2 development and initial verification. Rust **1.95.0** remains the verified Windows minimum. The CI matrix tracks exact development and compatibility toolchains as well as floating stable.
+Use exact Rust **1.100.0** for Praetorium development and initial verification. Rust **1.95.0** remains the verified Windows minimum. The CI matrix tracks exact development and compatibility toolchains as well as floating stable.
 
 Install exact Rust 1.100.0 from [rustup.rs](https://rustup.rs). Windows also uses the MSVC linker.
 
@@ -14,7 +14,7 @@ cargo +1.100.0 build --locked -p nexus-app
 cargo +1.100.0 run --locked -p nexus-app -- --isolated
 ```
 
-The executable is `EliteNexus-Gen2` (`EliteNexus-Gen2.exe` on Windows). The Windows and macOS developer packaging scripts use Gen2 names. Gen2 resolves a portable `nexus-gen2-data` profile first, then the per-user `EliteNexus-Gen2` directory. macOS bundles use Application Support. `ELITE_NEXUS_GEN2_HOME` selects a dedicated profile. Isolated runs without the override get a fresh scratch directory.
+The executable is `Praetorium` (`Praetorium.exe` on Windows). The Windows and macOS developer packaging scripts use Praetorium names. Praetorium resolves a portable `praetorium-data` profile first, then the per-user `Praetorium` directory. macOS bundles use Application Support. `PRAETORIUM_HOME` selects a dedicated profile. Isolated runs without the override get a fresh scratch directory.
 
 ## Command-line options
 
@@ -28,11 +28,11 @@ The executable is `EliteNexus-Gen2` (`EliteNexus-Gen2.exe` on Windows). The Wind
 | `--demo` | Add a sample Ask conversation, an alert banner and sample alerts in the alert history (for screenshots); with `--tab bell` the history is open, the list under the toolbar's bell. |
 | `--overlay <moment>` | The overlay with sample content: the main window shows the moment compact and expanded, see-through, as its own window (see-through off) and in VR's panel, and (except in a screenshot run) the overlay's own window turns between the two every four seconds. Moments: `jump`, `hyperspace`, `arrival`, `approach`, `sampling`, `close`, `mining`, `trade`, `docking`, `docked`, `carrier`, `two`, `alert`, `quiet`. |
 | `--screenshot <png> [--shot-delay <s>] [--size <w>x<h>]` | Render the page off-screen after loading, save the PNG and exit. The window is never visible and nothing is uploaded. `--size 1000x760` checks a narrow layout (the size is in points: on a display scaled above 100 % the PNG comes out that much larger, with the same layout, and `tools\dev\shot.ps1` says so); `--shot-delay 8` or more waits for local page content. |
-| `--install-desktop` / `--uninstall-desktop` | Linux only: add Elite Nexus and its icon to the desktop's app menu, or take it out. |
+| `--install-desktop` / `--uninstall-desktop` | Linux only: add Praetorium and its icon to the desktop's app menu, or take it out. |
 | `--updated <version>` | Given by an update's Restart now to the new copy: it waits up to 15 seconds for the old copy to let go of the instance lock, says it was updated from that version, and skips the support card. |
 
-The images in `docs/screenshots/` were made this way, e.g.
-`EliteNexus-Gen2.exe --page market --tab abnormal --screenshot docs\screenshots\market.png --shot-delay 8 --mute`. Check a
+The images in `docs/screenshots/` are inherited captures. For a new local capture, use
+`Praetorium.exe --isolated --page market --tab abnormal --screenshot target\market.png --shot-delay 8 --mute`. Check a
 narrow (1000 px) and a wide window whenever a layout changes.
 
 ## Checks
@@ -65,21 +65,21 @@ Each crate ships examples that work on your own journals and database:
 | `cargo run --release -p nexus-uplink --example validate` | Every upload your journals would produce, checked against the EDDN schemas. Sends nothing. |
 | `cargo run --release -p nexus-galaxy --example seed_journal -- <db>` | Build a galaxy database from your journals. |
 | `cargo run -p nexus-eddn --example live -- <db> <seconds>` | Watch the live EDDN feed flow into a database. |
-| `cargo +1.100.0 run --locked -p nexus-update --example update_sign -- manifest <dir> <tag> <date>` | Write an unsigned Gen2-format manifest for staged test artifacts. Production signing stays disabled. |
+| `cargo +1.100.0 run --locked -p nexus-update --example update_sign -- manifest <dir> <tag> <date>` | Write an unsigned Praetorium-format manifest for staged test artifacts. Production signing stays disabled. |
 
 **Testing updates.** `ELITE_NEXUS_UPDATE_URL` points a build at a folder (or an address) holding `update.json`,
 `update.json.minisig`, the archives it names and optionally a `CHANGELOG.md`, instead of GitHub; the signature is still
 checked against the built-in key, so sign the test manifest with `update_sign`. With the variable set even a debug build
-checks by itself; it installs only from a release build outside a `target` folder (copy `EliteNexus-Gen2.exe` elsewhere),
+checks by itself; it installs only from a release build outside a `target` folder (copy `Praetorium.exe` elsewhere),
 and never in a test run. `--tab update` (and `update-blocked`, `update-download`, `update-ready`, `update-failed`,
 `update-notes`, `updated`) shows the banner's states in a screenshot; with `--page Settings`, the About rows too.
 
 ## How it stays fast
 
-Elite Nexus is pure Rust: no Python, no Node.js, no browser engine, one executable with a GPU-rendered interface
+Praetorium is pure Rust: no Python, no Node.js, no browser engine, one executable with a GPU-rendered interface
 (egui/wgpu). Measured on one development PC:
 
-| | Elite Nexus |
+| | Praetorium |
 |---|---|
 | Full journal history load | **~40–60 ms** for 16.5k events (parallel parse, ~260 MB/s, 600k events/s); EDDiscovery takes minutes on big histories |
 | Live latency | journal + Status.json polled every **100 ms** (no missed writes, no notification lag) |
@@ -92,11 +92,11 @@ the galaxy database has one writer thread with pooled readers. `docs/ARCHITECTUR
 
 ## Reporting a bug
 
-For Gen2, use the [Gen2 issue tracker](https://github.com/Shadowgar/EliteNexus-Gen2/issues) and include:
+For Praetorium, use the [Praetorium issue tracker](https://github.com/Shadowgar/EliteNexus-Gen2/issues) and include:
 
 * the version (Settings › About), your OS, and how the game runs there (natively, Proton, Wine, CrossOver, Whisky);
 * what you did, what you expected and what happened;
-* `nexus.log` and, if the app closed unexpectedly, `crash.log`, both from the data folder (Settings › About › Data
+* `praetorium.log` and, if the app closed unexpectedly, `crash.log`, both from the data folder (Settings › About › Data
   folder › Open). Neither is sent anywhere by itself.
 
 What works on Linux and what doesn't yet is collected in [discussion #17](https://github.com/uruskan/EliteNexus/discussions/17).
@@ -124,31 +124,21 @@ What works on Linux and what doesn't yet is collected in [discussion #17](https:
 
 ## Releases and upstream review
 
-Gen2 builds are development artifacts. Publication and automatic updates require an approved Gen2 signing identity and release process. Use signed synthetic manifests and disposable installs to verify update trust and rollback.
+Praetorium builds are development artifacts. Publication and automatic updates require an approved Praetorium signing identity and release process. Use signed synthetic manifests and disposable installs to verify update trust and rollback.
 
 Every substantive change includes a cumulative [improvement-register entry](docs/GEN2_IMPROVEMENTS.md) with code and PR links, regression evidence, actual results, known limitations and upstream applicability. Update the changelog, architecture and user guide as applicable. Keep independently useful changes focused.
 
 ### Profile migration and rollback
 
-Start with a new Gen2 profile. With both apps closed, keep an untouched backup and copy only explicitly reviewed preferences, exported builds or a compatible database snapshot to a disposable Gen2 profile. Exclude credentials, service consent, queued uploads, installer staging and protected game paths. Use a cleanly closed SQLite source or a consistent backup. Rebuild journal indexes from the original read-only journals. Roll back by closing Gen2 and reopening the original installation with its original profile.
+Use the [copy-based profile migration](docs/PROFILE_MIGRATION.md) with synthetic data when testing coexistence or rollback.
 
 ## Accounts and APIs
 
-* **Inara** only accepts whitelisted app names; it approved "Elite Nexus" on 2026-10-13, so a user's personal API key
-  is all sync needs. It sends no `isBeingDeveloped`: test runs never upload, so what it sends is live play. Use an
-  Inara test account for development work that has to upload; see `docs/research/inara.md`.
-* **Frontier Companion API (CAPI)** needs a client ID approved by Frontier (`docs/research/capi.md`). Not supported
-  yet; the journal provides almost everything.
-* **EDDN** uploads are validated against the schemas in `docs/research/eddn-schemas/` and must stay strictly
-  compliant: `cargo run --release -p nexus-uplink --example validate` checks every message your journals would send.
+Inara and Frontier CAPI require separate project authorization. Public EDDN receive and documented Spansh reads are available under their existing restrictions. Outbound uploads and hosted AI remain disabled. Use the synthetic uplink tests to check schemas and authorization behavior.
 
 ## Where things are
 
-* `AGENTS.md`: working rules for this repository.
-* `docs/ARCHITECTURE.md`: crates, threads, the design system, code conventions.
-* `docs/USER_GUIDE.md`: every page explained (also the in-app assistant's knowledge).
-* `CHANGELOG.md`: what changed in each release.
-* `site/`: the website, published to GitHub Pages by `.github/workflows/pages.yml`, with `llms.txt` for AI assistants;
-  `tools/site/` builds and checks it.
-* `docs/research/`: verified specs for every integration, and a feature matrix of the tools Elite Nexus replaces.
-* `NOTICE.md`: third-party data and fonts, with their licences.
+- [Architecture](docs/ARCHITECTURE.md) and [design](docs/DESIGN.md).
+- [User guide](docs/USER_GUIDE.md) and [changelog](CHANGELOG.md).
+- [Local website preview](tools/site/README.md).
+- [Third-party notices](NOTICE.md) and [licensing](docs/LICENSING.md).

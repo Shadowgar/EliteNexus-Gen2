@@ -1,250 +1,42 @@
-<p align="center"><img src="site/assets/favicon.svg" width="88" alt="Elite Nexus icon"></p>
+# Praetorium — An Intelligent Shipboard Command Platform for Elite Dangerous
 
-<h1 align="center">EliteNexus-Gen2</h1>
+**All systems. One command.**
 
-**Development drafts.** Gen2 builds on [Elite Nexus](https://github.com/uruskan/EliteNexus), created by CMDR Alka Uruskan and its contributors. The [Gen2 improvement register](docs/GEN2_IMPROVEMENTS.md) follows each change from the audited base through verification and upstream review. The screenshots, feature descriptions, and community feedback below also document inherited upstream functionality.
+*Omnia sub uno imperio.*
 
-<p align="center"><strong>The free, open-source Elite Dangerous companion app for Windows, Linux and macOS.</strong><br>
-Live trading, exploration, exobiology, engineering, loadout planning, fleet and carrier tracking, the nearest wars,
-Spansh routes, an overlay over the game, an AI co-pilot, HUD colours, cockpit lights and glare control: one fast
-native app instead of a pile of tools and browser tabs.</p>
+Praetorium is an independent, open-source project that aims to bring together the capabilities of the Elite Dangerous third-party ecosystem into a comprehensive, intelligent and interconnected command platform.
 
-<p align="center">
-  <a href="https://github.com/uruskan/EliteNexus/releases/latest"><img src="https://img.shields.io/github/v/release/uruskan/EliteNexus?label=Upstream%20release&logo=github" alt="Original Elite Nexus releases"></a>
-  <a href="https://uruskan.github.io/EliteNexus/"><img src="https://img.shields.io/badge/Website-uruskan.github.io%2FEliteNexus-0b7285" alt="Original Elite Nexus website"></a>
-  <a href="https://github.com/sponsors/uruskan"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors" alt="Sponsor on GitHub"></a>
-  <a href="https://buymeacoffee.com/uruskan"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%98%95-ffdd00" alt="Buy me a coffee"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-GPL--3.0-blue" alt="Licence: GPL-3.0-or-later"></a>
-  <a href="https://github.com/uruskan/EliteNexus/actions/workflows/ci.yml"><img src="https://github.com/uruskan/EliteNexus/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-</p>
+This application began as a modified version of Elite Nexus, created by CMDR Alka Uruskan and its contributors. Praetorium is a separate project and is not an official Elite Nexus release, successor or endorsed product.
 
-Elite Nexus reads the game's journal as you play and brings together what commanders usually run side by side:
-EDDiscovery, ED Market Connector, Odyssey Materials Helper, Observatory, Exploration Buddy, voice alerts, and the
-websites you alt-tab to (Inara, Spansh, EDSM, EDSY, Coriolis, EDAstro). It works with Horizons and Odyssey on
-Windows 10 and 11, on Linux with the game under Proton or Wine, and on a Mac with the game under NotProton,
-CrossOver or Whisky.
+## Our foundation
 
-It is one executable with no installer, no account and no ads. Written in Rust with a GPU-rendered interface, it
-starts in about a second, loads years of journal history in well under one, and idles at a fraction of the memory
-the older tools need.
+We discovered Elite Nexus while looking for a technical foundation for a broader project. Its native Rust architecture, attention to performance and breadth of existing functionality stood out. We chose to build on the work already done by CMDR Alka Uruskan and contributors. We are grateful to them and to the Elite Nexus community for the care and time they invested.
 
-![Elite Nexus, an Elite Dangerous companion app: dashboard with commander ranks, active ship, location and session stats](docs/screenshots/dashboard.png)
+Praetorium is separate because its intended direction is different. We want to connect capabilities from multiple community tools and services through a shared command platform. That goal may lead to substantial changes to the architecture, interfaces and workflows. Keeping the projects separate lets each develop according to its own goals. As Praetorium grows, its implementation and user experience may look quite different from the initial application. We will preserve its attribution and document improvements that may be useful upstream.
 
-## What commanders are saying
+## What we aim to build
 
-![Quotes from commanders on the Frontier Forums, GitHub and Reddit, October 2026. "The engineering section is excellent as is the colonisation section and also the carrier route planning. This app does most of what I need from EDDiscovery in a fraction of memory usage. Keep going." "This is now my goto Elite companion. It does everything I want and more." "Not launched any other 3rd party apps since 0.6.0 dropped." "That abnormal price filtering is a great idea." "It ran without any problems, and immediately detected my Elite Dangerous installation. The Exploration and Exobiology sections of the application worked perfectly." "I love EliteNexus, handsome work you did there." "Works great so far, thanks for making it!"](docs/testimonials.png)
+- Context-aware conversations about the current game session, with optional OpenAI and other supported model integrations.
+- Planning and decision support across trading and economics, fleet carrier management and logistics, exploration and exobiology, mining, engineering, ship fitting and resource planning.
+- Navigation and galaxy intelligence that can connect those workflows with current observations.
+- VoiceAttack interoperability, desktop, tablet and VR command interfaces, and context-aware visual assistance.
 
-## Build a Gen2 development copy
+These are development goals. Some gameplay views already exist in the inherited application. The unified workflows, OpenAI integration and additional command interfaces remain planned work.
 
-Use [the contributor instructions](CONTRIBUTING.md) to build EliteNexus-Gen2 from source with Rust 1.100.0. The binary and its app-owned state are separate from the original installation. Gen2 uses `nexus-gen2-data` next to the executable or a per-user `EliteNexus-Gen2` directory. Both applications can read the same game journals.
+## How we work with the community
 
-Gen2 has no approved release or automatic updates. This draft permits local Ask on loopback, public EDDN receive and documented public data reads. Community uploads, hosted model providers, and other unapproved operations remain disabled. The original project's download, website and support links below retain their upstream purpose.
+We aim to use supported APIs, compatible open-source components, appropriately licensed algorithms and data, and interoperability with existing applications. Where direct reuse is unsuitable, we will implement the capability independently. We respect licenses, service terms, data rights, game rules and intellectual property. Integrating with another tool does not imply its developer endorses Praetorium. We will make generally applicable changes available for upstream consideration.
 
-## Support Elite Nexus
+## Development status
 
-Elite Nexus is made by one commander, with no company behind it, no ads and no subscription. If it has saved you an
-evening of alt-tabbing, found you a payday or kept hostile contacts red in your favourite HUD, you can sponsor it.
-Nothing in the app depends on it. o7
+The inherited application provides journal monitoring, commander and ship views, navigation, market data, fleet and carrier views, exploration, exobiology, mining, engineering and a native desktop interface. Subsequent project work covers credential handling, source and commander separation, application identity, durable database writes, protected file handling and authorization of queued observations. See the [improvement register](docs/GEN2_IMPROVEMENTS.md) for evidence and upstream applicability.
 
-<p>
-  <a href="https://github.com/sponsors/uruskan"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub"></a>
-  <a href="https://buymeacoffee.com/uruskan"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%98%95-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
-</p>
+The preceding Phase 01D-A Windows baseline passed 892 automated tests on both exact Rust 1.100.0 and 1.95.0 MSVC, with zero failures and 18 ignored. The owner previously passed 21 of 21 Windows gameplay checks on the build then named EliteNexus-Gen2. The Praetorium identity transition is in development. The hosted matrix covers Windows, Linux and macOS using both required pinned toolchains and floating stable. See [contributor instructions](CONTRIBUTING.md) for locked builds and tests.
 
-## Make the cockpit yours
+Production uploads and updates, hosted AI and other unapproved service operations are disabled. Isolated runs also block protected game-file operations. Native device-loss recovery, independent review, cross-platform runtime, live-service acceptance, signing, packaging and distribution remain open. There is no public production release.
 
-![Elite Dangerous HUD colour editor: the Colour slider turning from the standard orange through every hue while the live cockpit preview recolours, with hostile contacts still red and friendly ones still green](docs/screenshots/hud-colours.webp)
+## Acknowledgments and licensing
 
-* **HUD colours**: an editor built on the game's own setting, with community themes (credited to their authors), a
-  colour wheel, saturation and brightness, and a live cockpit preview that warns when friend and foe would look
-  alike. Applying writes only the three colour lines of `GraphicsConfigurationOverride.xml` and keeps your original
-  file.
-* **Keep hostile red, friendly green and shield blue.** The game's setting moves every HUD colour together, so a blue
-  theme turns hostile contacts blue too. Switch this on and your theme colours only the HUD's orange.
-* **Cockpit lights.** The game has no setting for them: Elite Nexus dims the cockpit's own lamps and glow and nothing
-  else, with in-game keys for on/off (F9), how much light stays (F7) and reach (F8).
-* **Glare and exposure.** Odyssey's auto-exposure darkens everything outside when the dashboard is bright; tame the
-  glare and lift the darks with the game's own tone-mapping values, starting from community presets.
+Thank you to **CMDR Alka Uruskan** and the **Elite Nexus contributors**. Visit the [original project](https://github.com/uruskan/EliteNexus), read the [Elite Nexus website](https://uruskan.github.io/EliteNexus/) and consider [supporting the original developer](https://github.com/sponsors/uruskan).
 
-HUD colours and glare use the game's own settings file. Keeping friend-and-foe colours and dimming the cockpit lights
-need an optional graphics hook, [3Dmigoto](https://github.com/bo3b/3Dmigoto) (open source), downloaded from its
-official release, checked against pinned checksums, and installed or removed in one click from the Cockpit lights
-tab. You calibrate it once: start the game, get into your cockpit and quit, and Elite Nexus finds the light and HUD
-shaders among those the game loaded and keeps a fix for exactly those. No game file is changed and Elite Nexus never
-ships the game's code: the fixes are made on your PC from your own game and never leave it. The hook can't run
-alongside EDHM, Frontier tolerates mods like this without having approved them, and it is untested under Proton and
-on macOS so far.
-
-| | |
-|---|---|
-| ![Elite Dangerous cockpit lights dimmer: installed, with light kept, reach and the in-game keys](docs/screenshots/cockpit-lights.png) **Cockpit lights** — dim the cockpit's own lights | ![Elite Dangerous Odyssey glare and auto-exposure fix: Morbad's Odyssey tweak applied, with less glare and the standard ACES curve](docs/screenshots/glare.png) **Glare and exposure** — less glare, brighter darks |
-
-## Screenshots
-
-![The overlay's next jump, compact and open over the game, as its own window and in VR mode: the next star is scoopable, a neutron star is three jumps ahead, the tank is 78 % full and Colonia, where the route ends, is 1,284 ly away](docs/screenshots/overlay.png)
-**Overlay** — one small island at the top of the game's screen, here for the next jump: see-through, as its own window and in VR
-
-| | |
-|---|---|
-| ![Market › Station: four markets side by side, with the cheapest place to buy and the best place to sell a good standing out](docs/screenshots/market.png) **Market** — up to eight markets side by side | ![Market › Shopping trip: four goods bought in three stops, with each stop's price and stock](docs/screenshots/shopping-trip.png) **Shopping trip** — several goods on the shortest trip it finds |
-| ![Combat: the nearest wars and civil wars, with the two factions, the days each has won, what each stands to lose and a route there](docs/screenshots/combat.png) **Combat** — the nearest wars, and how to fight legally | ![Mining › Where to mine: landable bodies with planetary mining locations near you and their odds of Monazite](docs/screenshots/mining.png) **Mining** — where to mine with the Rhino, and the odds |
-| ![Fleet › Plan a loadout: G5 Increased FSD Range planned on a Kestrel Mk II, its jump range up 11.73 ly](docs/screenshots/fleet.png) **Fleet** — plan a loadout and its engineering | ![Engineering: a wishlist of four blueprints and the shopping list of the materials still short](docs/screenshots/engineering.png) **Engineering** — wishlist, shopping list, where to get it |
-| ![Exobiology › Find planets: a bonus hunt for Stratum Tectonicas and the planets nobody has a record of sampling](docs/screenshots/exobiology.png) **Exobiology** — a bonus hunt for planets nobody has sampled | ![Exploration › Find valuable bodies: a Road to Riches tour of terraformable water worlds, widened out of the bubble](docs/screenshots/exploration.png) **Exploration** — tours of the worlds worth scanning |
-| ![Navigation › Fleet carrier: where the carrier is, its tritium and the nearest Fleet Carrier Administration](docs/screenshots/navigation.png) **Navigation** — planners, and the way back to your carrier | ![Fleet carrier: tritium, finances, capacity, crew and services](docs/screenshots/carrier.png) **Fleet carrier** — tritium, finances, crew |
-| ![Statistics › Career: time in the game, wealth, distance jumped, and where your credits came from and went](docs/screenshots/statistics.png) **Statistics** — your career in plain words | ![Galaxy map: everywhere you've been, with your ship and carrier](docs/screenshots/galaxy-map.png) **Galaxy map** — your travels, ship and carrier |
-| ![Ask: the AI co-pilot answering an exobiology question](docs/screenshots/ask.png) **Ask** — the AI co-pilot | ![Logbook: recent activity from the journal, with dockings, jumps and logins](docs/screenshots/logbook.png) **Logbook** — every journal event, searchable |
-| ![Bindings: active presets, conflicts and every bound action](docs/screenshots/bindings.png) **Bindings** — presets, conflicts, reference card | ![Accounts & sync: EDDN, EDSM, Inara and EDAstro, all opt-in](docs/screenshots/accounts.png) **Accounts & sync** — EDDN, EDSM, Inara, EDAstro |
-
-## Thanks
-
-Elite Nexus is one commander's spare-time project, and most of what changed since launch started with someone
-else's report, idea or help. Thank you, commanders.
-
-**Code**
-
-* **[leodesca01](https://github.com/leodesca01)**: the native Mac app, `Elite Nexus.app`
-  ([PR #2](https://github.com/uruskan/EliteNexus/pull/2)).
-* **[Nillecram](https://github.com/Nillecram)**: showed from their own Vista Genomics sales when the first-logged
-  bonus is really paid, and fixed it ([PR #7](https://github.com/uruskan/EliteNexus/pull/7)).
-* **[Za-Pa-Al](https://github.com/Za-Pa-Al)**: Windows speech (SAPI) as a second voice engine, with a voice picker
-  ([PR #15](https://github.com/uruskan/EliteNexus/pull/15)), and browsing Find commodity by category, with rare
-  goods as one entry ([PR #16](https://github.com/uruskan/EliteNexus/pull/16)).
-
-**Sponsors**
-
-* **[sjgarth](https://github.com/sjgarth)** (Alvarrune on the Frontier Forums),
-  **[mkulicke](https://github.com/mkulicke)** and **[Joseph-Davila](https://github.com/Joseph-Davila)** on GitHub
-  Sponsors, and the sponsors who chose to stay anonymous.
-* **yazcamapp** ([yazcam.com](https://yazcam.com/))
-* **NK**
-* **NetworX**
-* **CMDR Robbed**
-* **Fedifensor**
-* **Quwartos Grimmbart**
-* **Matt**
-* **CMDR Suganami**
-
-  They bought a coffee, and so did others who left no name: thank you too.
-
-**Bug reports and ideas on GitHub**
-
-* **[pioniere](https://github.com/pioniere)**: the first Linux review, on Nobara under Proton and Wayland, and the
-  silent Test voice ([discussion #17](https://github.com/uruskan/EliteNexus/discussions/17)).
-* **[docfallingapart](https://github.com/docfallingapart)**: the Linux app-menu entry, and a folder with a space in
-  its name.
-* **[nhok0169](https://github.com/nhok0169)**: Ask answering from old data, the empty Services tab, the window
-  freezing with the live feed, the synthesis and chart drawing, long module names, shared missions, the "where do
-  I get this material" idea, the shopping trip for several goods, trade routes for another ship's cargo with stock
-  and demand, rolls at each grade, a number of modules, and the whole way to each engineer
-  ([issue #4](https://github.com/uruskan/EliteNexus/issues/4)).
-* **[hangerhead](https://github.com/hangerhead)**: a carrier's docking access in the market lists, how long a buy
-  order has been live, and a louder voice.
-* **[Chequers2](https://github.com/Chequers2)**: a surface mining map that remembers the body and the site, and
-  numbered deposits on the surface radar.
-* **[vjt960](https://github.com/vjt960)**: the neutron planner's ×6 boost for the Caspian's FSD Mk II
-  ([issue #19](https://github.com/uruskan/EliteNexus/issues/19)).
-* **[WadRail](https://github.com/WadRail)**: sold exobiology data that stayed listed as unsold, and the journal lines
-  that showed the game logging sales without their samples
-  ([issue #20](https://github.com/uruskan/EliteNexus/issues/20)).
-* **[chrisvfritz](https://github.com/chrisvfritz)**: the Merc blueprints that were missing from Engineering
-  ([issue #10](https://github.com/uruskan/EliteNexus/issues/10)).
-* **[nEo-1664](https://github.com/nEo-1664)**: a long unsold exobiology list that pushed the rest of the page down,
-  which now scrolls inside its card ([issue #24](https://github.com/uruskan/EliteNexus/issues/24)).
-* **[yqol](https://github.com/yqol)**: the crash log of a graphics card that reset under Elite Nexus
-  ([issue #22](https://github.com/uruskan/EliteNexus/issues/22)).
-
-**Bug reports and ideas on the Frontier Forums**
-
-* **cmdr chequers**: journals on a network share, the fleet carrier jump and cooldown timers, and the memory
-  comparison with EDDiscovery.
-* **Alvarrune**: a Steam library on another drive, a colonisation depot that wasn't theirs, the route countdown, the
-  dimmer crash, screenshots saved as PNG, and a notice in the app when a new version is out.
-* **Asmodeus**: Elite Nexus changing bindings (it never touches them now), and clearing the recent mission history.
-* **Smallfishnz**: the window vanishing, which is why there is a crash log.
-* **NetworX**: the BGS tick hour resetting, the merits earned in each system, trade routes from the station you're
-  docked at, and Where to mine for the Rhino.
-* **BigOldChicken**: searching outfitting for a module, and **Jo Bangles**: the first impressions.
-
-**Community knowledge Elite Nexus is built on**
-
-* HUD themes by **CMDR Diomedian** (Empire blue, Federation, Alliance green), **CMDR Alex Traut** (Royal purple),
-  **Arkku** (Blue and red, and the HUD colour editor the themes come from) and **Prima Games** (VR yellow);
-  **CMDR Morbad**'s Odyssey glare settings.
-* Data: EDCD's FDevIDs, EDEngineer (msarilar), EDDiscovery, jixxed's journal schemas and Richard Buckle's
-  EDRefCard; the services Spansh, EDSM, Inara, EDDN and EDAstro; 3Dmigoto (bo3b); the Inter typeface and Phosphor
-  icons. Sources and licences: [NOTICE.md](NOTICE.md).
-
-## What it does
-
-Each page shows the one thing you usually need, with your current system, ship and landing pad as defaults, and
-keeps the advanced settings close at hand: in view under a search, or one click away under Options. Here is every
-page in one line; the
-**[user guide](docs/USER_GUIDE.md)** explains them in full.
-
-| Page | What you get |
-|---|---|
-| **Dashboard** | Commander, ranks and progress, credits and legal state, ship (fuel, hull, cargo, jump range, rebuy), location and system politics, session earnings, the current system's exploration value, holdings, your fleet carrier and your squadron's with their jump countdowns, colonisation, and an activity feed. |
-| **Exploration** | The current system as a tree (stars, planets, moons) with each body's value now and if mapped (first discovery and mapping, Odyssey bonus, efficiency), gravity, temperature, atmosphere, materials, rings and hotspots, biology and geology signals, footfall; Observatory-style highlights (Earth-likes, water and ammonia worlds, terraformables, landable atmospheres, close and wide rings, shepherd and nested moons, fast rotation, jumponium…); the system's **signals** by kind (stations, megaships, conflict zones, carriers…); **Find valuable bodies**, Spansh's Road to Riches, which widens the search out of the bubble by itself; **Unsold data**; a **History** of every system you scanned and whether its data was sold, refused or lost with your ship; the codex. |
-| **Exobiology** | A live **sampling radar** turned to your heading, with every previous sample's colony-range circle and a big "OK to sample / too close" readout; the bio bodies and the genera found on them; species **predictions** from a body's atmosphere, gravity, temperature, volcanism and stars before you land, with the expected value; unsold Vista Genomics data, with the first-logged bonus (×5) only where it can still be paid; **Find planets** two ways: a **bonus hunt** for planets where a valuable species should grow and nobody has a record of sampling it (every exclusion counted and explained), or **sure value**, Spansh's exobiology planner; **Tour the best 15** plans the route. |
-| **Navigation** | Your in-game route with scoopable, neutron and white-dwarf stars flagged and the longest non-scoopable streak; the **next system copied to the clipboard** after every jump; Spansh's **exact** (your ship's real jump range), **neutron** and **fleet-carrier** planners, each saying what it's for, the carrier one with where your carrier is and a one-click route back to it, the nearest **Fleet Carrier Administration**, its tritium, jump timer and an arrival estimate; tours and routes the assistant plans land here too and tick off as you arrive. |
-| **Galaxy map** | The Milky Way with everywhere you've been, your travel path, the active route, your carriers, parked ships and landmarks; search any visited system; click one to copy its name or plot a route to it. |
-| **Market** | A local galaxy database fed live by EDDN, your journal and, if you like, Spansh's daily dump (every station known from day one). **Commodity pages** with where to buy, where to sell, latest prices and price history, filtered by distance (up to the whole galaxy), pad, price age, stock or demand and carriers, and every commodity to browse by category from the search field; **Station**: up to eight markets side by side, with the cheapest place to buy a good and the best to sell it standing out, and a market you open in the game opening there by itself; **sell my cargo**, the best single stop for your hold, re-planned after every jump; a **shopping trip** for several goods, from one seller to the next on the shortest route it finds; **trade routes** for your ship's hold (or one you set) and credits, with stock and demand, pinned for the run planner in one click, or only those from the station you're docked at; **abnormal prices**, stations and carriers paying far above or selling far below the galactic average; **pins** and a **run planner** that buys and sells your pinned orders on the shortest trip; **price alerts** spoken seconds after any commander's update; the nearest material traders, brokers, Interstellar Factors and Vista Genomics; mining hotspots with their best sell prices; fleet carriers that say who may dock and, when you click one, how long its price has stood; and the live feed in a slim bar along the bottom. |
-| **Mining** | Live sessions: tonnes per hour, prospector quality, motherlodes. For Rhino surface mining, every planetary mining location you worked, with the body and the number to pick in the navigation panel to go back, what came out there and your notes, plus a surface radar to the numbered deposits and your ship, a minimap with a ring round the ground the Rhino worked at each deposit, and how far apart rigs go. **Where to mine**: landable bodies with planetary mining locations near you or along a route and, for a material (Monazite, Platinum, Iridium…), the odds of finding it on each ground, from the locations commanders read in the game. |
-| **Colonisation** | Construction depots with the remaining tonnage per commodity, what you already carry, and **where to buy** each commodity near the site with enough stock for a full hold; stale depots marked, other commanders' depots kept apart. |
-| **Fleet carrier** | Your fleet carrier and your squadron's: tritium, finances, capacity, crew and services, orders, jump schedule and history, a live jump countdown and cooldown, decommissioning, and a route for your ship back to it in one click. |
-| **Engineering** | A blueprint **wishlist** (each grade's own rolls, several modules at once, Merc blueprints with their Merc Coins, or quick-add "upgrade to G5" from your ship) that becomes a **shopping list** and a **trader plan**, exactly what to trade at which material trader, with **where to get** what you're short of: the nearest material trader of its kind, planets rich in a raw material or markets that sell a commodity; engineers with your next step and the whole way to unlock each, unlocked first then by distance; Odyssey suits and weapons; synthesis; your materials and ship locker. |
-| **Fleet** | Every ship and where it is, in transit included, with the landing pad it needs, its full loadout, engineering and modifier deltas; one-click **Open in EDSY / Coriolis** with the exact build. **Plan a loadout**: start from a new hull, one of your ships or a pasted build, change its modules and engineering and watch its jump range, speed, shields, armour, weapons, power, heat, mass and cost follow, with the materials the engineering takes; save builds, compare them and share them with EDSY or Coriolis. **Where to buy** one ship or module, or a whole build: the nearest stations that sell it, leaving out what you already have. |
-| **Missions** | Active missions with expiry and cargo or kill progress, and a **massacre-stack tracker** that counts a kill once per issuing faction, so you see the true kills remaining; the goods your missions ask you to source, mine or donate, with where to get them; the recent history, which you can clear and bring back. |
-| **Combat** | **Fights near you**: the nearest wars and civil wars, the fights with conflict zones, with how far, active or pending, the two factions with the days each has won and what each stands to lose, the system's government, how old the report is and a route there; your current system first, with the combat sites your scans found and a warning in an anarchy. **How to fight legally**: where killing isn't a crime, how to pick a side, what makes you wanted and when you end up in the detention centre, written for the game until Frontier's Law & Disorder update (December 2026). |
-| **BGS & Powerplay** | What you did for which faction and power since the tick (missions, trade, bounties and combat bonds, every sale of data), with your tick hour and period remembered, and the Powerplay merits you earned in each system. |
-| **Logbook** | Activity, every journal event with its JSON and full-text search, travel, docking, and a credit ledger. |
-| **Statistics** | Your career from the game's own statistics, in plain words: where your credits came from and went, each activity with its rank, records and the milestones within reach. What you did over 7, 30 or 90 days or all time, from your journals: time in the game, credits per hour, money in and out with trade counted by its profit, your balance over time (with a log scale), a chart by day and the period before for comparison. The same period ship by ship: time, jumps, earnings, kills, deaths and costs for each ship you flew. And every figure the game keeps, searchable. |
-| **Bindings** | Your active presets per category, conflicts, missing essentials, a searchable list of every bound action and a printable reference card. Read-only: the app never changes your bindings. |
-| **HUD & cockpit** | **HUD colours**, **Glare and exposure** and **Cockpit lights**: see [Make the cockpit yours](#make-the-cockpit-yours). |
-| **Ask** | Local model inference on loopback. Ask can read current verified commander state, scoped journal history and the local database. The on-screen list describes available tools. Hosted model providers and effectful route tools remain gated. |
-| **Accounts & sync** | EDDN (schema-checked, with a test mode), EDSM journal sync, Inara profile sync (the app name is approved, so your personal key is enough) and EDAstro, each opt-in and each with its own pause, with retry queues that respect the service's limits. |
-| **Alerts & voice** | Toasts plus speech (Windows speech or SAPI in the voice you pick, speech-dispatcher on Linux, `say` on macOS) for high-value bodies, likely valuable biology, sample spacing, motherlodes, a non-scoopable star when fuel is low, interdictions, hull critical, mission completion, carrier jumps and more, down to the priority you choose. The bell in the toolbar keeps every alert since Elite Nexus started, and the important ones can go to XSOverlay in VR. |
-| **Overlay** | One small black island at the top of the game's screen that says what's going on in a word or two ("2 of 3 samples · Far enough", "Scoopable · 12 jumps · 231 ly"), opens up for the moments that need you (the next jump and where the route ends, an arrival worth it, an approach, a sample, a deposit, a pinned trade stop, docking and your landing pad, the data a station buys, an alert) and fades away when nothing does; it counts down your carrier's jump too. Click-through, it never takes the focus, and it shows only while the game is in front; see-through, or an opaque window of the island's own size, and a VR mode for mirroring it into a headset. On Windows, run the game Borderless or Windowed, since exclusive fullscreen hides every other window; on a Mac, run it in a window (the overlay shows there all the time); on Linux, the overlay needs X11, or XWayland under Wayland (`WAYLAND_DISPLAY= ./EliteNexus`). |
-| **Settings** | Journal and game folders found by themselves (every Steam library, Epic and Frontier folders; Proton, Wine, CrossOver and Whisky prefixes) or set by hand, even on a network share; voice (on Windows, the speech engine too), toasts and alert thresholds; the overlay; text size in fixed steps; the app-menu entry on Linux. Off until you switch them on: **Follow my flight**, which turns to Navigation, Exploration or Exobiology as you fly; your game screenshots saved again as PNG, named after the system and body; and **AI agents**, so Claude Code and other MCP programs on this computer can use Ask's read-only tools. A settings file that can't be read or a crash is kept and explained, never silently reset. |
-
-## Documentation and links
-
-* **[User guide](docs/USER_GUIDE.md)**: every page explained, with [Linux](docs/USER_GUIDE.md#linux) and
-  [macOS](docs/USER_GUIDE.md#macos) notes. It is also what the in-app assistant knows about the app.
-* **[Website](https://uruskan.github.io/EliteNexus/)**, one page per topic:
-  [HUD colours](https://uruskan.github.io/EliteNexus/hud-colours.html),
-  [Cockpit lights](https://uruskan.github.io/EliteNexus/cockpit-lights.html),
-  [Odyssey glare](https://uruskan.github.io/EliteNexus/odyssey-glare.html),
-  [Trading](https://uruskan.github.io/EliteNexus/trading.html),
-  [Exploration & navigation](https://uruskan.github.io/EliteNexus/exploration.html),
-  [Exobiology](https://uruskan.github.io/EliteNexus/exobiology.html),
-  [Fleet & engineering](https://uruskan.github.io/EliteNexus/commander.html),
-  [AI, voice & your data](https://uruskan.github.io/EliteNexus/companion.html),
-  [Compared with other tools](https://uruskan.github.io/EliteNexus/compare.html) and
-  [Thanks](https://uruskan.github.io/EliteNexus/thanks.html).
-* **[Changelog](CHANGELOG.md)** and **[release notes](https://github.com/uruskan/EliteNexus/releases)**: what
-  changed in each version.
-* **Talk**: the [release thread on the Frontier Forums](https://forums.frontier.co.uk/threads/elite-nexus-free-companion-app-trading-routes-engineering-exobiology-hud-colours-that-keep-hostiles-red-glare-fix-etc.650288/)
-  and [GitHub Discussions](https://github.com/uruskan/EliteNexus/discussions) for questions and ideas;
-  [GitHub Issues](https://github.com/uruskan/EliteNexus/issues) for bugs, with `nexus.log` (and `crash.log`, if
-  there is one) from the data folder (Settings › About › Data folder › Open).
-* **Accounts you may want**: an [EDSM API key](https://www.edsm.net/en/settings/api) and an
-  [Inara API key](https://inara.cz/elite/cmdr-settings-api/) for sync. The Frontier Companion API isn't supported
-  yet; the journal already provides almost everything.
-
-## For developers
-
-Elite Nexus is written in Rust (egui/wgpu) and builds with a stable toolchain on Windows, Linux and macOS.
-**[CONTRIBUTING.md](CONTRIBUTING.md)** covers building from source, command-line options, tests, developer tools and
-how to send changes. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) tours the crates and threads, [AGENTS.md](AGENTS.md)
-holds the working rules for this repository, and [docs/research/](docs/research/) the verified specs behind every
-integration (EDDN, EDSM, Inara, Spansh, the journal, engineering, exploration, HUD colours and cockpit lights).
-
-## Licence
-
-Elite Nexus is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
-License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
-version. It comes with no warranty. See [LICENSE](LICENSE). Third-party data and fonts keep their own licences: see
-[NOTICE.md](NOTICE.md).
-
-*Elite Dangerous is a trademark of Frontier Developments plc. Elite Nexus is an unofficial community tool.*
+Praetorium is licensed under [GPL-3.0-or-later](LICENSE). See [licensing and origin](docs/LICENSING.md), [third-party notices](NOTICE.md) and [historical contributor acknowledgments](docs/UPSTREAM-ACKNOWLEDGMENTS.md). The [profile migration guide](docs/PROFILE_MIGRATION.md) covers upgrading from a development profile. Elite Dangerous is a trademark of Frontier Developments plc. Praetorium is an unofficial community project and has no affiliation with Frontier Developments.
