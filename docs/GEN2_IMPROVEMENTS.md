@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 32 substantive entries, ENX-001 through ENX-032.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 33 substantive entries, ENX-001 through ENX-033.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -297,6 +297,14 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 
 **Upstream applicability:** Coordinated conversion, persistence and migration changes. No production service or release authorization.
 
+### ENX-033 — Market quote freshness (G2-024A)
+
+- **Behavior.** Find commodity re-reads open lists and selected details every 30 seconds. EDDN receipt and Spansh station times no longer stand in for quote observation times. Desktop views can show **Age unknown**, and Ask returns a null age for undated quotes. Bounded searches exclude those quotes. G2-022 field precedence continues to govern replacements.
+- **Code and compatibility.** The changes apply to galaxy ingestion and queries and their desktop and Ask consumers. The existing zero timestamp represents unknown freshness. Earlier databases may contain fallback times that cannot be distinguished from observation times using stored data. The correction applies as reports are ingested.
+- **Evidence.** On Windows with Rust 1.100.0 and the shared Cargo target, the focused nexus-galaxy integration test filters quote_freshness, market_precedence and same_timestamp_market_replacement_reconciles_price_history passed seven tests on 2e1dbc7. Application test compilation and desktop and Ask runtime verification are deferred to 01D-W.
+
+**Integration:** PR #9 at `b49c3cb`; static review accepted. No additional builds. Historical fallback timestamps remain unidentifiable.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.
@@ -316,9 +324,3 @@ The smallest standalone reviews are Windows credential protection failure handli
 [b-position]: https://github.com/Shadowgar/Praetorium/commit/920d775bb7742549a2dd275861ee960390acb601
 [b-log]: https://github.com/Shadowgar/Praetorium/commit/eb8845ccd4c6815485dc934c838970e2a7bce352
 [b-head]: https://github.com/Shadowgar/Praetorium/commit/ffa123193f0167cc062ab2c7454898351666d563
-
-### ENX-033 — Market quote freshness (G2-024A)
-
-- **Behavior.** Find commodity re-reads open lists and selected details every 30 seconds. EDDN receipt and Spansh station times no longer stand in for quote observation times. Desktop views can show **Age unknown**, and Ask returns a null age for undated quotes. Bounded searches exclude those quotes. G2-022 field precedence continues to govern replacements.
-- **Code and compatibility.** The changes apply to galaxy ingestion and queries and their desktop and Ask consumers. The existing zero timestamp represents unknown freshness. Earlier databases may contain fallback times that cannot be distinguished from observation times using stored data. The correction applies as reports are ingested.
-- **Evidence.** On Windows with Rust 1.100.0 and the shared Cargo target, the focused nexus-galaxy integration test filters quote_freshness, market_precedence and same_timestamp_market_replacement_reconciles_price_history passed seven tests on 2e1dbc7. Application test compilation and desktop and Ask runtime verification are deferred to 01D-W.
