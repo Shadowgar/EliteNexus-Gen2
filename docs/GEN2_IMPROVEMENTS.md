@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 30 substantive entries, ENX-001 through ENX-030.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 31 substantive entries, ENX-001 through ENX-031.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -277,9 +277,17 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 
 **Class and subsystem:** Journal/model accounting correction. `CarrierBankTransfer.PlayerBalance` is optional, so a reported zero is distinguishable from an omitted balance. After recording the existing transfer arithmetic and category, the model reconciles commander credits and credit history with the reported value when present. Omitted balances retain the prior calculation. Own-carrier transfers retain their non-spending classification.
 
-**Evidence:** [PR #6](https://github.com/Shadowgar/Praetorium/pull/6), implementation [64074f7](https://github.com/Shadowgar/Praetorium/commit/64074f7841791813fd9750678df6efcba19f7932). The implementation report records a focused scenario regression failing with stale 400,000 Cr and passing with reported 0 Cr, using Rust 1.100.0 and the persistent local target. Static review covered the journal field, model reconciliation, ledger category and regression. No new full suite or runtime verification was performed during integration. The original G2-004 shared trade-budget defect remains open.
+**Evidence:** [PR #6](https://github.com/Shadowgar/Praetorium/pull/6), implementation [64074f7](https://github.com/Shadowgar/Praetorium/commit/64074f7841791813fd9750678df6efcba19f7932). The implementation report records a focused scenario regression failing with stale 400,000 Cr and passing with reported 0 Cr, using Rust 1.100.0 and the persistent local target. Static review covered the journal field, model reconciliation, ledger category and regression. No new full suite or runtime verification was performed during integration. G2-004 was outside this correction; see ENX-031.
 
 **Upstream applicability:** Independently reviewable journal and model correction; consumers of the event type should accommodate optional player balance. No production service or release change.
+
+### ENX-031 — Preserve known zero and unknown trade budgets (G2-004)
+
+**Class and subsystem:** Trade affordability, journal balance provenance and Market/Ask consistency. Shared route search no longer discards an explicit zero capital constraint. An omitted login balance does not create an absolute balance sample; observed balances, including zero, constrain route quantities. Market labels unknown funds and Ask supports a validated nonnegative integer hypothetical budget. Existing cargo, supply and demand bounds remain.
+
+**Evidence:** [PR #7](https://github.com/Shadowgar/Praetorium/pull/7), implementation [8434cea](https://github.com/Shadowgar/Praetorium/commit/8434cea51cce4740e4d08bbdb7aa53ca89b58e2f), test correction [ee7cb85](https://github.com/Shadowgar/Praetorium/commit/ee7cb85cc3faaf67dabe0fb8644c3188ee37190c). Focused galaxy trade-route and commander-balance regressions reported passed on Rust 1.100.0 using the persistent local target. Owner's subsequent Ask test compilation failed with E0599 on an erroneous write-lock unwrap; static correction removes the redundant unwrap. Corrected Ask test compilation and execution remain unverified and are explicitly deferred to 01D-W. Integrated on owner direction without another build or broader test suite. No release or service authorization.
+
+**Upstream applicability:** Shared route constraint and balance qualification are independently reviewable; optional journal field requires compatible consumers. Verify the deferred Ask fixture before consolidated acceptance.
 
 ## Upstream review opportunities
 

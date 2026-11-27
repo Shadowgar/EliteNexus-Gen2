@@ -14,7 +14,7 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 ## 01D-B — Trading, market and fleet carriers (REL-01)
 
 - [x] **ENX-030 — Carrier transfer balance reconciliation.** Integrated from PR #6; reported zero is authoritative, missing balance retains transfer arithmetic. Focused red/green regression reported on Rust 1.100.0. This is separate from G2-004.
-- [ ] **G2-004 (REL-01A) — Known zero-credit trade budget.** Next assignment. The original finding concerns the route-search affordability constraint discarding an explicit zero budget, not just a stale displayed commander balance. Preserve the difference between unknown funds, observed zero and an explicit hypothetical budget. Verify the shared Market/Ask route behavior with focused fixtures for unknown, zero, exactly affordable and higher budgets. A commander balance correction alone does not close this item.
+- [x] **G2-004 (REL-01A / ENX-031) — Known zero-credit trade budget.** Integrated from PR #7. Shared route search enforces zero; unknown balance leaves affordability unchecked; Ask supports an explicit hypothetical budget. Focused galaxy and commander-balance regressions reported passed. Ask test initially failed to compile due to an incorrect write-lock unwrap; corrected in `ee7cb85`, with compilation and execution deferred to 01D-W by owner direction.
 - [ ] **G2-022 — Market precedence.** Keep per-field source/age semantics; resolve same-time conflicting observations deterministically and preserve unknown/incomplete data. Avoid location/access rollback from independent clocks.
 - [ ] **G2-024 — Market freshness, deals, alerts and access.** Refresh quotes, include relevant origin/payload inputs in request identity, scope alert generations, and distinguish open, restricted and unknown carrier access across desktop and assistant tools.
 - [ ] **G2-025 — Carrier movement authority.** Separate jump requests, estimates and verified movements by carrier identity. Do not infer authoritative route advancement or duplicate history from unrelated or repeated observations.
@@ -35,6 +35,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [ ] **G2-036 — Isolated clipboard UI.** Make the unavailable next-system clipboard action explicit without overwriting the ordinary saved preference.
 
 ## 01D-W — Comprehensive gameplay regression testing
+
+- [ ] Complete the deferred G2-004 Ask regression `shopping_trip_chains_the_stops_from_one_to_the_next` on the consolidated revision; verify the corrected test compiles and runs.
 
 - [ ] Exercise representative affected Windows gameplay journeys after the correction tranches: commander and journal updates, Market/Ask, navigation/carrier, exploration/exobiology, colonisation, fleet/fitting and interface recovery. Preserve isolated profiles, safe copies and existing service gates. Record the tested revision, observed results and outstanding limitations. Reuse valid prior evidence; do not repeat unrelated automated suites by default. Broader verification requires a concrete reason and owner authorization.
 
