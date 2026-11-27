@@ -19,6 +19,10 @@ on:
       - "docs/social-preview.png"
       - "CLAUDE.md"
       - "docs/DEVELOPMENT_REFERENCE.md"
+      - "docs/DEVELOPMENT_BUDGET.md"
+      - "ROADMAP.md"
+      - "BACKLOG.md"
+      - ".codex/**"
       - "docs/GEN2_IMPROVEMENTS.md"
       - ".github/workflows/verification.yml"
   workflow_dispatch:

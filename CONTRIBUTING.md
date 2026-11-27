@@ -37,6 +37,8 @@ narrow (1000 px) and a wide window whenever a layout changes.
 
 ## Checks
 
+Use the [local development commands and resource budget](docs/DEVELOPMENT_BUDGET.md) and the [active backlog](BACKLOG.md). Project-local Codex defaults apply only in supported trusted clients. No AI is required to run the local commands.
+
 Use [AGENTS.md](AGENTS.md) for the risk-based verification policy. For routine work, pick the relevant test or compile check; do not run every command below.
 
 ```sh

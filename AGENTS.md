@@ -11,6 +11,8 @@ Praetorium is an independent Rust/egui command platform based on Elite Nexus by 
 - Reuse a persistent local Cargo target directory for the active worktree. Do not clean caches or create a new target per milestone. Keep separate targets only for simultaneous builds, incompatible environments or deliberate isolation. Preserve the known-good executable/profile for rollback.
 - At the end, report commit, changed behavior, exact checks actually run, any failure or skipped acceptance and the next action. Do not call a pending or cancelled check passed. Do not wait for a manual full matrix merely to finish a development task.
 
+- Use the project-local `.codex/config.toml` in new trusted sessions. The [resource budget](docs/DEVELOPMENT_BUDGET.md) defines initial quota targets and the concise assignment format. Stop at the budget checkpoint; no automated goal continuation. Use [BACKLOG.md](BACKLOG.md) for the next authorized item and [ROADMAP.md](ROADMAP.md) for direction. Do not load historical research by default.
+
 ## Testing and build policy
 
 Development toolchain: exact Rust **1.100.0**. Retained compatibility target: **1.95.0**. Record the actual toolchain and revision; use the checked-in lockfile.
@@ -24,7 +26,7 @@ Development toolchain: exact Rust **1.100.0**. Retained compatibility target: **
 | Local gameplay acceptance | Build once and run the affected workflow in an isolated profile. |
 | Broader milestone / release candidate | Owner-authorized manual verification workflow at the appropriate scope. |
 
-Examples (select the relevant command, not the entire list):
+Use `tools/dev/Dev.ps1` for ordinary local Check, Test, Build, Run or Usage operations; see the resource budget for examples. Run only the relevant command. Direct Cargo examples (select one):
 
 ```powershell
 cargo +1.100.0 test --locked -p nexus-update --lib notes::tests::the_real_changelog_reads

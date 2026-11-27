@@ -1,0 +1,15 @@
+# Resource defaults for new sessions in this trusted project.
+# No account credentials, permissions or sandbox overrides.
+model_reasoning_effort = "low"
+model_auto_compact_token_limit = 64000
+tool_output_token_limit = 2000
+service_tier = "default"
+
+[features]
+multi_agent = false
+goals = false
+fast_mode = false
+ultrafast_mode = false
+
+[skills]
+max_context_tokens = 2000

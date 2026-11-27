@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 28 substantive entries, ENX-001 through ENX-028.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 29 substantive entries, ENX-001 through ENX-029.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -264,6 +264,12 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 **Scope and compatibility:** [CI](../.github/workflows/ci.yml), [manual verification](../.github/workflows/verification.yml), [website workflow](../.github/workflows/pages.yml), [agent rules](../AGENTS.md), [contributor guide](../CONTRIBUTING.md) and the [development reference](DEVELOPMENT_REFERENCE.md). Existing regression tests, lockfile, minimum compatibility target and production safety gates are retained. Routine verification is proportional to changed behavior and risk; broader acceptance requires explicit authorization. The concise agent instructions prohibit redundant polling, full-context audits, unsolicited delegation and repeated checks.
 
 **Evidence and limitations:** Configuration and documentation review only; no application build, test suite or manual verification was dispatched for this workflow change. Actual warm/cold-run duration and GitHub execution of the new workflow remain to be measured on the next justified check. Prior verification results remain historical; the consolidated alpha is not declared fully accepted or released. Workflow guidance is independently adaptable upstream.
+
+### ENX-029 — Project-local Codex defaults and reusable development commands
+
+**Class and subsystem:** Development resource management. The [project configuration](../.codex/config.toml) sets low effort, 64K compaction threshold, 2K tool-output and skills-catalog budgets, default service tier and disables agent delegation, goals and fast-mode controls. The [local command wrapper](../tools/dev/Dev.ps1) uses one pinned incremental Cargo operation, requires a selected package test scope and launches the existing executable only in isolated mode. The [usage reader](../tools/dev/usage.py) reports cumulative token-counter advances and separate account quota snapshots without network calls or exporting prompts. The [resource budget](DEVELOPMENT_BUDGET.md), [roadmap](../ROADMAP.md) and [backlog](../BACKLOG.md) provide a bounded working queue and acceptance targets without requiring historical audit context. No gameplay source, lockfile or tests changed.
+
+**Verification and limitations:** Configuration keys checked against the official Codex reference. Local client loading, Windows command execution and actual savings must be measured during the next small authorized assignment; no full CI, release or application acceptance is implied. Local usage counters do not establish billed quota. Historical private research stays separate.
 
 ## Upstream review opportunities
 
