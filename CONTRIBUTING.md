@@ -5,7 +5,7 @@ just want to use the app, the [README](README.md) and the [user guide](docs/USER
 
 ## Building from source
 
-Use exact Rust **1.100.0** for Praetorium development and initial verification. Rust **1.95.0** remains the verified Windows minimum. The CI matrix tracks exact development and compatibility toolchains as well as floating stable.
+Use exact Rust **1.100.0** for Praetorium development and initial verification. Rust **1.95.0** remains the verified Windows minimum. Routine CI uses only the pinned development toolchain. Compatibility checks are available through the manual verification workflow.
 
 Install exact Rust 1.100.0 from [rustup.rs](https://rustup.rs). Windows also uses the MSVC linker.
 
@@ -37,20 +37,18 @@ narrow (1000 px) and a wide window whenever a layout changes.
 
 ## Checks
 
+Use [AGENTS.md](AGENTS.md) for the risk-based verification policy. For routine work, pick the relevant test or compile check; do not run every command below.
+
 ```sh
-cargo +1.100.0 clippy --locked --workspace --all-targets -- -D warnings
-cargo +1.100.0 test --locked --workspace
+cargo +1.100.0 test --locked -p nexus-update --lib notes::tests::the_real_changelog_reads
+cargo +1.100.0 check --locked -p nexus-app
 ```
 
-CI (`.github/workflows/ci.yml`) runs both on `windows-latest`, `ubuntu-latest` and `macos-latest` for every push to
-`main` and every pull request; keep them green. Tests that need the internet are `#[ignore]`d:
-`cargo test -p nexus-app untouched -- --ignored --nocapture`. The Spansh planners can be exercised live with
-`cargo run -p nexus-spansh --example smoke -- --only riches,exobio` (all steps without `--only`).
+Use affected-crate tests or a module filter for a regression, and expand coverage for changed interfaces and safety-critical boundaries when justified. For a local playable binary, build once with the pinned toolchain and existing Cargo target; do not rebuild simply to wait for CI. Non-executable documentation needs inspection only. Embedded documentation and version changes may require a focused regression.
 
-For application verification, run the checks with exactly the intended toolchain and the checked-in lockfile.
-Add `--locked` to Cargo build, Clippy and test commands. Record toolchain incompatibilities separately.
-Use synthetic inputs and a disposable settings directory for model, journal or provider work. Do not run
-ignored live checks as part of a general baseline. Use a disposable account or VM for GUI verification.
+A ready code PR triggers a single Windows compile check. Draft PRs do not run that job, and pushes to `main` do not trigger Rust CI. Stale routine checks are cancelled. The separate **Manual verification** workflow runs one Windows workspace job by default, three pinned-toolchain platform jobs for cross-platform acceptance, or the full nine-job compatibility matrix only on explicit selection. It runs strict Clippy and workspace tests; it is not triggered by pushes or PRs. Native packaging and runtime acceptance are separate. Do not duplicate those checks locally without a technical reason.
+
+Keep the lockfile, test source and toolchain recorded. Use synthetic inputs and a disposable profile for model, journal, provider and game-file work. Ignored live tests stay opt-in and require service authorization. Inspect the result once rather than polling with an AI agent. Record failures, cancelled checks and unverified behavior explicitly.
 
 ## Developer tools
 

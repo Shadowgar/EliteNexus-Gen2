@@ -1,0 +1,48 @@
+name: Manual verification
+
+# Deliberate acceptance only. No push, PR, tag, or scheduled trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Verification scope (choose only what is justified)
+        type: choice
+        required: true
+        default: windows-workspace
+        options:
+          - windows-workspace
+          - cross-platform
+          - compatibility
+
+permissions:
+  contents: read
+
+concurrency:
+  group: praetorium-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: ${{ matrix.os }} / Rust ${{ matrix.rust }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: ${{ fromJSON(inputs.scope == 'windows-workspace' && '["windows-latest"]' || '["windows-latest","ubuntu-latest","macos-latest"]') }}
+        rust: ${{ fromJSON(inputs.scope == 'compatibility' && '["1.95.0","1.100.0","stable"]' || '["1.100.0"]') }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: rustup toolchain install "${{ matrix.rust }}" --profile minimal --component clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: verification-${{ matrix.rust }}
+      - name: Strict lint
+        run: cargo +${{ matrix.rust }} clippy --locked --workspace --all-targets -- -D warnings
+      - name: Workspace tests
+        run: cargo +${{ matrix.rust }} test --locked --workspace
