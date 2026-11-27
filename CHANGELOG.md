@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Trade routes respect a known zero-credit balance. Market leaves affordability unchecked when the balance is unknown, and Ask can use an explicit hypothetical budget.
+
 - Carrier bank transfers reconcile commander credits with the reported balance, including zero. Transfers without a reported balance continue to use the deposit or withdrawal amount.
 
 ## [0.1.0-alpha.1] - Development milestone (verification pending)

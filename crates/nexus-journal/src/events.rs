@@ -210,7 +210,7 @@ pub struct LoadGame {
     #[serde(rename = "Group")]
     pub group: Option<String>,
     #[serde(rename = "Credits")]
-    pub credits: i64,
+    pub credits: Option<i64>,
     #[serde(rename = "Loan")]
     pub loan: i64,
     pub language: String,

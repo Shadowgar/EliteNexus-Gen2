@@ -173,7 +173,6 @@ pub(crate) fn trade_routes(
 
     // 3. per-commodity bounded scan
     let cargo = q.cargo_capacity.max(1);
-    let capital = q.capital.filter(|c| *c > 0);
     let min_profit = q.min_profit_per_ton.max(1);
     let mut cands: Vec<Candidate> = books
         .par_iter_mut()
@@ -209,7 +208,7 @@ pub(crate) fn trade_routes(
                         continue;
                     }
                     let mut units = cargo.min(s.qty).min(b.qty);
-                    if let Some(c) = capital {
+                    if let Some(c) = q.capital {
                         units = units.min(c / s.price.max(1));
                     }
                     if units <= 0 {

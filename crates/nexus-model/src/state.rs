@@ -119,6 +119,11 @@ impl GameState {
         }
     }
 
+    /// Available trade capital once an absolute commander balance has been observed.
+    pub fn trade_capital(&self) -> Option<i64> {
+        self.history.credit_samples.last().map(|_| self.cmdr.credits.max(0))
+    }
+
     /// The game is running: it hasn't closed (`Shutdown`), nor ended without one (`game_gone`).
     pub fn game_running(&self) -> bool {
         !self.game_closed && self.game_gone.is_none()
@@ -199,8 +204,10 @@ impl GameState {
                 self.cmdr.on_load_game(l, ts);
                 self.exploration.set_odyssey(l.odyssey.unwrap_or(false));
                 self.fleet.on_load_game(l);
-                self.session = Session::start(ts, l.credits);
-                self.history.credit_sample(ts, l.credits);
+                self.session = Session::start(ts, self.cmdr.credits);
+                if let Some(credits) = l.credits {
+                    self.history.credit_sample(ts, credits);
+                }
                 self.history.login(ts);
                 // Logged in as: a suit means on foot, a taxi (adder_taxi, vulture_taxi…, which dropships are too) a ride,
                 // anything else aboard that ship; never crewing for another commander. (The Location that follows says
@@ -215,7 +222,11 @@ impl GameState {
                 self.game_closed = false;
                 self.at_main_menu = false;
                 let mode = l.game_mode.as_deref().map(|m| format!(" ({m})")).unwrap_or_default();
-                self.feed(ts, "LoadGame", format!("Logged in{mode}, {} Cr", group_digits(l.credits)));
+                let mut message = format!("Logged in{mode}");
+                if let Some(credits) = l.credits {
+                    message.push_str(&format!(", {} Cr", group_digits(credits)));
+                }
+                self.feed(ts, "LoadGame", message);
             }
             Event::Shutdown(_) => {
                 self.session.end = Some(ts);

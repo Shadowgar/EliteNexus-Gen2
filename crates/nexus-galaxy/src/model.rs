@@ -858,7 +858,7 @@ pub struct TradeQuery {
     pub max_hop_ly: f64,
     pub min_pad: Option<char>,
     pub cargo_capacity: i64,
-    /// Credits available for the purchase (`None` = unlimited).
+    /// Credits available for the purchase. `None` leaves affordability unchecked.
     pub capital: Option<i64>,
     pub max_age_hours: Option<f64>,
     pub include_carriers: bool,

@@ -598,6 +598,17 @@ fn carrier_transfer_distinguishes_zero_player_balance_from_missing() {
     assert_eq!(m.active().unwrap().cmdr.credits, 0);
 }
 
+#[test]
+fn trade_capital_distinguishes_missing_and_zero_login_credits() {
+    let mut m = Model::default();
+    let missing = r#"{ "timestamp":"2026-10-01T10:00:02Z", "event":"LoadGame", "FID":"F1", "Commander":"Test" }"#;
+    let zero = r#"{ "timestamp":"2026-10-01T10:01:02Z", "event":"LoadGame", "FID":"F1", "Commander":"Test", "Credits":0 }"#;
+    feed(&mut m, &[missing]);
+    assert_eq!(m.active().unwrap().trade_capital(), None);
+    feed(&mut m, &[zero]);
+    assert_eq!(m.active().unwrap().trade_capital(), Some(0));
+}
+
 /// The carrier jump timer through real journal lines: request, cancel, request again, arrive
 /// while docked aboard, cool down, ready.
 #[test]

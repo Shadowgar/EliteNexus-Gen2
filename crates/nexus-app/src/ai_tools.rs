@@ -144,7 +144,7 @@ struct Me {
     system: String,
     pad: Option<char>,
     cargo_capacity: i64,
-    credits: i64,
+    trade_capital: Option<i64>,
     jump_range: f64,
     /// The ship has the FSD Mk II: a neutron star boosts its jump ×6, not ×4.
     overcharge: bool,
@@ -236,7 +236,7 @@ impl NexusTools {
             system: system.clone(),
             pad: finder::ship_pad(gs),
             cargo_capacity: ship.map(|s| i64::from(s.cargo_capacity)).filter(|c| *c > 0).unwrap_or(0),
-            credits: gs.cmdr.credits,
+            trade_capital: gs.trade_capital(),
             jump_range: ship.map(|s| s.max_jump_range).unwrap_or(0.0),
             overcharge: overcharges(ship),
             loadout: ship.and_then(|s| s.loadout_json.clone()),
@@ -456,13 +456,17 @@ impl NexusTools {
         let (origin, near) = self.origin(a, &me)?;
         // The hold of the ship flown, or the cargo space asked for (a trade ship the commander isn't in), as on the page.
         let cargo = arg_f64(a, "cargo_t").map(|t| t.round() as i64).filter(|t| *t > 0).unwrap_or(me.cargo_capacity).clamp(1, 5_000);
+        let capital = match a.get("capital_cr") {
+            Some(value) => Some(value.as_i64().filter(|credits| *credits >= 0).ok_or("capital_cr must be a nonnegative integer.")?),
+            None => me.trade_capital,
+        };
         let q = TradeQuery {
             origin,
             radius_ly: arg_f64(a, "radius_ly").unwrap_or(40.0),
             max_hop_ly: arg_f64(a, "max_hop_ly").unwrap_or(25.0),
             min_pad: me.pad,
             cargo_capacity: cargo,
-            capital: Some(me.credits.max(0)),
+            capital,
             max_age_hours: Some(48.0),
             include_carriers: false,
             include_planetary: true,
@@ -472,7 +476,7 @@ impl NexusTools {
         let routes = self.db()?.trade_routes(&q).map_err(|e| e.to_string())?;
         Ok(json!({
             // The flown ship's pad, also for another ship's cargo_t: say so when the two ships' pads differ.
-            "near": near, "cargo_capacity_t": q.cargo_capacity, "landing_pad": me.pad.map(String::from),
+            "near": near, "cargo_capacity_t": q.cargo_capacity, "capital_cr": q.capital, "landing_pad": me.pad.map(String::from),
             "routes": routes.iter().map(|r| json!({
                 "commodity": r.commodity_name, "profit_per_ton": r.profit_per_ton, "tonnes": r.units, "profit_per_trip": r.total_profit,
                 "buy_at": { "station": r.from.station, "system": r.from.system, "price": r.buy_price, "stock": r.supply, "distance_ly": r1(r.from.distance_from_origin_ly), "age_hours": hours_ago(r.from.market_updated_unix) },
@@ -2123,6 +2127,7 @@ pub static TOOLS: &[Tool] = &[
                     "radius_ly": { "type": "number", "description": "Both stations within this distance, default 40." },
                     "max_hop_ly": { "type": "number", "description": "Maximum distance between the two stations, default 25." },
                     "cargo_t": { "type": "integer", "description": "Another ship's cargo space." },
+                    "capital_cr": { "type": "integer", "minimum": 0, "description": "Hypothetical purchase budget in credits. Defaults to the commander balance when known." },
                     "limit": { "type": "integer" }
                 }),
                 &[],
@@ -2824,6 +2829,15 @@ mod tests {
         assert_eq!((&routes["cargo_capacity_t"], &routes["routes"][0]["tonnes"]), (&json!(50), &json!(50)), "{routes}");
         assert_eq!(routes["landing_pad"], "L", "the flown Anaconda's pad, whatever cargo_t says");
         assert_eq!((&routes["routes"][0]["buy_at"]["stock"], &routes["routes"][0]["sell_at"]["demand"]), (&json!(500), &json!(1_000)));
+
+        tools.model.write().unwrap().active_mut().unwrap().cmdr.credits = 0;
+        let routes = tools.call("trade_routes", &json!({ "cargo_t": 50 })).unwrap();
+        assert_eq!(routes["capital_cr"], 0);
+        assert_eq!(routes["routes"], json!([]));
+
+        let routes = tools.call("trade_routes", &json!({ "cargo_t": 50, "capital_cr": 400 })).unwrap();
+        assert_eq!(routes["capital_cr"], 400);
+        assert_eq!(routes["routes"][0]["tonnes"], 1);
     }
 
     /// The model writes a good with its tonnes first or last, or with none (any amount).

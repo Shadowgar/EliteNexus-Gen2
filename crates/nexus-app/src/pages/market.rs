@@ -1235,8 +1235,9 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                         }
                     });
                 });
-                bar.field("Credits", "Each route buys what these credits pay for, up to the cargo space.", |ui| {
-                    ui.label(RichText::new(short_credits(gs.cmdr.credits)).font(display(size::CALLOUT)).color(pal::TEXT));
+                bar.field("Credits", "When the balance is unknown, routes are sized without a credit limit.", |ui| {
+                    let credits = gs.trade_capital().map(short_credits).unwrap_or_else(|| "Unknown".into());
+                    ui.label(RichText::new(credits).font(display(size::CALLOUT)).color(pal::TEXT));
                 });
                 bar.field("", "", |ui| find |= crate::widgets::primary_button(ui, "Find routes").clicked());
             });
@@ -1251,7 +1252,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                     max_hop_ly: p.hop,
                     min_pad: p.min_pad,
                     cargo_capacity: cargo.max(1),
-                    capital: Some(gs.cmdr.credits.max(0)),
+                    capital: gs.trade_capital(),
                     max_age_hours: Some(p.max_age_h),
                     include_carriers: p.carriers,
                     include_planetary: p.planetary,

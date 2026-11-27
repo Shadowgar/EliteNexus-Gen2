@@ -871,11 +871,14 @@ fn trade_routes_find_the_best_hop() {
     assert_eq!(r.units, 100);
     assert_eq!(r.total_profit, 300_000);
     assert_eq!(r.hop_ly, 10.0);
-    let q = TradeQuery {
-        capital: Some(450_000),
-        ..q.clone()
-    };
-    assert_eq!(db.trade_routes(&q).expect("routes")[0].units, 50);
+    for (capital, expected_units) in [(0, None), (9_000, Some(1)), (450_000, Some(50)), (1_000_000, Some(100))] {
+        let constrained = TradeQuery {
+            capital: Some(capital),
+            ..q.clone()
+        };
+        let routes = db.trade_routes(&constrained).expect("routes");
+        assert_eq!(routes.first().map(|route| route.units), expected_units, "budget: {capital}");
+    }
     let q = TradeQuery {
         max_hop_ly: 5.0,
         ..q

@@ -138,7 +138,9 @@ impl Commander {
         if !l.fid.is_empty() {
             self.fid = l.fid.clone();
         }
-        self.credits = l.credits;
+        if let Some(credits) = l.credits {
+            self.credits = credits;
+        }
         self.loan = l.loan;
         self.game_mode = l.game_mode.clone().unwrap_or_default();
         self.group = l.group.clone();

@@ -75,6 +75,8 @@ HUD & cockpit verifies the same game folder when a dimmer download completes. If
 
 Market › Database & feed reports pending write messages and write errors separately from stored snapshots. If an import finishes writing but its checkpoint is blocked, the committed rows remain in the database and its WAL. Close other readers before trying again. If the database opens only in a newer build, use that build or a separate profile and retain the database and its SQLite sidecar files together for recovery.
 
+In Market’s trade-route search, **Credits** shows the observed balance or **Unknown**. A zero balance rules out routes that require buying cargo. If the balance is unknown, routes are sized by cargo space, supply and demand without checking affordability. In Ask, you can specify a hypothetical budget in credits for a trade-route search.
+
 ## Overlay
 
 The overlay is a small black island at the top centre of the game's screen, in a window of its own beside the main
