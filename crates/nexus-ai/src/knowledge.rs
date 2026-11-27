@@ -15,7 +15,7 @@ const DOCS: &[(&str, &str)] = &[
     ("Combat and missions", include_str!("../knowledge/combat.md")),
     ("Colonisation, Powerplay and the BGS", include_str!("../knowledge/galaxy.md")),
     ("Websites and tools", include_str!("../knowledge/links.md")),
-    ("Elite Nexus user guide", include_str!("../../../docs/USER_GUIDE.md")),
+    ("Praetorium user guide", include_str!("../../../docs/USER_GUIDE.md")),
 ];
 
 #[derive(Debug)]

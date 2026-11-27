@@ -43,13 +43,13 @@ const HOW_TO_EXPORT: &str = "EDSY: OPS › Export… › SLEF. Coriolis: name th
 
 /// Reads a build from pasted text: a SLEF export (EDSY, Coriolis, EDOMH, EDDiscovery), a journal
 /// `Loadout` event (what Copy build on the Ships tab copies), or an EDSY or Coriolis import link
-/// (the kind EDMC and Elite Nexus open).
+/// (the kind EDMC and Praetorium open).
 pub fn parse_build(text: &str) -> Result<Build, String> {
     let text = text.trim();
     if text.is_empty() {
         return Err("Paste a build first.".into());
     }
-    let not_a_build = || format!("That isn't a ship build Elite Nexus can read. Paste one exported from EDSY or Coriolis as SLEF ({HOW_TO_EXPORT}), a link from EDSY or Coriolis that opens a build, or a ship's build copied on the Ships tab.");
+    let not_a_build = || format!("That isn't a ship build Praetorium can read. Paste one exported from EDSY or Coriolis as SLEF ({HOW_TO_EXPORT}), a link from EDSY or Coriolis that opens a build, or a ship's build copied on the Ships tab.");
     let json = if text.starts_with('{') || text.starts_with('[') {
         text.to_string()
     } else if let Some(json) = crate::export::decode_link(text) {

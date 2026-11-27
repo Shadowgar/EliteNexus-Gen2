@@ -31,7 +31,7 @@ impl XsOverlay {
     }
 }
 
-/// The notification: the alert's title and detail for four seconds, silent (Elite Nexus speaks alerts itself).
+/// The notification: the alert's title and detail for four seconds, silent (Praetorium speaks alerts itself).
 pub fn payload(a: &Alert) -> String {
     let height = if a.detail.is_empty() { 110.0 } else { 175.0 };
     let icon = if a.priority == Priority::Critical { "error" } else { "default" };
@@ -47,7 +47,7 @@ pub fn payload(a: &Alert) -> String {
         "content": a.detail,
         "useBase64Icon": false,
         "icon": icon,
-        "sourceApp": "Elite Nexus",
+        "sourceApp": crate::identity::NAME,
     })
     .to_string()
 }
@@ -64,6 +64,6 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&payload(&a)).expect("JSON");
         assert_eq!(v["messageType"], 1);
         assert_eq!((v["title"].as_str(), v["content"].as_str()), (Some("Hull critical"), Some("Hull at 20%")));
-        assert_eq!((v["icon"].as_str(), v["audioPath"].as_str(), v["sourceApp"].as_str()), (Some("error"), Some(""), Some("Elite Nexus")));
+        assert_eq!((v["icon"].as_str(), v["audioPath"].as_str(), v["sourceApp"].as_str()), (Some("error"), Some(""), Some("Praetorium")));
     }
 }

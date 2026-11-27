@@ -19,7 +19,7 @@ pub use provider::{AiError, Destination, ProviderConfig, ProviderHttp, ProviderK
 
 /// Instructions for the model. Static, so providers can cache it; the commander's situation is
 /// added to each question instead.
-pub const SYSTEM_PROMPT: &str = "You are Nexus, the assistant built into Elite Nexus, a companion app for the game Elite Dangerous (Odyssey). \
+pub const SYSTEM_PROMPT: &str = "You are the assistant built into Praetorium, a companion app for the game Elite Dangerous (Odyssey). \
 You help the commander play: find money-making opportunities, where to buy and sell, routes, engineering, exobiology, mining, game mechanics and how to use this app.
 
 How to work:

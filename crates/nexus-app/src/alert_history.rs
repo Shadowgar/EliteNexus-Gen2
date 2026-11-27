@@ -1,5 +1,5 @@
 //! The alert history behind the bell in the toolbar: this run's alerts, newest first, each with its time, so one whose
-//! banner went by unseen can still be read. Kept in memory only: alerts come from what happens while Elite Nexus runs.
+//! banner went by unseen can still be read. Kept in memory only: alerts come from what happens while Praetorium runs.
 
 use crate::theme::{display, pal, size};
 use crate::widgets;
@@ -108,9 +108,9 @@ impl AlertHistory {
                 });
                 let started = since.to_local_string("%H:%M");
                 let note = if items.len() >= KEEP {
-                    format!("Since Elite Nexus started at {started}, newest first: the last {KEEP}.")
+                    format!("Since Praetorium started at {started}, newest first: the last {KEEP}.")
                 } else {
-                    format!("Since Elite Nexus started at {started}, newest first.")
+                    format!("Since Praetorium started at {started}, newest first.")
                 };
                 ui.add(egui::Label::new(RichText::new(note).size(size::FOOTNOTE).color(pal::DIM)).wrap());
                 ui.add_space(6.0);
@@ -118,7 +118,7 @@ impl AlertHistory {
                     ui.add_space(10.0);
                     ui.add(
                         egui::Label::new(
-                            RichText::new("No alerts yet. The alerts shown as banners while Elite Nexus runs are listed here too, so one you missed can still be read.")
+                            RichText::new("No alerts yet. The alerts shown as banners while Praetorium runs are listed here too, so one you missed can still be read.")
                                 .size(size::CALLOUT)
                                 .color(pal::DIM),
                         )

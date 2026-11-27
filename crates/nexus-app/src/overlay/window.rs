@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The window's title. It has no title bar; Windows finds the window by it.
-const TITLE: &str = "Elite Nexus overlay";
+const TITLE: &str = "Praetorium overlay";
 
 /// Why this computer can't draw a see-through window, as `main.rs` found at start. The island is then a window of its
 /// own, as with see-through off, and Settings › Overlay says why.
@@ -65,7 +65,7 @@ impl NoSeeThrough {
         match self {
             NoSeeThrough::NoDirectX12 => "This PC's graphics can't draw a see-through window (on Windows that takes DirectX 12), so the island stays an opaque window of its own.",
             NoSeeThrough::NoTransparency => "This computer's graphics driver can't draw a see-through window, so the island stays an opaque window of its own.",
-            NoSeeThrough::NoCompositor => "No compositor was running on this X11 desktop when Elite Nexus started, and without one nothing can be see-through, so the island stays an opaque window of its own. Start one, then restart Elite Nexus.",
+            NoSeeThrough::NoCompositor => "No compositor was running on this X11 desktop when Praetorium started, and without one nothing can be see-through, so the island stays an opaque window of its own. Start one, then restart Praetorium.",
         }
     }
 }
@@ -89,7 +89,7 @@ pub struct OverlayPrefs {
     pub scale: f32,
     /// Keep the small empty island when there's nothing to say, instead of fading away (see-through or not).
     pub keep_minimal: bool,
-    /// Stay visible whichever window is in front, not only the game or Elite Nexus.
+    /// Stay visible whichever window is in front, not only the game or Praetorium.
     pub always_visible: bool,
     /// A see-through window around the island (applies after a restart). Off: the island is an opaque window of its
     /// own, its size and (on Windows) its shape.
@@ -194,7 +194,7 @@ pub struct Overlay {
     alerted: bool,
     sent: Sent,
     desktop: Desktop,
-    /// The game or Elite Nexus is in front (None: the desktop can't say), and when that was asked.
+    /// The game or Praetorium is in front (None: the desktop can't say), and when that was asked.
     in_front: Option<bool>,
     asked: Option<f64>,
     /// The game's monitor (Windows), looked up every few seconds.
@@ -358,7 +358,7 @@ impl Overlay {
             }
             None => self.island(gs, src, prefs.keep_minimal, live, t),
         };
-        // Shown only while the game or Elite Nexus is in front (unless kept visible), and while there's something to say.
+        // Shown only while the game or Praetorium is in front (unless kept visible), and while there's something to say.
         let in_front = prefs.always_visible || prefs.vr || self.demo.is_some() || self.in_front != Some(false);
         let gone = view.size == Size::Gone;
         let view = if in_front { view } else { IslandView::default() };

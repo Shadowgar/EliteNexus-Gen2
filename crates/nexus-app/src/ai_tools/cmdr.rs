@@ -124,7 +124,7 @@ fn ship(gs: &GameState, s: &Ship, detail: Detail, now: Timestamp) -> Value {
 }
 
 /// Said when a listed ship's loadout was never seen.
-const LOADOUT_UNKNOWN: &str = "loadout_known false: the game hasn't reported that ship's modules in the journal Elite Nexus read (it does when the ship is flown), so its engineering, modules, jump range and cargo aren't known.";
+const LOADOUT_UNKNOWN: &str = "loadout_known false: the game hasn't reported that ship's modules in the journal Praetorium read (it does when the ship is flown), so its engineering, modules, jump range and cargo aren't known.";
 
 /// Ships matching what the commander asked for: an id, or a name, ident or type (as written, ignoring case); when
 /// none matches exactly, a name, ident or type that contains it.

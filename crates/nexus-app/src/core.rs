@@ -216,7 +216,7 @@ fn run(
     let local_profile = journal_dir.is_none();
     let Some(dir) = journal_dir.or_else(nexus_journal::default_journal_dir) else {
         tracing::warn!("no journal folder found");
-        status.write().phase = Phase::Error("Elite Nexus couldn't find Elite Dangerous's journal folder on this computer.".into());
+        status.write().phase = Phase::Error("Praetorium couldn't find Elite Dangerous's journal folder on this computer.".into());
         repaint();
         return;
     };
@@ -272,9 +272,9 @@ fn replay_and_follow(
         Ok(f) => f,
         Err(e) => {
             status.write().phase = Phase::Error(if e.kind() == std::io::ErrorKind::NotFound {
-                format!("Elite Nexus looked for the journals in {}, but that folder doesn't exist on this computer.", dir.display())
+                format!("Praetorium looked for the journals in {}, but that folder doesn't exist on this computer.", dir.display())
             } else {
-                format!("Elite Nexus can't read the journal folder {} ({e}).", dir.display())
+                format!("Praetorium can't read the journal folder {} ({e}).", dir.display())
             });
             repaint();
             return false;

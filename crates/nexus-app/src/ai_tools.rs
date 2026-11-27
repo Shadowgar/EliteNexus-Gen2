@@ -4396,14 +4396,14 @@ mod tests {
         assert!(v["bodies_holding_it"].as_u64().unwrap() > 0);
     }
 
-    /// The whole chain with a built program, as an agent starts it: `EliteNexus --mcp` with piped stdin and stdout,
-    /// talking to a listener on this user's real pipe that answers from a test commander. Set `ELITE_NEXUS_EXE` to the
+    /// The whole chain with a built program, as an agent starts it: `Praetorium --mcp` with piped stdin and stdout,
+    /// talking to a listener on this user's real pipe that answers from a test commander. Set `PRAETORIUM_EXE` to the
     /// program and run `cargo test -p nexus-app live_agent_chain -- --ignored`, with no Praetorium answering agents.
     #[test]
     #[ignore]
     fn live_agent_chain() {
         use std::io::{BufRead, Write};
-        let exe = std::env::var_os("ELITE_NEXUS_EXE").expect("ELITE_NEXUS_EXE: the program to start");
+        let exe = std::env::var_os("PRAETORIUM_EXE").expect("PRAETORIUM_EXE: the program to start");
         let rt = live_runtime();
         let mut service = crate::mcp::McpService::default();
         service.start_at(crate::mcp::endpoint().unwrap(), agent_tools(commander(), &rt), rt.handle());
