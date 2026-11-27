@@ -636,11 +636,22 @@ fn checked_data_dir(path: PathBuf, scratch: bool) -> std::io::Result<PathBuf> {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty application data directory"));
     }
     validate(&path)?;
+    // A new directory under a junction or symlink must not be created in an earlier profile.
+    for ancestor in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        match ancestor.canonicalize() {
+            Ok(existing) => {
+                validate(&existing)?;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
     if scratch { std::fs::create_dir(&path)?; } else { std::fs::create_dir_all(&path)?; }
     let resolved = path.canonicalize()?;
     validate(&resolved)?;
     if !is_writable(&resolved) {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the Gen2 profile is read-only"));
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the Praetorium profile is read-only"));
     }
     Ok(resolved)
 }
@@ -708,6 +719,13 @@ mod tests {
         assert!(checked_data_dir(upstream.clone(), false).is_err());
         for name in ["Elite Nexus", "EliteNexus", "EliteNexus-Gen2", "nexus-gen2-data"] {
             assert!(checked_data_dir(scratch.join(name), false).is_err(), "accepted {name}");
+        }
+        #[cfg(unix)]
+        {
+            let alias = scratch.join("alias");
+            std::os::unix::fs::symlink(&upstream, &alias).unwrap();
+            assert!(checked_data_dir(alias.join("new"), false).is_err());
+            assert!(!upstream.join("new").exists());
         }
         let praetorium = checked_data_dir(scratch.join(crate::identity::PORTABLE_DATA), false).unwrap();
         assert_ne!(upstream.canonicalize().unwrap(), praetorium);
