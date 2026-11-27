@@ -1,38 +1,19 @@
-# Publishes the website in site/ to GitHub Pages (https://uruskan.github.io/EliteNexus/), adding the screenshots,
-# the social preview, the Inter font and the user guide from the rest of the repo. Needs Pages switched on once:
-# repo Settings > Pages > Source: GitHub Actions.
-name: Website
+name: Website preview
 
 on:
-  push:
-    branches: [main]
-    paths: ["site/**", "tools/site/**", "data/fonts/inter/**", "docs/screenshots/**", "docs/social-preview.png", "docs/USER_GUIDE.md", ".github/workflows/pages.yml"]
+  pull_request:
+    paths: ["site/**", "tools/site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
-  deploy:
+  check:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
-      - name: Assemble
+      - name: Assemble and check preview
         run: |
           python tools/site/build.py --output _site
           python tools/site/check.py --root _site
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: _site
-      - id: deployment
-        uses: actions/deploy-pages@v4

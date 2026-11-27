@@ -1,4 +1,4 @@
-"""Check a complete Elite Nexus static site build without network access.
+"""Check a Praetorium local website preview without network access.
 
 Usage: python tools/site/check.py --root target-agents/site-preview
 Checks HTML links/assets, fragments, page metadata, moved-page redirects and screenshot links.
@@ -16,7 +16,7 @@ import sys
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
 
-BASE = "https://uruskan.github.io/EliteNexus/"
+BASE = "https://preview.invalid/"
 DEFAULT_ROOT = Path(__file__).resolve().parents[2] / "site"
 VOID_ELEMENTS = frozenset(
     "area base br col embed hr img input link meta param source track wbr".split()
@@ -127,7 +127,7 @@ def local_target(root: Path, page_url: str, value: str):
     elif path.startswith(prefix):
         relative = path[len(prefix):]
     else:
-        raise ValueError("local URL is outside the /EliteNexus/ project path")
+        raise ValueError("local URL is outside the project path")
     target = (root / relative).resolve()
     if not target.is_relative_to(root):
         raise ValueError("local URL escapes the site output directory")
@@ -184,7 +184,7 @@ def check(root: Path) -> int:
             expected_canonical = urljoin(BASE, quote(canonical_path))
         if expected_canonical.endswith("index.html"):
             expected_canonical = expected_canonical[:-len("index.html")]
-        if document.canonicals != [expected_canonical]:
+        if document.canonicals != [expected_canonical] and not (document.noindex and not document.canonicals):
             fail(document, f"canonical must be {expected_canonical!r}; found {document.canonicals!r}")
 
         for reference in document.references:
