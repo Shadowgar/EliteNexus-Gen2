@@ -92,7 +92,7 @@ the galaxy database has one writer thread with pooled readers. `docs/ARCHITECTUR
 
 ## Reporting a bug
 
-For Praetorium, use the [Praetorium issue tracker](https://github.com/Shadowgar/EliteNexus-Gen2/issues) and include:
+For Praetorium, use the [Praetorium issue tracker](https://github.com/Shadowgar/Praetorium/issues) and include:
 
 * the version (Settings › About), your OS, and how the game runs there (natively, Proton, Wine, CrossOver, Whisky);
 * what you did, what you expected and what happened;
