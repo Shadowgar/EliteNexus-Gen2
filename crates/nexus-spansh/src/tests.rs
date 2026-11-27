@@ -833,7 +833,7 @@ fn every_fixture_is_covered() {
 // =============================================================================================
 // Job machinery against a localhost mock (no Spansh traffic).
 
-mod mock {
+pub(crate) mod mock {
     use std::sync::{Arc, Mutex};
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -843,6 +843,7 @@ mod mock {
     pub struct Seen {
         pub method: String,
         pub path: String,
+        pub accept: Option<String>,
         pub body: String,
     }
 
@@ -927,9 +928,14 @@ mod mock {
         let mut first = head.lines().next()?.split_whitespace();
         let method = first.next()?.to_owned();
         let path = first.next()?.to_owned();
+        let accept = head.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("accept").then(|| value.trim().to_owned())
+        });
         Some(Seen {
             method,
             path,
+            accept,
             body: String::from_utf8_lossy(&buf[head_end..]).into_owned(),
         })
     }

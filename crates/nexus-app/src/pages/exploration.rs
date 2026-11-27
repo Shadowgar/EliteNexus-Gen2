@@ -93,6 +93,13 @@ pub struct ExplorationUi {
 }
 
 impl ExplorationUi {
+    pub fn retire_commander_results(&mut self) {
+        self.selected_body = None;
+        self.system = None;
+        self.reveal = false;
+        self.find = FindBodies::default();
+    }
+
     /// Opens on a tab by name (`find`, `history`, `unsold`); `autorun` starts the Find search on
     /// the first frame (screenshot runs).
     pub fn new(tab: Option<&str>, autorun: bool) -> Self {

@@ -176,17 +176,21 @@ impl SpanshBuilder {
                     reqwest::header::ACCEPT,
                     reqwest::header::HeaderValue::from_static("application/json"),
                 );
-                reqwest::Client::builder()
+                let builder = reqwest::Client::builder()
                     .user_agent(self.user_agent.clone())
                     .default_headers(headers)
                     .gzip(true)
                     .timeout(self.request_timeout)
-                    .connect_timeout(self.connect_timeout)
-                    .build()
-                    .map_err(|source| Error::Transport {
-                        url: self.base_url.clone(),
-                        source,
-                    })?
+                    .connect_timeout(self.connect_timeout);
+                let builder = if matches!(self.access, Access::Full) {
+                    builder
+                } else {
+                    builder.redirect(reqwest::redirect::Policy::none())
+                };
+                builder.build().map_err(|source| Error::Transport {
+                    url: self.base_url.clone(),
+                    source,
+                })?
             }
         };
         Ok(self.finish(http))
@@ -240,16 +244,12 @@ impl Spansh {
             max_concurrent: max_concurrent.max(1),
             ..Default::default()
         };
-        if let Ok(http) = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(&builder.user_agent)
-            .timeout(builder.request_timeout)
-            .connect_timeout(builder.connect_timeout)
-            .build()
-        {
-            builder.finish(http)
-        } else {
-            SpanshBuilder { access: Access::Offline, ..builder }.finish(reqwest::Client::new())
+        match builder.clone().build() {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::error!(%error, "Spansh HTTP client setup failed");
+                SpanshBuilder { access: Access::Offline, ..builder }.finish(reqwest::Client::new())
+            }
         }
     }
 
@@ -576,12 +576,32 @@ mod tests {
 mod access_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn application_transport_requests_json() {
+        let mock = crate::tests::mock::serve(vec![(200, "{}")]).await;
+        let client = Spansh::gen2(false, 2);
+        // Exercise the actual application HTTP client without contacting Spansh.
+        client
+            .inner
+            .http
+            .get(&mock.base)
+            .send()
+            .await
+            .expect("localhost response")
+            .error_for_status()
+            .expect("successful response");
+        assert_eq!(mock.requests()[0].accept.as_deref(), Some("application/json"));
+    }
+
     #[test]
     fn normal_application_preserves_public_search_and_route_access() {
         let online = Spansh::gen2(false, 2);
         let offline = Spansh::gen2(true, 1);
-        for endpoint in ["system/42", "systems/search", "bodies/search", "stations/search",
-            "generic/route", "carrier/route", "exobiology/route", "riches/route", "results/job"] {
+        for endpoint in [
+            "system/42", "systems/search", "bodies/search", "stations/search",
+            "route", "generic/route", "fleetcarrier/route", "exobiology/route", "riches/route",
+            "results/job",
+        ] {
             assert!(online.inner.access.allows(&online.url(endpoint)), "{endpoint}");
             assert!(!offline.inner.access.allows(&offline.url(endpoint)), "{endpoint}");
         }

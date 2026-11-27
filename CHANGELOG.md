@@ -4,7 +4,7 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
-- Restore normal-mode Spansh searches and route planners and configured Ask model providers without removing isolation, credential binding or HTTPS transport safeguards. Clearly identify isolated runs and suppress misleading upload toolbar controls while outbound sync is disabled. Local compile and gameplay verification are pending.
+- Restore normal-mode Spansh searches and route planners and configured Ask model providers with isolation, credential binding and HTTPS transport safeguards. Restore Spansh's JSON request headers and clear stale search results when the commander or journal source changes. Identify isolated profiles and hide upload toolbar controls while outbound sync is disabled. [PR #15](https://github.com/Shadowgar/Praetorium/pull/15) records verification and remaining gameplay checks.
 
 - Market and fleet carrier tasks show an error and allow retry if their worker fails or exits early. A new Deals scan can start while a superseded scan finishes.
 

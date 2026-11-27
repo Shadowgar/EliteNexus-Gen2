@@ -728,7 +728,9 @@ impl NexusApp {
         let (title, subtitle) = page_heading(self.page, gs);
         drop(model);
         self.page_header(ui, &title, &subtitle);
-        let model = self.core.model.read();
+        let model = self.core.model.clone();
+        let model = model.read();
+        self.sync_navigation_scope(&model);
         let Some(gs) = model.active() else { return };
         // Whose unsold exobiology list a Clear on the Exobiology page clears, as the model keys its commanders.
         let cmdr_key = model.active.clone();
@@ -899,20 +901,6 @@ impl NexusApp {
         } else {
             body(ui);
         }
-        drop(model);
-        // Clear list: the list empties at once, and settings.json keeps how far, for the next time the journals are read.
-        if let (Some(upto), Some(cmdr)) = (clear_exobio, cmdr_key) {
-            self.core.model.write().clear_exobio_unsold(&cmdr, upto);
-            self.settings.exobio.clear(&cmdr, upto);
-            settings_changed = true;
-        }
-        if refresh_voices {
-            self.speaker.refresh_voices();
-        }
-        if let Some(to) = market_goto {
-            self.market_ui.open_source(self.market.db.as_ref(), to);
-            self.page = Page::Market;
-        }
         if let Some(pages::galaxy_map::MapAction::PlotTo(system)) = map_action {
             self.nav.to = system;
             self.nav.pick(pages::navigation::Planner::Exact);
@@ -934,6 +922,20 @@ impl NexusApp {
             self.nav.planned = Some(route);
             self.nav.pick(pages::navigation::Planner::InGame);
             self.page = Page::Navigation;
+        }
+        drop(model);
+        if let Some(to) = market_goto {
+            self.market_ui.open_source(self.market.db.as_ref(), to);
+            self.page = Page::Market;
+        }
+        // Clear list: the list empties at once, and settings.json keeps how far, for the next time the journals are read.
+        if let (Some(upto), Some(cmdr)) = (clear_exobio, cmdr_key) {
+            self.core.model.write().clear_exobio_unsold(&cmdr, upto);
+            self.settings.exobio.clear(&cmdr, upto);
+            settings_changed = true;
+        }
+        if refresh_voices {
+            self.speaker.refresh_voices();
         }
         match self.nav.goto.take() {
             Some(pages::navigation::Goto::Exploration) => {
@@ -1013,10 +1015,8 @@ impl NexusApp {
         }
         if restart {
             self.market.set_watch_scope(None);
-            self.market_ui.retire_requests();
+            self.retire_navigation_results();
             self.assistant.replace_source();
-            self.log = Default::default();
-            self.nav = Default::default();
             self.ask_ui.input.clear();
             self.core = start_core(ctx, self.overrides.journal_dir.as_ref().or(self.settings.journal_dir.as_ref()), self.market.history_sink(), &self.settings);
             self.sync.attach(&self.core);
@@ -1029,6 +1029,30 @@ impl NexusApp {
             self.game_seen_here = false;
             self.own_journals = self.overrides.journal_dir.is_none() && self.settings.journal_dir.is_none();
             // Nor does the old count of jumps: one more in the journals read now isn't a jump just made.
+            self.last_jump_count = None;
+        }
+    }
+
+    fn retire_navigation_results(&mut self) {
+        self.nav = Default::default();
+        self.log = Default::default();
+        self.colo = Default::default();
+        self.map = Default::default();
+        self.exo.retire_commander_results();
+        self.explo.retire_commander_results();
+        self.mining_ui.find = Default::default();
+        self.fleet.retire_commander_results();
+        self.combat.retire_commander_results();
+        self.market_ui.retire_requests();
+    }
+
+    fn sync_navigation_scope(&mut self, model: &nexus_model::Model) {
+        let scope = (model.source_generation(), model.active_generation());
+        if self.navigation_scope != Some(scope) {
+            if self.navigation_scope.is_some_and(|old| old.0 != 0) {
+                self.retire_navigation_results();
+            }
+            self.navigation_scope = Some(scope);
             self.last_jump_count = None;
         }
     }
@@ -1332,21 +1356,9 @@ impl eframe::App for NexusApp {
         self.screenshot_tick(ctx);
         self.drain_alerts();
         {
-            let model = self.core.model.read();
-            let scope = (model.source_generation(), model.active_generation());
-            if self.navigation_scope != Some(scope) {
-                if self.navigation_scope.is_some_and(|old| old.0 != 0) {
-                    self.nav = Default::default();
-                    self.log = Default::default();
-                    self.colo = Default::default();
-                    self.map = Default::default();
-                    self.fleet.retire_commander_results();
-                    self.combat.retire_commander_results();
-                    self.market_ui.retire_requests();
-                }
-                self.navigation_scope = Some(scope);
-                self.last_jump_count = None;
-            }
+            let model = self.core.model.clone();
+            let model = model.read();
+            self.sync_navigation_scope(&model);
             if let Some(gs) = model.active() {
                 self.nav.sync_carrier_selection(gs, self.settings.carrier, nexus_journal::Timestamp::now());
             }

@@ -136,6 +136,15 @@ const ROWS: usize = 25;
 const TOUR_PLANETS: usize = 15;
 
 impl ExobioUi {
+    pub fn retire_commander_results(&mut self) {
+        self.job = Slot::default();
+        self.known.job = Slot::default();
+        self.searched = None;
+        self.shown = ROWS;
+        self.autorun = false;
+        self.confirm_clear = false;
+    }
+
     /// Opens on `tab` ("untouched" or "known": Find planets with that strategy; "clear-unsold": This system, with the
     /// unsold list's Clear list asking to confirm); `autorun` starts its search on the first frame (screenshot runs).
     pub fn new(tab: Option<&str>, autorun: bool) -> Self {

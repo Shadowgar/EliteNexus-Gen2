@@ -110,7 +110,7 @@ pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &st
         footnote(ui, "Outbound sync is disabled in this build. Upload switches and keys below are saved preferences only; no data will be sent. EDDN reception is independent.");
     }
     if crate::launch::isolated() {
-        footnote(ui, "Isolated mode: all service traffic and external links are disabled. The default test profile is temporary and settings do not carry over to a new launch.");
+        footnote(ui, "Isolated mode: service traffic and external links are disabled. Settings are saved to the test profile. The default test profile is temporary, and an explicitly configured PRAETORIUM_HOME can be reused.");
     }
     footnote(ui, &format!("Sync preferences and API keys are local. Keys are {}. Each approved service requires opt-in before it can send data.", secrets::KEPT));
     ui.add_space(4.0);
