@@ -305,6 +305,12 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 
 **Integration:** PR #9 at `b49c3cb`; static review accepted. No additional builds. Historical fallback timestamps remain unidentifiable.
 
+### G2-024B — Deals request identity
+
+Desktop Abnormal prices identifies each scan by the commander, system and complete Deals query, including origin, hold capacity and search parameters. Changes and manual refresh retire the current rows and actions immediately. The running worker drains before the next scan starts, and its retired outcome is discarded even if the inputs return to their earlier values.
+
+This is applicable to upstream desktop Deals wherever the same filter-only identity is used. Ask's Deals tool executes a fresh query per call using its captured commander context. Focused application regressions and interactive verification are deferred to 01D-W.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.

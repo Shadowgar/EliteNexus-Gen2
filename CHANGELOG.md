@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Abnormal prices recalculates when the commander system, origin, ship capacity or search settings change. Superseded scans no longer show prices or offer row actions.
+
 - Find commodity refreshes open quote lists and selected market details every 30 seconds. Quote age uses the market report time. Reports without a usable observation timestamp have unknown age and are excluded by age limits.
 
 - Market and station updates now track timestamps and sources separately for station details and commodity listings. Incomplete reports preserve existing listings, and older observations cannot roll back carrier location or docking access.

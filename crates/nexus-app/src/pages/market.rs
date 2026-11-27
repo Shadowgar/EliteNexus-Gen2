@@ -377,8 +377,73 @@ type Res<T> = Result<Vec<T>, String>;
 /// The database's carriers by callsign (those the game listed here), and every station and carrier it places in this
 /// system.
 type HereView = (FxHashMap<String, StationInfo>, Vec<StationInfo>);
-/// Abnormal-price filters: mode, ratio ×100, radius, age, carriers, pad.
-type AbnKey = (TradeMode, u64, Option<u64>, u64, bool, Option<char>);
+/// The context and complete payload of a desktop Deals scan.
+#[derive(PartialEq)]
+struct DealsRequest {
+    commander: String,
+    fid: String,
+    system: String,
+    system_address: u64,
+    query: DealQuery,
+}
+
+impl DealsRequest {
+    fn new(gs: &GameState, p: &MarketPrefs) -> Self {
+        Self {
+            commander: gs.cmdr.name.clone(),
+            fid: gs.cmdr.fid.clone(),
+            system: gs.location.system.clone(),
+            system_address: gs.location.system_address,
+            query: DealQuery {
+                mode: p.abn_mode,
+                origin: gs.location.star_pos,
+                max_distance_ly: p.abn_radius,
+                min_ratio: p.abn_ratio,
+                min_pad: p.min_pad,
+                include_carriers: p.abn_carriers,
+                max_age_hours: Some(p.abn_age_h),
+                cargo_capacity: gs.fleet.current().map(|s| i64::from(s.cargo_capacity.max(1))).unwrap_or(100),
+                limit: 200,
+            },
+        }
+    }
+}
+
+#[derive(Default)]
+struct DealsScan {
+    /// The running or displayed scan. Clearing this also retires a worker whose query later becomes current again.
+    request: Option<DealsRequest>,
+    slot: Slot<Res<Deal>>,
+}
+
+impl DealsScan {
+    fn update(&mut self, current: &DealsRequest, refresh: bool) {
+        if refresh || self.request.as_ref() != Some(current) {
+            self.request = None;
+        }
+        if self.request.is_some() {
+            self.slot.tick();
+        } else {
+            self.slot.last = None;
+            self.slot.took = None;
+            // Drain a retired scan without publishing it, keeping database scans single-flight.
+            if let Some(job) = &mut self.slot.job
+                && job.poll().is_some()
+            {
+                self.slot.job = None;
+            }
+        }
+    }
+
+    fn start(&mut self, ctx: &egui::Context, request: DealsRequest, db: &GalaxyDb) {
+        if self.request.is_none() && !self.slot.busy() && (request.query.max_distance_ly.is_none() || request.query.origin.is_some()) {
+            let q = request.query.clone();
+            let db = db.clone();
+            self.slot.run(ctx, move || db.price_deals(&q).map_err(|e| e.to_string()));
+            self.request = Some(request);
+        }
+    }
+}
 
 /// Everything on a commodity's page.
 pub struct CommodityPage {
@@ -481,7 +546,7 @@ pub struct MarketUi {
     new_watch: PriceWatch,
     alert_ref: Slot<Result<AlertRef, String>>,
     alert_ref_key: Option<String>,
-    abn: Slot<Res<Deal>>,
+    abn: DealsScan,
     /// The pins' markets as the database has them now, refreshed every half minute and on arrival.
     pins_live: Slot<Result<FxHashMap<u64, Option<StationMarket>>, String>>,
     pins_key: Option<(Vec<u64>, i64)>,
@@ -497,8 +562,6 @@ pub struct MarketUi {
     plan_key: Option<String>,
     /// A run the commander chose to follow: the app moves it to the Navigation page.
     pub follow: Option<crate::pages::navigation::PlannedRoute>,
-    /// The filters the shown results were found with (a change re-runs the scan).
-    abn_key: Option<AbnKey>,
 }
 
 impl Default for MarketUi {
@@ -557,8 +620,7 @@ impl MarketUi {
             new_watch: PriceWatch::default(),
             alert_ref: Slot::default(),
             alert_ref_key: None,
-            abn: Slot::default(),
-            abn_key: None,
+            abn: DealsScan::default(),
             pins_live: Slot::default(),
             pins_key: None,
             pins_at: None,
@@ -1109,7 +1171,6 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
     st.hotspots.tick();
     st.hotspot_prices.tick();
     st.sell.tick();
-    st.abn.tick();
     st.pins_live.tick();
     st.alert_ref.tick();
     st.plan.tick();
@@ -1176,6 +1237,9 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
     let mut nav = None;
     if !st.prefs.pins.is_empty() && !matches!(st.tab, Tab::Database | Tab::Alerts) {
         nav = pins_panel(ui, gs, st);
+    }
+    if st.tab != Tab::Abnormal && (st.abn.request.is_some() || st.abn.slot.busy()) {
+        st.abn.update(&DealsRequest::new(gs, &st.prefs), false);
     }
     match st.tab {
         Tab::Commodity => nav = commodity_tab(ui, gs, &db, st).or(nav),
@@ -2369,8 +2433,10 @@ fn history_plot(ui: &mut Ui, market_id: u64, pts: &[PricePoint]) {
 /// Abnormal prices: anything a station pays far above the galactic average, or sells far below it,
 /// across the whole database (or within a radius). The scan re-runs whenever a filter changes.
 fn abnormal_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Option<Nav> {
-    let origin = gs.location.star_pos;
     let p = &mut st.prefs;
+    if p.pad_auto {
+        p.min_pad = finder::ship_pad(gs);
+    }
     let mut refresh = false;
     crate::widgets::settings_bar(ui, |bar| {
         bar.field("Stations and carriers", "", |ui| {
@@ -2403,37 +2469,25 @@ fn abnormal_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -
         });
         bar.field("", "", |ui| refresh = crate::widgets::icon_button(ui, icon::ARROW_CLOCKWISE, "Scan again with the latest prices").clicked());
     });
-    if refresh {
-        st.abn_key = None;
-    }
+    let request = DealsRequest::new(gs, &st.prefs);
+    st.abn.update(&request, refresh);
+    let needs_origin = request.query.max_distance_ly.is_some() && request.query.origin.is_none();
+    st.abn.start(ui.ctx(), request, db);
     let p = &st.prefs;
-    let key = (p.abn_mode, (p.abn_ratio * 100.0) as u64, p.abn_radius.map(|r| r as u64), p.abn_age_h as u64, p.abn_carriers, p.min_pad);
-    if st.abn_key != Some(key) && !st.abn.busy() && (p.abn_radius.is_none() || origin.is_some()) {
-        st.abn_key = Some(key);
-        let q = DealQuery {
-            mode: p.abn_mode,
-            origin,
-            max_distance_ly: p.abn_radius,
-            min_ratio: p.abn_ratio,
-            min_pad: p.min_pad,
-            include_carriers: p.abn_carriers,
-            max_age_hours: Some(p.abn_age_h),
-            cargo_capacity: gs.fleet.current().map(|s| i64::from(s.cargo_capacity.max(1))).unwrap_or(100),
-            limit: 200,
-        };
-        let db = db.clone();
-        st.abn.run(ui.ctx(), move || db.price_deals(&q).map_err(|e| e.to_string()));
-    }
     ui.add_space(8.0);
     let explain = match p.abn_mode {
         TradeMode::SellToStation => "Stations and carriers buying a commodity for far more than its galactic average: sell there. Click a commodity for where to buy it, or a station for its whole market.",
         TradeMode::BuyFromStation => "Stations and carriers selling a commodity for far less than its galactic average: buy there. Click a commodity for where to sell it, or a station for its whole market.",
     };
     ui.add(egui::Label::new(RichText::new(explain).size(size::FOOTNOTE).color(pal::DIM)).wrap());
-    if !status(ui, &st.abn) {
+    if needs_origin {
+        empty(ui, icon::MAGNIFYING_GLASS, "Current system position unknown", "Choose Whole galaxy or wait for your current system position.");
         return None;
     }
-    let Some(Ok(deals)) = &st.abn.last else { return None };
+    if !status(ui, &st.abn.slot) {
+        return None;
+    }
+    let Some(Ok(deals)) = &st.abn.slot.last else { return None };
     if deals.is_empty() {
         empty(ui, icon::MAGNIFYING_GLASS, "Nothing abnormal right now", "No price in range is that far from its galactic average. Try a lower multiple or older prices.");
         return None;
@@ -5174,6 +5228,90 @@ fn alerts_tab(ui: &mut Ui, gs: &GameState, svc: &MarketService, db: &GalaxyDb, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deals_request_tracks_location_capacity_and_search_payload() {
+        let mut gs = GameState::default();
+        gs.cmdr.fid = "F123".into();
+        gs.location.system = "Sol".into();
+        gs.location.system_address = 1;
+        gs.location.star_pos = Some([0.0; 3]);
+        let mut ship = nexus_model::fleet::Ship::new(1, "adder");
+        ship.cargo_capacity = 100;
+        gs.fleet.ships.insert(1, ship);
+        gs.fleet.current_ship_id = Some(1);
+        let mut prefs = MarketPrefs::default();
+        let original = DealsRequest::new(&gs, &prefs);
+
+        gs.location.star_pos = Some([0.0, 0.5, 0.0]);
+        assert!(DealsRequest::new(&gs, &prefs) != original);
+        gs.location.star_pos = None;
+        assert!(DealsRequest::new(&gs, &prefs) != original);
+        gs.location.star_pos = original.query.origin;
+        gs.location.system_address = 2;
+        assert!(DealsRequest::new(&gs, &prefs) != original);
+        gs.location.system_address = 1;
+        gs.cmdr.fid = "F456".into();
+        assert!(DealsRequest::new(&gs, &prefs) != original);
+        gs.cmdr.fid = "F123".into();
+        gs.fleet.current_mut().unwrap().cargo_capacity = 128;
+        let request = DealsRequest::new(&gs, &prefs);
+        assert_eq!(request.query.cargo_capacity, 128);
+        assert!(request != original);
+        gs.fleet.current_mut().unwrap().cargo_capacity = 100;
+        assert!(DealsRequest::new(&gs, &prefs) == original);
+
+        prefs.abn_age_h += 0.25;
+        assert!(DealsRequest::new(&gs, &prefs) != original, "fractional filters must retain their precision");
+    }
+
+    #[test]
+    fn deals_scan_rejects_superseded_results_even_when_inputs_return() {
+        let mut gs = GameState::default();
+        let prefs = MarketPrefs::default();
+        let ctx = egui::Context::default();
+        let mut scan = DealsScan {
+            request: Some(DealsRequest::new(&gs, &prefs)),
+            ..Default::default()
+        };
+        scan.slot.last = Some(Ok(Vec::new()));
+
+        let (release, wait) = crossbeam_channel::bounded(1);
+        scan.slot.run(&ctx, move || {
+            wait.recv().unwrap();
+            Err("superseded error".into())
+        });
+        gs.location.system_address = 1;
+        scan.update(&DealsRequest::new(&gs, &prefs), false);
+        assert!(scan.slot.last.is_none());
+        assert!(scan.slot.busy(), "keep the running worker until it finishes");
+
+        gs.location.system_address = 0;
+        let current = DealsRequest::new(&gs, &prefs);
+        release.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while scan.slot.busy() {
+            scan.update(&current, false);
+            assert!(std::time::Instant::now() < deadline, "superseded worker did not finish");
+            std::thread::yield_now();
+        }
+        assert!(scan.request.is_none());
+        assert!(scan.slot.last.is_none());
+        assert!(scan.slot.took.is_none());
+
+        scan.request = Some(DealsRequest::new(&gs, &prefs));
+        scan.slot.run(&ctx, || Ok(Vec::new()));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while scan.slot.busy() {
+            scan.update(&current, false);
+            assert!(std::time::Instant::now() < deadline, "current worker did not finish");
+            std::thread::yield_now();
+        }
+        assert!(matches!(scan.slot.last, Some(Ok(_))));
+        scan.update(&current, true);
+        assert!(scan.request.is_none());
+        assert!(scan.slot.last.is_none());
+    }
 
     fn info(name: &str, symbol: &str, category: &str, rare: bool) -> CommodityInfo {
         CommodityInfo { symbol: symbol.into(), name: name.into(), category: category.into(), is_rare: rare }
