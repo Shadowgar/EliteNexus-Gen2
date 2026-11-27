@@ -173,7 +173,7 @@ impl Updater {
             demo: shot_tab.is_some(),
             auto: enabled && prefs.check && !cfg!(debug_assertions),
             rt,
-            http: enabled.then(|| reqwest::Client::builder().https_only(true).user_agent(concat!("Praetorium/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(20)).build().ok()).flatten(),
+            http: enabled.then(|| reqwest::Client::builder().https_only(true).user_agent(crate::identity::USER_AGENT).connect_timeout(Duration::from_secs(20)).build().ok()).flatten(),
             next_check: None,
             check: None,
             checked: None,

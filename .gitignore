@@ -6,6 +6,7 @@
 # Local app data (settings, API keys, galaxy database, upload queues, logs) — never commit
 /nexus-data/
 /nexus-gen2-data/
+/praetorium-data/
 *.db
 *.db-wal
 *.db-shm

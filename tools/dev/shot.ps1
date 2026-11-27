@@ -40,7 +40,7 @@
 # -Demo: a sample Ask conversation, an alert banner and sample alerts in the alert history; with
 #        -Tab bell the history (the list under the toolbar's bell) is open.
 # -Exe: another build (e.g. one from your own CARGO_TARGET_DIR). The data folder is the build's own
-#        (target\debug\nexus-gen2-data).
+#        (target\debug\praetorium-data).
 param(
     [string]$Page = "Dashboard",
     [string]$Out = "shot",

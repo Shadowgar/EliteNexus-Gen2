@@ -80,4 +80,3 @@ else's report, idea or help. Thank you, commanders.
 * Data: EDCD's FDevIDs, EDEngineer (msarilar), EDDiscovery, jixxed's journal schemas and Richard Buckle's
   EDRefCard; the services Spansh, EDSM, Inara, EDDN and EDAstro; 3Dmigoto (bo3b); the Inter typeface and Phosphor
   icons. Sources and licences: [NOTICE.md](NOTICE.md).
-

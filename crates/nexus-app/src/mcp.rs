@@ -46,7 +46,7 @@ pub fn endpoint() -> Result<String, String> {
 /// ends check that the other runs as the same user.
 #[cfg(not(windows))]
 pub fn endpoint() -> Result<String, String> {
-    // /run/user/<uid> holds other programs' sockets too: a name that's plainly Praetorium'.
+    // /run/user/<uid> holds other programs' sockets too: a name that's plainly Praetorium's.
     Ok(unix::socket_dir()?.join("praetorium-mcp.sock").to_string_lossy().into_owned())
 }
 
@@ -222,7 +222,7 @@ impl McpService {
                 let mut s = status.lock();
                 s.listening = false;
                 s.error = Some(if e.kind() == std::io::ErrorKind::AddrInUse || e.kind() == std::io::ErrorKind::PermissionDenied {
-                    "Another program already answers AI agents under Praetorium' name: is a second Praetorium running?".into()
+                    "Another program already answers AI agents under Praetorium's name: is a second Praetorium running?".into()
                 } else {
                     format!("Couldn't listen for AI agents: {e}")
                 });

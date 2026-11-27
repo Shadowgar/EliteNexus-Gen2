@@ -21,7 +21,7 @@ if [ "$(uname -s)" != Darwin ]; then
   echo "This script makes the macOS app and runs on a Mac." >&2
   exit 1
 fi
-for tool in cargo codesign iconutil ditto plutil; do
+for tool in cargo codesign ditto plutil; do
   command -v "$tool" >/dev/null || { echo "Missing $tool: install Xcode's Command Line Tools (xcode-select --install) and Rust (https://rustup.rs)." >&2; exit 1; }
 done
 
@@ -41,12 +41,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$target_dir/release/Praetorium" "$app/Contents/MacOS/Praetorium"
 
-# The icon is drawn in code (crates/nexus-app/src/icon.rs); iconutil turns the rendered sizes into an .icns.
-iconset="$out/Praetorium.iconset"
-rm -rf "$iconset"
-cargo +1.100.0 run --locked --quiet --release -p nexus-app --example macos_iconset -- "$iconset" >/dev/null
-iconutil -c icns -o "$app/Contents/Resources/Praetorium.icns" "$iconset"
-rm -rf "$iconset"
+cp assets/branding/praetorium.icns "$app/Contents/Resources/Praetorium.icns"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
