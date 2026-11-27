@@ -725,7 +725,7 @@ impl Processor {
         // Inara: the mapper tracks state from every event.
         let inara_events = self.inara.on_event(name, &ev, &self.session, ctx);
         if allowed && !inara_events.is_empty() {
-            self.queue_inara(inara_events, ctx, now);
+            self.queue_inara(inara_events, ctx, now, None);
         }
 
         // EDSM
@@ -795,7 +795,7 @@ impl Processor {
 
         let inara_events = self.inara.on_companion(c);
         if !inara_events.is_empty() && self.journal_sync_allowed(ctx, None, true) {
-            self.queue_inara(inara_events, ctx, now);
+            self.queue_inara(inara_events, ctx, now, None);
         }
     }
 
@@ -855,27 +855,30 @@ impl Processor {
         if out.is_empty() || session.is_beta(ctx) || !session.is_live_galaxy(ctx) || session.blocked(None).is_some() {
             return;
         }
-        let shared = self.shared.clone();
-        let config = shared.config.read();
-        if config.inara_snapshot_key().is_none_or(|configured| fingerprint(&[configured]) != key) {
+        // The current epoch may have retired the live LoadGame while keeping its Fileheader.
+        // Attribute the snapshot using its replay, and require it to match the verified context.
+        if ctx.fid.is_empty() || session.fid(ctx) != Some(ctx.fid.as_str())
+            || !session.cmdr(ctx).is_some_and(|cmdr| cmdr.eq_ignore_ascii_case(&ctx.cmdr))
+        {
             return;
         }
-        self.queue_inara(out, ctx, Timestamp::now());
+        self.queue_inara(out, ctx, Timestamp::now(), Some(&session));
         self.shared.inara.flush.store(true, Ordering::Relaxed);
         self.shared.inara.wake();
     }
 
-    fn queue_inara(&mut self, events: Vec<InaraEvent>, ctx: &UploadContext, now: Timestamp) {
-        let (Some(creds), Some(cmdr)) = (self.cfg.inara_sending().cloned(), self.session.cmdr(ctx).map(str::to_string)) else {
+    fn queue_inara(&mut self, events: Vec<InaraEvent>, ctx: &UploadContext, now: Timestamp, replay: Option<&Session>) {
+        let session = replay.unwrap_or(&self.session);
+        let (Some(creds), Some(cmdr)) = (self.cfg.inara_sending().cloned(), session.cmdr(ctx).map(str::to_string)) else {
             return;
         };
+        let fid = session.fid(ctx).unwrap_or_default().to_string();
         let key = fingerprint(&[&creds.api_key]);
         let shared = self.shared.clone();
         if !self.bound("inara", key, &cmdr, None, &shared.inara.counters) {
             return;
         }
         let cmdr = cmdr.as_str();
-        let fid = self.session.fid(ctx).unwrap_or_default().to_string();
         {
             let mut q = self.shared.inara.queue.lock();
             for e in events {
@@ -1373,11 +1376,13 @@ async fn run_inara(shared: Arc<Shared>) {
                     }
                     batch.push((e.id, e.item.clone()));
                 }
+            } else {
+                // Clear the flush while holding the same lock used to enqueue a snapshot.
+                svc.flush.store(false, Ordering::Relaxed);
             }
             batch
         };
         let Some((_, first)) = batch.first() else {
-            svc.flush.store(false, Ordering::Relaxed);
             idle(&svc.notify, Duration::from_secs(300)).await;
             continue;
         };

@@ -746,6 +746,28 @@ fn a_profile_sync_never_sends_a_past_mission() {
     assert!(!sent.iter().any(|e| e.contains("Mission")), "nothing from before sync was on: {sent:?}");
 }
 
+#[test]
+fn profile_snapshot_uses_verified_replay_after_partial_live_session() {
+    let cfg = inara_cfg();
+    let mut h = Harness::new(cfg.clone(), RecordingTransport::simulated());
+    let mut processor = Processor::new(h.uplink().shared.clone(), cfg.clone());
+    let at = Timestamp(Timestamp::now().0 - 120);
+    let rows: Vec<_> = [FILEHEADER, LOADGAME, RANKS[0], RANKS[1]]
+        .into_iter().map(|body| live_event(body, at).raw).collect();
+    // The previous epoch may consume Fileheader before its queued LoadGame is retired.
+    processor.on_event(&rows[0], &UploadContext::default());
+    for row in &rows {
+        h.tracker.apply(row);
+    }
+    let key = fingerprint(&[cfg.inara_snapshot_key().unwrap()]);
+    processor.inara_snapshot(&rows, h.tracker.context(), key);
+    assert!(h.wait_for(|requests| inara_events(requests).iter().any(|e| e == "setCommanderRankPilot")));
+    let request = h.transport.requests_to(inara::API_URL).pop().unwrap();
+    let body: Value = serde_json::from_str(&request.body_text()).unwrap();
+    assert_eq!(body["header"]["commanderName"], "Jameson");
+    assert_eq!(body["header"]["commanderFrontierID"], "F1");
+}
+
 /// Pausing drops what was queued but not sent yet, as switching a service off does.
 #[test]
 fn pausing_drops_the_queue() {
