@@ -559,7 +559,11 @@ impl NexusApp {
                 items.push(CapItem::new(text, if trouble { pal::WARN } else { pal::DIM }, false).action(CapAction::Accounts).tip("Uploads sent this session (EDDN / EDSM / Inara / EDAstro). Click for details."));
             }
             // One button pauses or resumes every upload that's on; Accounts & sync has a switch for each.
-            let uploads = self.settings.accounts.uploads();
+            let uploads = if crate::sync::OUTBOUND_AUTHORIZED && !crate::launch::isolated() {
+                self.settings.accounts.uploads()
+            } else {
+                Vec::new()
+            };
             if !uploads.is_empty() {
                 let names: Vec<&str> = uploads.iter().map(|u| u.0).collect();
                 let paused: Vec<&str> = uploads.iter().filter(|u| u.1).map(|u| u.0).collect();
@@ -1479,7 +1483,12 @@ impl NexusApp {
         let side = if wide { 32 } else { 24 };
         egui::CentralPanel::default()
             .frame(Frame::new().fill(pal::WINDOW).inner_margin(Margin { left: side, right: side, top: 20, bottom: 16 }))
-            .show(ui, |ui| self.content(ui));
+            .show(ui, |ui| {
+                if crate::launch::isolated() {
+                    widgets::footnote(ui, "ISOLATED TEST MODE — services and protected actions disabled; default test profile is temporary.");
+                }
+                self.content(ui);
+            });
         if !self.settings.welcomed && self.shot.is_none() && matches!(self.core.status.read().phase, Phase::Live) {
             let files = self.core.status.read().files;
             let ctx = ui.ctx().clone();

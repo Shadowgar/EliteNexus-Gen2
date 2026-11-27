@@ -4,6 +4,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 
 ## Next
 
+- [ ] **REC-01 — Restore inherited gameplay functionality (priority).** Draft restores the Spansh HTTPS API and configured Ask providers in ordinary mode, while retaining isolation and credential validation. Verify normal-mode exobiology, exploration, all route planners, outfitting and material searches, plus user-authorized model requests. No external calls or paid AI tests performed during implementation. Review EDDN, EDSM, Inara and EDAstro separately before enabling uploads; keep Inara application approval and independent updater signing requirements. Review restricted historical tools and user-confirmed route actions separately. Fix misleading isolation and effective service status, verify persistent key storage, surface settings write failures, and check functional parity before resuming enhancements. Existing G2 scope and interrupted G2-026/027 work remain intact.
+
 - [x] **DEV-01 — Local alpha build and initial dashboard acceptance:** owner reports targeted changelog regression passed; locked Rust 1.100.0 Windows release build at `8dd4efb` succeeded in 8m 35s using a short persistent Cargo target (three nonblocking manifest warnings). Owner screenshot confirms Praetorium 0.1.0-alpha.1, commander/ship/location data and offline isolated dashboard. Live journal updates, explicit profile-separation acceptance and effective Codex configuration remain unverified; no full workspace verification or release approval implied.
 - [ ] **DEV-02 — Measure workflow during normal feature development:** record actual same-account quota before/after a fresh focused assignment and compare local usage counters when available. Do not commission a separate AI assignment solely to measure usage. Keep raw session records private.
 
@@ -39,6 +41,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [ ] **G2-036 — Isolated clipboard UI.** Make the unavailable next-system clipboard action explicit without overwriting the ordinary saved preference.
 
 ## 01D-W — Comprehensive gameplay regression testing
+
+- [x] Owner reports Windows release build at `4d4b484`, Rust 1.100.0, `C:/PraetoriumBuild`, 5m 41s, three nonblocking manifest warnings. Initial normal-mode smoke showed EDDN reception and journal state; blocked Spansh Bonus hunt exposed service parity regression. Automated desktop regressions, consolidated gameplay and recovery revision compilation remain outstanding.
 
 - [ ] G2-033 (market/carrier scope): compile Praetorium and run the Deals and Navigation worker regressions. Verify terminal errors and retry in Market and Fleet Carrier Navigation, and change commander, journal source and selected carrier during requests.
 

@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Restore normal-mode Spansh searches and route planners and configured Ask model providers without removing isolation, credential binding or HTTPS transport safeguards. Clearly identify isolated runs and suppress misleading upload toolbar controls while outbound sync is disabled. Local compile and gameplay verification are pending.
+
 - Market and fleet carrier tasks show an error and allow retry if their worker fails or exits early. A new Deals scan can start while a superseded scan finishes.
 
 - Fleet and squadron carrier routes and jump history use verified journal movement for the specific carrier. The desktop and assistant show scheduled destinations and unconfirmed arrivals separately from the last confirmed system.

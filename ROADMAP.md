@@ -17,7 +17,8 @@ The original phase and G2 requirement identifiers are retained for traceability.
 | 01D-A | Storage and protected operation safety | Integrated; historical Windows and hosted checks passed |
 | 01E | Praetorium identity, versioning and repository consolidation | Integrated; initial Windows alpha build and dashboard accepted |
 | 01D-B | Trading, market and fleet carriers | Implementation integrated — ENX-030–038; consolidated acceptance pending |
-| 01D-C | Exploration, exobiology, colonisation and statistics | Next — G2-026 and 027 together, then G2-028 |
+| Recovery | Restore inherited gameplay and service functionality | Priority before further enhancements; see REC-01 |
+| 01D-C | Exploration, exobiology, colonisation and statistics | Interrupted G2-026/027 work retained; resume after recovery review |
 | 01D-D | Build imports, fitting and remaining interface defects | Pending — G2-020, 032, remaining 033 and 036; 035 addressed by branding |
 | 01D-W | Comprehensive gameplay regression testing | Pending — affected gameplay journeys on the consolidated Windows build |
 | 02 | Performance and existing feature quality | Pending — G2-007, 008, 034 and measured refinements |

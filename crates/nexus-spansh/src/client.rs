@@ -41,7 +41,7 @@ pub struct Spansh {
 enum Access {
     #[default]
     Full,
-    PublicRecords,
+    PublicApi,
     Offline,
 }
 
@@ -50,12 +50,14 @@ impl Access {
         match self {
             Self::Full => true,
             Self::Offline => false,
-            Self::PublicRecords => url.strip_prefix(DEFAULT_BASE_URL)
-                .and_then(|path| path.strip_prefix('/'))
-                .and_then(|path| path.split_once('/'))
-                .is_some_and(|(resource, id)| {
-                    matches!(resource, "system" | "body" | "station" | "dump") && id.parse::<u64>().is_ok()
-                }),
+            Self::PublicApi => reqwest::Url::parse(url).is_ok_and(|parsed| {
+                parsed.scheme() == "https"
+                    && parsed.host_str() == Some("spansh.co.uk")
+                    && parsed.port_or_known_default() == Some(443)
+                    && parsed.username().is_empty()
+                    && parsed.password().is_none()
+                    && parsed.path().starts_with("/api/")
+            }),
         }
     }
 }
@@ -229,10 +231,11 @@ impl Spansh {
         SpanshBuilder::default()
     }
 
-    /// Gen2 keeps documented public records separate from unapproved hosted search and planner jobs.
+    /// Application client: preserve the public Spansh search and planner API in normal runs.
+    /// Isolated runs refuse all transport; normal runs are confined to the service's HTTPS API.
     pub fn gen2(offline: bool, max_concurrent: usize) -> Self {
         let builder = SpanshBuilder {
-            access: if offline { Access::Offline } else { Access::PublicRecords },
+            access: if offline { Access::Offline } else { Access::PublicApi },
             user_agent: concat!("Praetorium/", env!("CARGO_PKG_VERSION")).into(),
             max_concurrent: max_concurrent.max(1),
             ..Default::default()
@@ -282,7 +285,12 @@ impl Spansh {
     /// Send a request (respecting the concurrency limit and cancellation) and read the body.
     async fn execute(&self, request: reqwest::RequestBuilder, url: &str) -> Result<Reply> {
         if !self.inner.access.allows(url) {
-            return Err(Error::InvalidRequest("this Spansh operation is unavailable in Gen2".into()));
+            let reason = if matches!(self.inner.access, Access::Offline) {
+                "Spansh is unavailable in this offline or isolated session"
+            } else {
+                "Spansh requests must stay within its HTTPS API"
+            };
+            return Err(Error::InvalidRequest(reason.into()));
         }
         let work = async {
             let _permit = self
@@ -569,21 +577,30 @@ mod access_tests {
     use super::*;
 
     #[test]
-    fn gen2_spansh_allows_only_documented_numeric_records() {
-        assert!(Access::PublicRecords.allows(&format!("{DEFAULT_BASE_URL}/system/42")));
-        for endpoint in ["systems/search", "generic/route", "results/job", "system/name", "system/42?filter=yes"] {
-            assert!(!Access::PublicRecords.allows(&format!("{DEFAULT_BASE_URL}/{endpoint}")));
+    fn normal_application_preserves_public_search_and_route_access() {
+        let online = Spansh::gen2(false, 2);
+        let offline = Spansh::gen2(true, 1);
+        for endpoint in ["system/42", "systems/search", "bodies/search", "stations/search",
+            "generic/route", "carrier/route", "exobiology/route", "riches/route", "results/job"] {
+            assert!(online.inner.access.allows(&online.url(endpoint)), "{endpoint}");
+            assert!(!offline.inner.access.allows(&offline.url(endpoint)), "{endpoint}");
         }
-        assert!(!Access::Offline.allows(&format!("{DEFAULT_BASE_URL}/system/42")));
-        assert!(!Access::PublicRecords.allows("https://example.invalid/api/system/42"));
+        for url in ["https://example.invalid/api/system/42", "http://spansh.co.uk/api/system/42",
+            "https://spansh.co.uk:444/api/system/42", "https://spansh.co.uk.evil.invalid/api/system/42",
+            "https://user@spansh.co.uk/api/system/42", "https://spansh.co.uk/api/../other"] {
+            assert!(!Access::PublicApi.allows(url), "{url}");
+        }
     }
 
     #[tokio::test]
     async fn blocked_calls_fail_before_transport() {
-        for client in [Spansh::gen2(true, 1), Spansh::gen2(false, 1)] {
-            let url = client.url("systems/search");
-            let result = client.execute(client.inner.http.post(&url), &url).await;
-            assert!(matches!(result, Err(Error::InvalidRequest(_))));
-        }
+        let offline = Spansh::gen2(true, 1);
+        let url = offline.url("systems/search");
+        let result = offline.execute(offline.inner.http.post(&url), &url).await;
+        assert!(matches!(result, Err(Error::InvalidRequest(_))));
+        let online = Spansh::gen2(false, 1);
+        let url = "https://example.invalid/api/system/42";
+        let result = online.execute(online.inner.http.get(url), url).await;
+        assert!(matches!(result, Err(Error::InvalidRequest(_))));
     }
 }

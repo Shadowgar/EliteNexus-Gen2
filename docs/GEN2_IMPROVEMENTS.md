@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 38 substantive entries, ENX-001 through ENX-038.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 39 substantive entries, ENX-001 through ENX-039.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -350,6 +350,12 @@ The committed-update identity is in memory. Market precedence, persisted observa
 - Three shared worker regressions passed in a standalone harness on Rust 1.100.0 with `C:/PraetoriumBuild`. Application compilation, the Deals and Navigation regressions, and runtime acceptance are tracked in 01D-W. The remaining consumers are tracked in 01D-D.
 
 **Integration:** [PR #14](https://github.com/Shadowgar/Praetorium/pull/14), [`6986aaa`](https://github.com/Shadowgar/Praetorium/commit/6986aaa5af3b4b496cd555f11c88aa75881a3a18). Scoped static review of completion handling, request retirement, market worker retries and carrier navigation. Three standalone worker tests reported passed; not an application build. Retiring a receiver does not cancel its underlying work; assess overlapping retired reads in consolidated acceptance/performance measurements. Remaining consumers retain their 01D-D scope. Application verification remains deferred to 01D-W.
+
+## Recovery — Inherited functionality
+
+### ENX-039 — Restore existing service capabilities (REC-01)
+
+**Status:** Draft implementation, not integrated or runtime verified. Supersedes the excessive normal-mode Spansh and hosted-model restrictions in ENX-021, not the isolated-mode, credential, journal ownership or independent signing protections. The owner reported blocked Bonus hunt during normal-mode gameplay and apparent key loss and inactive links during isolated launches. Normal-mode Spansh API access is confined to its HTTPS origin, with existing request limits, timeout, cancellation and redirect denial retained. Configured Gemini, Claude, Local and Custom models are permitted through the existing destination and credential validation. Isolated runs remain blocked. Account links explain isolation and upload toolbar controls reflect effective availability rather than saved preferences. Existing scoped tool restrictions and outbound sync remain unchanged. No live AI calls, service uploads, build, or test execution performed by this review; new policy regressions are included for local execution. See REC-01 for remaining parity work. The owner reported a successful Windows release build of `4d4b484`, not this recovery revision. Public service references: https://docs.spansh.co.uk/, https://github.com/EDCD/EDDN/blob/master/schemas/README-EDDN-schemas.md, https://www.edsm.net/en/api-journal-v1, https://inara.cz/elite/inara-api-devguide/, https://edastro.com/journals/upload.html. Evaluate each outbound service's actual requirements and payloads rather than assuming universal application whitelisting.
 
 ## Upstream review opportunities
 

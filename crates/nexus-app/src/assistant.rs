@@ -125,7 +125,7 @@ impl AssistantService {
             self.status = None;
             self.exchanges.push(Exchange {
                 question,
-                answer: Some(Err("This Gen2 draft permits only local model connections on loopback. Isolated runs disable model connections.".into())),
+                answer: Some(Err(if crate::launch::isolated() { "Model connections are unavailable in isolated mode." } else { "The model address is invalid. Use HTTPS or a loopback HTTP address." }.into())),
                 tools: Vec::new(),
                 usage: Usage::default(),
                 stopped: false,
@@ -237,7 +237,7 @@ impl AssistantService {
 }
 
 fn model_service_allowed(isolated: bool, cfg: &ProviderConfig) -> bool {
-    !isolated && cfg.kind == nexus_ai::ProviderKind::Local && cfg.destination().is_ok_and(|destination| destination.is_loopback())
+    !isolated && cfg.destination().is_ok()
 }
 
 struct Guarded<'a> {
@@ -337,11 +337,16 @@ mod tests {
     }
 
     #[test]
-    fn model_gate_blocks_cloud_and_isolated_sessions_before_discovery() {
-        use nexus_ai::ProviderKind::{Custom, Gemini, Local};
+    fn model_gate_preserves_configured_providers_and_blocks_isolated_sessions() {
+        use nexus_ai::ProviderKind::{Claude, Custom, Gemini, Local};
         for (kind, url, expected) in [
-            (Gemini, "", false), (Custom, "https://localhost/v1", false),
-            (Local, "https://example.invalid/v1", false), (Local, "http://127.0.0.1:7/v1", true),
+            (Gemini, "", true), (Claude, "", true),
+            (Custom, "https://api.openai.com/v1", true),
+            (Local, "https://example.invalid/v1", true),
+            (Local, "http://127.0.0.1:7/v1", true),
+            (Custom, "http://example.invalid/v1", false),
+            (Custom, "https://user:password@example.invalid/v1", false),
+            (Custom, "https://example.invalid/v1?key=fixture", false),
         ] {
             let cfg = ProviderConfig::new(kind, url.into(), "fixture".into());
             assert_eq!(model_service_allowed(false, &cfg), expected);

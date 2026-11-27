@@ -95,14 +95,23 @@ fn key_row(g: &mut Group, stored: &mut String, input: &mut String, error: &mut O
 
 fn link_row(g: &mut Group, text: &str, url: &str) {
     g.content(|ui| {
-        ui.hyperlink_to(format!("{text} {}", icon::ARROW_SQUARE_OUT), url);
+        if crate::launch::isolated() {
+            footnote(ui, &format!("{text} — external links are disabled in isolated mode."));
+        } else {
+            ui.hyperlink_to(format!("{text} {}", icon::ARROW_SQUARE_OUT), url);
+        }
     });
 }
 
 /// Returns true if settings changed.
 pub fn show(ui: &mut Ui, acc: &mut Accounts, st: &mut AccountsUi, cmdr_name: &str, status: &StatusView) -> bool {
     let mut changed = false;
-    footnote(ui, "Praetorium outbound sync is unavailable pending service approval. The EDDN receive switch controls the separate public market feed.");
+    if !crate::sync::OUTBOUND_AUTHORIZED {
+        footnote(ui, "Outbound sync is disabled in this build. Upload switches and keys below are saved preferences only; no data will be sent. EDDN reception is independent.");
+    }
+    if crate::launch::isolated() {
+        footnote(ui, "Isolated mode: all service traffic and external links are disabled. The default test profile is temporary and settings do not carry over to a new launch.");
+    }
     footnote(ui, &format!("Sync preferences and API keys are local. Keys are {}. Each approved service requires opt-in before it can send data.", secrets::KEPT));
     ui.add_space(4.0);
     if acc.edsm_commander.is_empty() && !cmdr_name.is_empty() {
