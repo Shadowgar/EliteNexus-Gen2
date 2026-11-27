@@ -316,3 +316,9 @@ The smallest standalone reviews are Windows credential protection failure handli
 [b-position]: https://github.com/Shadowgar/Praetorium/commit/920d775bb7742549a2dd275861ee960390acb601
 [b-log]: https://github.com/Shadowgar/Praetorium/commit/eb8845ccd4c6815485dc934c838970e2a7bce352
 [b-head]: https://github.com/Shadowgar/Praetorium/commit/ffa123193f0167cc062ab2c7454898351666d563
+
+### ENX-033 — Market quote freshness (G2-024A)
+
+- **Behavior.** Find commodity re-reads open lists and selected details every 30 seconds. EDDN receipt and Spansh station times no longer stand in for quote observation times. Desktop views can show **Age unknown**, and Ask returns a null age for undated quotes. Bounded searches exclude those quotes. G2-022 field precedence continues to govern replacements.
+- **Code and compatibility.** The changes apply to galaxy ingestion and queries and their desktop and Ask consumers. The existing zero timestamp represents unknown freshness. Earlier databases may contain fallback times that cannot be distinguished from observation times using stored data. The correction applies as reports are ingested.
+- **Evidence.** On Windows with Rust 1.100.0 and the shared Cargo target, the focused nexus-galaxy integration test filters quote_freshness, market_precedence and same_timestamp_market_replacement_reconciles_price_history passed seven tests on 2e1dbc7. Application test compilation and desktop and Ask runtime verification are deferred to 01D-W.

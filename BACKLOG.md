@@ -16,7 +16,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [x] **ENX-030 — Carrier transfer balance reconciliation.** Integrated from PR #6; reported zero is authoritative, missing balance retains transfer arithmetic. Focused red/green regression reported on Rust 1.100.0. This is separate from G2-004.
 - [x] **G2-004 (REL-01A / ENX-031) — Known zero-credit trade budget.** Integrated from PR #7. Shared route search enforces zero; unknown balance leaves affordability unchecked; Ask supports an explicit hypothetical budget. Focused galaxy and commander-balance regressions reported passed. Ask test initially failed to compile due to an incorrect write-lock unwrap; corrected in `ee7cb85`, with compilation and execution deferred to 01D-W by owner direction.
 - [x] **G2-022 (ENX-032) — Market precedence.** Integrated from PR #8. Independent field clocks and sources, deterministic ties, incomplete report preservation, carrier location/access protection, schema-3 migration and same-time history reconciliation. Reported 27 galaxy tests passed at `22d8dc7`; focused history regression red/green at `a4ab34a`. Legacy history reconstruction is limited to existing points at the replaced timestamp. Production-size migration and live acceptance deferred to 01D-W.
-- [ ] **G2-024 — Market freshness, deals, alerts and access.** Refresh quotes, include relevant origin/payload inputs in request identity, scope alert generations, and distinguish open, restricted and unknown carrier access across desktop and assistant tools.
+- [ ] **G2-024A (ENX-033) — Market quote freshness.** Refresh open commodity quotes, use the market observation time and preserve unknown age.
+- [ ] **G2-024 (remaining scope) — Deals, alerts and access.** Include relevant origin and payload inputs in Deals request identity, scope alert generations, and distinguish open, restricted and unknown carrier access across desktop and assistant tools.
 - [ ] **G2-025 — Carrier movement authority.** Separate jump requests, estimates and verified movements by carrier identity. Do not infer authoritative route advancement or duplicate history from unrelated or repeated observations.
 - [ ] **G2-033 (market/carrier scope) — Worker outcomes.** Handle terminal failures and disconnected workers; retire superseded results and permit retry. Leave unrelated workers for 01D-D.
 
@@ -35,6 +36,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [ ] **G2-036 — Isolated clipboard UI.** Make the unavailable next-system clipboard action explicit without overwriting the ordinary saved preference.
 
 ## 01D-W — Comprehensive gameplay regression testing
+
+- [ ] G2-024A: compile the application tests and exercise Find commodity refresh, quote expiry and unknown-age presentation in the desktop and Ask workflows.
 
 - [ ] G2-022: test schema-3 migration on a disposable production-size schema-2 database copy, preserve rollback backup (older builds reject schema 3), exercise live market/carrier history, and measure added provenance/history storage.
 
