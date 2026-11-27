@@ -61,6 +61,7 @@ pub struct PendingJump {
     pub system: String,
     pub system_address: u64,
     pub body: Option<String>,
+    pub body_id: Option<u32>,
     pub departure: Option<Timestamp>,
     pub requested: Timestamp,
 }
@@ -83,26 +84,15 @@ pub mod timing {
     pub const CANCEL_CUTOFF_SECS: i64 = 10 * 60;
 }
 
-/// The jump the carrier made last, kept for the cooldown that follows it.
-#[derive(Debug, Clone, Default)]
-pub struct LastJump {
-    pub system: String,
-    pub body: Option<String>,
-    /// When the journal saw the carrier arrive: `CarrierJump` (written to a commander aboard) or a
-    /// `CarrierLocation` in the new system. None when only the departure time is known.
-    pub arrived: Option<Timestamp>,
-    pub departed: Option<Timestamp>,
-}
-
 /// What the carrier's jump drive is doing at a given moment.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JumpTimer {
     /// A jump is scheduled. `departs` is None if the journal left the departure time out.
     Countdown { to: String, body: Option<String>, departs: Option<Timestamp> },
-    /// The carrier jumped and can't jump again until `ready`. `estimated` when the journal didn't
-    /// record the arrival (the commander wasn't aboard): then it's counted from the departure,
-    /// and the real end comes a little later, by however long the jump itself took.
-    Cooldown { at: String, body: Option<String>, ready: Timestamp, estimated: bool },
+    /// The scheduled departure passed. The earliest estimated cooldown end uses that departure.
+    AwaitingConfirmation { to: String, body: Option<String>, departs: Timestamp, earliest_ready: Timestamp },
+    /// A movement was observed. The cooldown is estimated from the observation time.
+    Cooldown { at: String, body: Option<String>, ready: Timestamp },
 }
 
 impl JumpTimer {
@@ -110,6 +100,7 @@ impl JumpTimer {
     pub fn left(&self, now: Timestamp) -> Option<i64> {
         match self {
             JumpTimer::Countdown { departs, .. } => departs.map(|d| (d.0 - now.0).max(0)),
+            JumpTimer::AwaitingConfirmation { earliest_ready, .. } => (now < *earliest_ready).then(|| earliest_ready.0 - now.0),
             JumpTimer::Cooldown { ready, .. } => Some((ready.0 - now.0).max(0)),
         }
     }
@@ -147,11 +138,11 @@ pub struct Carrier {
     pub system: Option<String>,
     pub system_address: Option<u64>,
     pub body_id: Option<u32>,
-    /// When the journal last placed the carrier in `system` (zero when it never has); after a jump nobody saw
-    /// arrive, the departure time.
+    /// When the journal last placed the carrier in `system` (zero when it never has).
     pub located: Timestamp,
     pub pending_jump: Option<PendingJump>,
-    pub last_jump: Option<LastJump>,
+    /// The latest request, cancellation or observation that resolved a request.
+    request_updated: Timestamp,
     pub jumps: Vec<CarrierJumpRecord>,
     /// Market orders the commander set, by commodity symbol (`steel`).
     pub trade_orders: BTreeMap<String, TradeOrder>,
@@ -179,6 +170,11 @@ impl Carrier {
     }
 
     pub fn on_stats(&mut self, s: &ev::CarrierStats, ts: Timestamp) {
+        if s.carrier_id == 0 || ts < self.stats_updated
+            || (!self.mine(s.carrier_id) && ts <= self.stats_updated.max(self.located).max(self.request_updated))
+        {
+            return;
+        }
         // Another carrier of this kind: the old one was scrapped, or the commander changed squadrons.
         if self.id.is_some_and(|id| id != s.carrier_id) {
             *self = Carrier::default();
@@ -204,6 +200,9 @@ impl Carrier {
 
     /// A new carrier: nothing of an earlier one carries over.
     pub fn on_buy(&mut self, b: &ev::CarrierBuy, ts: Timestamp) {
+        if b.carrier_id == 0 || ts <= self.stats_updated.max(self.located).max(self.request_updated) {
+            return;
+        }
         *self = Carrier {
             id: Some(b.carrier_id),
             carrier_type: b.carrier_type.clone(),
@@ -232,100 +231,106 @@ impl Carrier {
         }
     }
 
-    pub fn on_jump_request(&mut self, r: &ev::CarrierJumpRequest, ts: Timestamp) {
-        if !self.mine(r.carrier_id) {
-            return;
+    pub fn on_jump_request(&mut self, r: &ev::CarrierJumpRequest, ts: Timestamp) -> bool {
+        if r.carrier_id == 0 || !self.mine(r.carrier_id) || r.system_name.is_empty() || ts <= self.request_updated || ts < self.located {
+            return false;
         }
         self.id.get_or_insert(r.carrier_id);
+        self.request_updated = ts;
         self.pending_jump = Some(PendingJump {
             system: r.system_name.clone(),
             system_address: r.system_address,
             body: r.body.clone(),
+            body_id: r.body_id,
             departure: r.departure_time.as_deref().and_then(Timestamp::parse),
             requested: ts,
         });
+        true
     }
 
-    pub fn on_jump_cancelled(&mut self, c: &ev::CarrierLocation) {
-        if self.mine(c.carrier_id) {
+    pub fn on_jump_cancelled(&mut self, c: &ev::CarrierLocation, ts: Timestamp) {
+        if c.carrier_id != 0 && self.mine(c.carrier_id) && ts >= self.request_updated {
+            self.id.get_or_insert(c.carrier_id);
+            self.request_updated = ts;
             self.pending_jump = None;
         }
     }
 
     pub fn on_location(&mut self, l: &ev::CarrierLocation, ts: Timestamp) {
-        if !self.mine(l.carrier_id) {
+        let Some(system) = l.star_system.as_deref().filter(|s| !s.is_empty()) else { return };
+        if l.carrier_id == 0 || !self.mine(l.carrier_id) {
             return;
         }
-        self.id.get_or_insert(l.carrier_id);
-        let moved = self.system_address.is_some() && self.system_address != l.system_address;
-        if moved
-            && let Some(sys) = &l.star_system {
-                self.jumps.push(CarrierJumpRecord { ts, system: sys.clone(), body: None });
-            }
-        if l.star_system.is_some() {
-            self.system = l.star_system.clone();
-            self.located = ts;
-        }
-        self.system_address = l.system_address.or(self.system_address);
-        self.body_id = l.body_id;
-        if self.pending_jump.as_ref().is_some_and(|p| Some(p.system_address) == l.system_address)
-            && let Some(p) = self.pending_jump.take()
-        {
-            self.last_jump = Some(LastJump { system: p.system, body: p.body, arrived: Some(ts), departed: p.departure });
+        if ts > self.located && ts >= self.request_updated {
+            self.id.get_or_insert(l.carrier_id);
+            self.observe(system, l.system_address, l.body_id, ts, false, None);
         }
     }
 
     /// The commander is docked on a carrier that jumped (CarrierJump event).
     pub fn on_carrier_jump(&mut self, a: &ev::SystemArrival, ts: Timestamp) {
-        if a.market_id.is_some() && a.market_id == self.id {
-            self.system = Some(a.star_system.clone());
-            self.system_address = Some(a.system_address);
-            self.body_id = a.body_id;
-            self.located = ts;
-            self.jumps.push(CarrierJumpRecord { ts, system: a.star_system.clone(), body: a.body.clone() });
-            let departed = self.pending_jump.take().and_then(|p| p.departure);
-            self.last_jump = Some(LastJump { system: a.star_system.clone(), body: a.body.clone(), arrived: Some(ts), departed });
+        if a.market_id.is_some() && a.market_id == self.id && a.docked != Some(false) && !a.star_system.is_empty()
+            && ts > self.located && ts >= self.request_updated
+        {
+            self.observe(&a.star_system, Some(a.system_address), a.body_id, ts, true, a.body.as_deref());
         }
     }
 
-    /// Our own carrier jump has departed long enough ago that it must have arrived.
-    pub fn settle_pending(&mut self, now: Timestamp) {
-        let arrived = self.pending_jump.as_ref().and_then(|p| p.departure).is_some_and(|d| now.0 > d.0 + 60 * 5);
-        if arrived
-            && let Some(p) = self.pending_jump.take() {
-                self.system = Some(p.system.clone());
-                self.system_address = Some(p.system_address);
-                self.located = p.departure.unwrap_or(now);
-                self.jumps.push(CarrierJumpRecord { ts: p.departure.unwrap_or(now), system: p.system.clone(), body: p.body.clone() });
-                self.last_jump = Some(LastJump { system: p.system, body: p.body, arrived: None, departed: p.departure });
-            }
+    fn observe(&mut self, system: &str, address: Option<u64>, body_id: Option<u32>, ts: Timestamp, explicit_jump: bool, body: Option<&str>) {
+        let address = address.filter(|a| *a != 0);
+        let same_system = |name: &str, known_address: Option<u64>| match (address, known_address) {
+            (Some(seen), Some(known)) => seen == known,
+            _ => system.eq_ignore_ascii_case(name),
+        };
+        let same_place = self.system.as_deref().is_some_and(|name| same_system(name, self.system_address));
+        let changed = self.system.is_some()
+            && (!same_place || self.body_id.zip(body_id).is_some_and(|(old, new)| old != new));
+        let matching_request = self.pending_jump.as_ref().filter(|p| {
+            ts >= p.departure.unwrap_or(p.requested)
+                && same_system(&p.system, (p.system_address != 0).then_some(p.system_address))
+                && p.body_id.is_none_or(|id| Some(id) == body_id)
+        });
+        self.system = Some(system.to_owned());
+        self.system_address = address.or(self.system_address.filter(|_| same_place));
+        self.body_id = body_id.or(self.body_id.filter(|_| same_place));
+        self.located = ts;
+
+        // A matching snapshot can verify arrival at the first known position. For a repeat
+        // position, an explicit jump can supply confirmation that the snapshot alone could not.
+        let confirms_request = matching_request.is_some() && (changed || !same_place || explicit_jump);
+        let already_recorded = same_place && matching_request.is_some_and(|p| {
+            self.jumps.last().is_some_and(|j| j.ts >= p.requested && j.system.eq_ignore_ascii_case(system))
+        });
+        let request_body = if confirms_request {
+            self.request_updated = ts;
+            self.pending_jump.take().and_then(|p| p.body)
+        } else {
+            None
+        };
+        if changed || (!same_place && explicit_jump) || (confirms_request && !already_recorded) {
+            self.jumps.push(CarrierJumpRecord { ts, system: system.to_owned(), body: body.map(str::to_owned).or(request_body) });
+        }
     }
 
-    /// The jump countdown or cooldown running at `now`; None when the carrier is free to jump.
-    /// Once the departure time has passed the cooldown starts, counted from the departure until
-    /// the journal shows the arrival.
+    /// The scheduled countdown, an unconfirmed departure, or the cooldown following verified movement.
     pub fn jump_timer(&self, now: Timestamp) -> Option<JumpTimer> {
         use timing::COOLDOWN_SECS;
         if let Some(p) = &self.pending_jump {
             return match p.departure {
-                Some(d) if now.0 >= d.0 => {
-                    let ready = Timestamp(d.0 + COOLDOWN_SECS);
-                    (now.0 < ready.0).then(|| JumpTimer::Cooldown { at: p.system.clone(), body: p.body.clone(), ready, estimated: true })
-                }
+                Some(d) if now >= d => Some(JumpTimer::AwaitingConfirmation { to: p.system.clone(), body: p.body.clone(), departs: d, earliest_ready: Timestamp(d.0 + COOLDOWN_SECS) }),
                 departs => Some(JumpTimer::Countdown { to: p.system.clone(), body: p.body.clone(), departs }),
             };
         }
-        let j = self.last_jump.as_ref()?;
-        let from = j.arrived.or(j.departed)?;
-        let ready = Timestamp(from.0 + COOLDOWN_SECS);
-        (now.0 < ready.0).then(|| JumpTimer::Cooldown { at: j.system.clone(), body: j.body.clone(), ready, estimated: j.arrived.is_none() })
+        let j = self.jumps.last()?;
+        let ready = Timestamp(j.ts.0 + COOLDOWN_SECS);
+        (now < ready).then(|| JumpTimer::Cooldown { at: j.system.clone(), body: j.body.clone(), ready })
     }
 
     /// A rough time, in seconds, until `jumps` more jumps have arrived: whatever countdown or
     /// cooldown is running (a running countdown counts as the first of those jumps), then the
     /// usual 15-minute countdown for each jump and a 5-minute cooldown between them. Busy servers
     /// and the jumps themselves add time, so treat it as a minimum.
-    pub fn route_estimate(&self, now: Timestamp, jumps: u32) -> i64 {
+    pub fn route_estimate(&self, now: Timestamp, next_system: &str, jumps: u32) -> i64 {
         use timing::{COOLDOWN_SECS, PREPARE_SECS};
         let n = i64::from(jumps);
         if n == 0 {
@@ -333,7 +338,12 @@ impl Carrier {
         }
         let rest = |legs: i64| legs * PREPARE_SECS + (legs - 1).max(0) * COOLDOWN_SECS;
         match self.jump_timer(now) {
-            Some(t @ JumpTimer::Countdown { departs: Some(_), .. }) => t.left(now).unwrap_or(0) + (n - 1) * (COOLDOWN_SECS + PREPARE_SECS),
+            Some(JumpTimer::Countdown { to, departs: Some(d), .. }) if to.eq_ignore_ascii_case(next_system) => {
+                (d.0 - now.0) + (n - 1) * (COOLDOWN_SECS + PREPARE_SECS)
+            }
+            Some(JumpTimer::AwaitingConfirmation { to, earliest_ready, .. }) if to.eq_ignore_ascii_case(next_system) => {
+                if n == 1 { 0 } else { (earliest_ready.0 - now.0).max(0) + rest(n - 1) }
+            }
             Some(t @ JumpTimer::Cooldown { .. }) => t.left(now).unwrap_or(0) + rest(n),
             _ => rest(n),
         }
@@ -462,69 +472,84 @@ mod tests {
     }
 
     #[test]
-    fn request_then_cancel_clears_the_countdown() {
+    fn movement_cancellation_retires_the_request() {
         let mut c = own();
         assert_eq!(c.jump_timer(at(0)), None, "no jump scheduled");
         request(&mut c, 0);
         let t = c.jump_timer(at(60)).expect("countdown");
         assert!(matches!(&t, JumpTimer::Countdown { to, departs: Some(d), .. } if to == "Beta" && *d == at(PREPARE_SECS)));
         assert_eq!(t.left(at(60)), Some(PREPARE_SECS - 60));
-        c.on_jump_cancelled(&ev::CarrierLocation { carrier_id: ID, ..Default::default() });
+        c.on_jump_cancelled(&ev::CarrierLocation { carrier_id: ID, ..Default::default() }, at(61));
+        request(&mut c, 0); // Replaying the cancelled request cannot revive it.
         assert_eq!(c.jump_timer(at(61)), None, "a cancelled jump leaves nothing to count");
-        assert!(c.last_jump.is_none());
+        assert!(c.jumps.is_empty());
     }
 
     #[test]
-    fn request_jump_cooldown_ready() {
+    fn movement_verified_jump_records_once_and_starts_cooldown() {
         let mut c = own();
         request(&mut c, 0);
         // Docked aboard: the journal writes CarrierJump on arrival, 40 s after departure.
         let arrival = PREPARE_SECS + 40;
-        let a = ev::SystemArrival { star_system: "Beta".into(), system_address: 200, body: Some("Beta A 1".into()), market_id: Some(ID), ..Default::default() };
+        let a = ev::SystemArrival { star_system: "Beta".into(), system_address: 200, body_id: Some(3), body: Some("Beta A 1".into()), market_id: Some(ID), ..Default::default() };
         c.on_carrier_jump(&a, at(arrival));
         assert!(c.pending_jump.is_none());
         assert_eq!(c.system.as_deref(), Some("Beta"));
         let t = c.jump_timer(at(arrival + 10)).expect("cooldown");
-        assert_eq!(t, JumpTimer::Cooldown { at: "Beta".into(), body: Some("Beta A 1".into()), ready: at(arrival + COOLDOWN_SECS), estimated: false });
+        assert_eq!(t, JumpTimer::Cooldown { at: "Beta".into(), body: Some("Beta A 1".into()), ready: at(arrival + COOLDOWN_SECS) });
         assert_eq!(t.left(at(arrival + 10)), Some(COOLDOWN_SECS - 10));
         assert_eq!(c.jump_timer(at(arrival + COOLDOWN_SECS)), None, "ready to jump again");
+        c.on_carrier_jump(&a, at(arrival));
+        c.on_location(&ev::CarrierLocation { carrier_id: ID, star_system: Some("Beta".into()), system_address: Some(200), body_id: Some(3), ..Default::default() }, at(arrival + 1));
+        c.on_location(&ev::CarrierLocation { carrier_id: ID, star_system: Some("Alpha".into()), system_address: Some(100), ..Default::default() }, at(arrival - 1));
+        assert_eq!(c.jumps.len(), 1);
+        assert_eq!(c.jumps[0].ts, at(arrival));
+        assert_eq!(c.system.as_deref(), Some("Beta"));
     }
 
     #[test]
-    fn departure_passed_without_arrival_starts_an_estimated_cooldown() {
+    fn movement_elapsed_timer_leaves_location_and_history_unchanged() {
         let mut c = own();
         request(&mut c, 0);
         // Not aboard: no CarrierJump. Past the departure time the cooldown runs from it.
-        let t = c.jump_timer(at(PREPARE_SECS + 30)).expect("cooldown");
-        assert_eq!(t, JumpTimer::Cooldown { at: "Beta".into(), body: Some("Beta A 1".into()), ready: at(PREPARE_SECS + COOLDOWN_SECS), estimated: true });
-        // A later journal event settles the jump; the estimate stays the same.
-        c.settle_pending(at(PREPARE_SECS + COOLDOWN_SECS + 1));
-        assert_eq!(c.system.as_deref(), Some("Beta"));
-        assert_eq!(c.jump_timer(at(PREPARE_SECS + COOLDOWN_SECS - 1)).and_then(|t| t.left(at(PREPARE_SECS + COOLDOWN_SECS - 1))), Some(1));
-        assert_eq!(c.jump_timer(at(PREPARE_SECS + COOLDOWN_SECS)), None);
+        let t = c.jump_timer(at(PREPARE_SECS + 30)).expect("pending confirmation");
+        assert_eq!(t, JumpTimer::AwaitingConfirmation { to: "Beta".into(), body: Some("Beta A 1".into()), departs: at(PREPARE_SECS), earliest_ready: at(PREPARE_SECS + COOLDOWN_SECS) });
+        let now = at(PREPARE_SECS + COOLDOWN_SECS + 60);
+        assert_eq!(c.jump_timer(now).and_then(|t| t.left(now)), None);
+        assert!(matches!(c.jump_timer(now), Some(JumpTimer::AwaitingConfirmation { .. })));
+        assert_eq!(c.system.as_deref(), Some("Alpha"));
+        assert!(c.jumps.is_empty());
     }
 
     #[test]
-    fn carrier_location_in_the_new_system_marks_the_arrival() {
+    fn movement_matching_location_verifies_arrival_once() {
         let mut c = own();
         request(&mut c, 0);
         let arrival = PREPARE_SECS + 50;
         c.on_location(&ev::CarrierLocation { carrier_type: Some("FleetCarrier".into()), carrier_id: ID, star_system: Some("Beta".into()), system_address: Some(200), body_id: Some(3) }, at(arrival));
         let t = c.jump_timer(at(arrival)).expect("cooldown");
-        assert!(matches!(t, JumpTimer::Cooldown { ready, estimated: false, .. } if ready == at(arrival + COOLDOWN_SECS)));
+        assert!(matches!(t, JumpTimer::Cooldown { ready, .. } if ready == at(arrival + COOLDOWN_SECS)));
         assert_eq!((c.system.as_deref(), c.located), (Some("Beta"), at(arrival)), "placed, and when");
+        c.on_carrier_jump(&ev::SystemArrival { market_id: Some(ID), system_address: 200, star_system: "Beta".into(), body_id: Some(3), ..Default::default() }, at(arrival + 1));
+        assert_eq!(c.jumps.len(), 1);
     }
 
     #[test]
-    fn a_jump_nobody_saw_arrive_is_placed_at_its_departure() {
+    fn movement_reschedule_rejects_old_requests_cancellations_and_observations() {
         let mut c = own();
         request(&mut c, 0);
-        c.settle_pending(at(PREPARE_SECS + COOLDOWN_SECS + 60));
-        assert_eq!((c.system.as_deref(), c.located), (Some("Beta"), at(PREPARE_SECS)));
+        let new = ev::CarrierJumpRequest { carrier_id: ID, system_name: "Gamma".into(), system_address: 300, ..Default::default() };
+        assert!(c.on_jump_request(&new, at(90)));
+        c.on_jump_cancelled(&ev::CarrierLocation { carrier_id: ID, ..Default::default() }, at(60));
+        request(&mut c, 0);
+        c.on_location(&ev::CarrierLocation { carrier_id: ID, star_system: Some("Beta".into()), system_address: Some(200), ..Default::default() }, at(80));
+        assert_eq!(c.system.as_deref(), Some("Alpha"));
+        assert!(c.jumps.is_empty());
+        assert_eq!(c.pending_jump.as_ref().unwrap().system, "Gamma");
     }
 
     #[test]
-    fn someone_elses_carrier_is_ignored() {
+    fn movement_unrelated_carrier_is_ignored() {
         let mut c = own();
         let r = ev::CarrierJumpRequest { carrier_id: ID + 1, system_name: "Gamma".into(), system_address: 300, departure_time: Some("2026-10-18T12:00:00Z".into()), ..Default::default() };
         c.on_jump_request(&r, at(0));
@@ -570,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_carrier_starts_clean() {
+    fn movement_carrier_replacement_starts_clean() {
         let mut c = own();
         request(&mut c, 0);
         decommission(&mut c, 0, 100);
@@ -579,6 +604,8 @@ mod tests {
         c.on_stats(&ev::CarrierStats { carrier_id: ID + 1, callsign: "NEW-001".into(), fuel_level: 800, ..Default::default() }, at(200));
         assert_eq!((c.id, c.callsign.as_str(), c.fuel), (Some(ID + 1), "NEW-001", 800));
         assert!(c.active(at(300)) && c.jumps.is_empty() && c.pending_jump.is_none() && c.decommission.is_none());
+        c.on_stats(&ev::CarrierStats { carrier_id: ID, ..Default::default() }, at(100));
+        assert_eq!(c.id, Some(ID + 1), "an outdated carrier report cannot restore the previous identity");
         // Same after a purchase.
         c.on_buy(&ev::CarrierBuy { carrier_id: ID + 2, callsign: "NEW-002".into(), location: "Gamma".into(), system_address: 300, ..Default::default() }, at(400));
         assert_eq!((c.id, c.fuel, c.system.as_deref()), (Some(ID + 2), 0, Some("Gamma")));
@@ -623,18 +650,19 @@ mod tests {
     }
 
     #[test]
-    fn route_estimate_counts_the_running_timer_first() {
+    fn movement_route_estimate_uses_only_a_matching_request() {
         let cycle = PREPARE_SECS + COOLDOWN_SECS;
         let mut c = own();
-        assert_eq!(c.route_estimate(at(0), 0), 0);
+        assert_eq!(c.route_estimate(at(0), "Beta", 0), 0);
         // Idle: three countdowns and the two cooldowns between them.
-        assert_eq!(c.route_estimate(at(0), 3), 3 * PREPARE_SECS + 2 * COOLDOWN_SECS);
+        assert_eq!(c.route_estimate(at(0), "Beta", 3), 3 * PREPARE_SECS + 2 * COOLDOWN_SECS);
         // Counting down to the first of three jumps.
         request(&mut c, 0);
-        assert_eq!(c.route_estimate(at(100), 3), PREPARE_SECS - 100 + 2 * cycle);
+        assert_eq!(c.route_estimate(at(100), "Beta", 3), PREPARE_SECS - 100 + 2 * cycle);
+        assert_eq!(c.route_estimate(at(100), "Gamma", 3), 3 * PREPARE_SECS + 2 * COOLDOWN_SECS);
         // Cooling down after it: two jumps left.
-        let a = ev::SystemArrival { star_system: "Beta".into(), system_address: 200, market_id: Some(ID), ..Default::default() };
+        let a = ev::SystemArrival { star_system: "Beta".into(), system_address: 200, body_id: Some(3), market_id: Some(ID), ..Default::default() };
         c.on_carrier_jump(&a, at(PREPARE_SECS));
-        assert_eq!(c.route_estimate(at(PREPARE_SECS + 60), 2), COOLDOWN_SECS - 60 + 2 * PREPARE_SECS + COOLDOWN_SECS);
+        assert_eq!(c.route_estimate(at(PREPARE_SECS + 60), "Gamma", 2), COOLDOWN_SECS - 60 + 2 * PREPARE_SECS + COOLDOWN_SECS);
     }
 }

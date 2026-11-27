@@ -314,17 +314,17 @@ impl NexusApp {
 
     /// After every jump, put the next route system on the clipboard (paste into the galaxy map).
     fn auto_copy_next(&mut self) {
-        if crate::launch::isolated() { return; }
         let next = {
             let model = self.core.model.read();
             let Some(gs) = model.active() else { return };
             if self.navigation_scope != Some((model.source_generation(), model.active_generation())) {
                 return;
             }
-            // Arrivals tick off planned waypoints; a carrier route follows its carrier, wherever the commander is.
             if let Some(p) = self.nav.planned.as_mut() {
-                let carrier = p.carrier().and_then(|k| gs.carrier_of(k).system.as_deref());
-                p.advance(carrier.unwrap_or(&gs.location.system));
+                p.advance_for(gs);
+            }
+            if crate::launch::isolated() {
+                return;
             }
             // Counted with the setting off too, so switching it on never acts on an old jump.
             let jumped = jumped(&mut self.last_jump_count, &gs.cmdr.fid, gs.history.jumps.len());

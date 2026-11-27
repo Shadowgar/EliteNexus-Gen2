@@ -643,7 +643,7 @@ fn carrier_jump_countdown_then_cooldown() {
     let gs = m.active().unwrap();
     assert_eq!(gs.carrier.system.as_deref(), Some("Beta"));
     let timer = gs.carrier.jump_timer(t("2026-10-01T10:36:40Z")).expect("cooldown");
-    assert_eq!(timer, JumpTimer::Cooldown { at: "Beta".into(), body: Some("Beta".into()), ready: t("2026-10-01T10:40:40Z"), estimated: false });
+    assert_eq!(timer, JumpTimer::Cooldown { at: "Beta".into(), body: Some("Beta".into()), ready: t("2026-10-01T10:40:40Z") });
     assert_eq!(gs.carrier.jump_timer(t("2026-10-01T10:40:40Z")), None, "ready to jump again");
 }
 
@@ -652,7 +652,7 @@ const SQUADRON_STATS: &str = r#"{ "timestamp":"2026-10-01T10:06:00Z", "event":"C
 
 /// A squadron carrier next to the commander's own: each keeps its own stats, place and jumps.
 #[test]
-fn squadron_carrier_alongside_a_personal_one() {
+fn carrier_jump_scopes_squadron_and_personal_state() {
     use nexus_journal::Timestamp;
     use nexus_model::carrier::{CarrierKind, JumpTimer};
     let t = |s: &str| Timestamp::parse(s).expect("time");
@@ -681,22 +681,38 @@ fn squadron_carrier_alongside_a_personal_one() {
     let kinds: Vec<CarrierKind> = gs.carriers(now).into_iter().map(|(k, _)| k).collect();
     assert_eq!(kinds, [CarrierKind::Personal, CarrierKind::Squadron]);
 
-    // Docked aboard the squadron carrier when it jumps: only it moves.
+    // Other carriers and the commander can be in the destination after the timer expires.
     feed(
         &mut m,
-        &[r#"{ "timestamp":"2026-10-01T10:25:40Z", "event":"CarrierJump", "Docked":true, "StationName":"SQD-001", "StationType":"SquadronCarrier", "MarketID":3720000000, "StarSystem":"Delta", "SystemAddress":400, "StarPos":[30.0,0.0,0.0], "Population":0, "Body":"Delta", "BodyID":0, "BodyType":"Star" }"#],
+        &[
+            r#"{"timestamp":"2026-10-01T10:31:00Z","event":"CarrierLocation","CarrierType":"SquadronCarrier","CarrierID":3720000001,"StarSystem":"Delta","SystemAddress":400,"BodyID":0}"#,
+            r#"{"timestamp":"2026-10-01T10:31:01Z","event":"Location","StarSystem":"Delta","SystemAddress":400}"#,
+            r#"{"timestamp":"2026-10-01T10:31:02Z","event":"CarrierJumpCancelled","CarrierType":"FleetCarrier","CarrierID":3720000000}"#,
+        ],
     );
+    let gs = m.active().unwrap();
+    assert_eq!(gs.squadron_carrier.system.as_deref(), Some("Gamma"));
+    assert!(gs.squadron_carrier.jumps.is_empty());
+    assert!(matches!(gs.squadron_carrier.jump_timer(t("2026-10-01T10:31:03Z")), Some(JumpTimer::AwaitingConfirmation { .. })));
+
+    // The matching aboard observation verifies the movement once.
+    let jump = r#"{"timestamp":"2026-10-01T10:31:40Z","event":"CarrierJump","Docked":true,"StationName":"SQD-001","StationType":"SquadronCarrier","MarketID":3720000000,"StarSystem":"Delta","SystemAddress":400,"StarPos":[30.0,0.0,0.0],"Body":"Delta","BodyID":0}"#;
+    feed(&mut m, &[jump, jump]);
     let gs = m.active().unwrap();
     assert_eq!(gs.squadron_carrier.system.as_deref(), Some("Delta"));
     assert_eq!(gs.carrier.system.as_deref(), Some("Alpha"));
-    assert!(matches!(gs.squadron_carrier.jump_timer(t("2026-10-01T10:26:00Z")), Some(JumpTimer::Cooldown { estimated: false, .. })));
+    assert!(gs.carrier.jumps.is_empty());
+    assert!(gs.squadron_carrier.pending_jump.is_none());
+    assert_eq!(gs.squadron_carrier.jumps.len(), 1);
+    assert_eq!(gs.history.jumps.iter().filter(|j| j.carrier).count(), 1);
+    assert!(matches!(gs.squadron_carrier.jump_timer(t("2026-10-01T10:32:00Z")), Some(JumpTimer::Cooldown { .. })));
 
     // Credits given to the squadron's carrier are spent; on the commander's own they stay theirs.
     feed(
         &mut m,
         &[
-            r#"{ "timestamp":"2026-10-01T10:30:00Z", "event":"CarrierBankTransfer", "CarrierType":"SquadronCarrier", "CarrierID":3720000000, "Deposit":100000, "PlayerBalance":900000, "CarrierBalance":5000100000 }"#,
-            r#"{ "timestamp":"2026-10-01T10:31:00Z", "event":"CarrierBankTransfer", "CarrierType":"FleetCarrier", "CarrierID":3716323840, "Deposit":200000, "PlayerBalance":700000, "CarrierBalance":1000200000 }"#,
+            r#"{ "timestamp":"2026-10-01T10:33:00Z", "event":"CarrierBankTransfer", "CarrierType":"SquadronCarrier", "CarrierID":3720000000, "Deposit":100000, "PlayerBalance":900000, "CarrierBalance":5000100000 }"#,
+            r#"{ "timestamp":"2026-10-01T10:34:00Z", "event":"CarrierBankTransfer", "CarrierType":"FleetCarrier", "CarrierID":3716323840, "Deposit":200000, "PlayerBalance":700000, "CarrierBalance":1000200000 }"#,
         ],
     );
     let gs = m.active().unwrap();

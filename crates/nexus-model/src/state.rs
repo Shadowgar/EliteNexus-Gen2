@@ -84,6 +84,7 @@ pub struct GameState {
     pub legal_state: Option<String>,
     prev_flags: u32,
     pending_star_class: Option<(String, String)>,
+    last_carrier_ride: Timestamp,
 }
 
 impl GameState {
@@ -164,8 +165,9 @@ impl GameState {
     /// The carrier a journal event is about (see [`CarrierKind::of`]).
     fn carrier_for(&mut self, carrier_type: Option<&str>, id: u64) -> Option<&mut Carrier> {
         match CarrierKind::of(carrier_type, id, self.squadron_carrier.id)? {
-            CarrierKind::Personal => Some(&mut self.carrier),
-            CarrierKind::Squadron => Some(&mut self.squadron_carrier),
+            CarrierKind::Personal if self.squadron_carrier.id != Some(id) => Some(&mut self.carrier),
+            CarrierKind::Squadron if self.carrier.id != Some(id) => Some(&mut self.squadron_carrier),
+            _ => None,
         }
     }
 
@@ -369,23 +371,26 @@ impl GameState {
                 self.pending_star_class = None;
             }
             Event::CarrierJump(a) => {
-                self.location.on_arrival(a, ts, ArrivalKind::CarrierJump);
-                self.ship_follows(a, true);
-                self.history.jump(JumpRecord {
-                    ts,
-                    system: a.star_system.clone(),
-                    address: a.system_address,
-                    pos: a.star_pos,
-                    dist: 0.0,
-                    fuel_used: 0.0,
-                    carrier: true,
-                });
-                self.exobio.on_system(a.system_address);
-                self.exploration.enter_system(a.system_address, &a.star_system, a.star_pos, ts);
                 self.carrier.on_carrier_jump(a, ts);
                 self.squadron_carrier.on_carrier_jump(a, ts);
-                self.mining.leave_body();
-                self.feed(ts, "CarrierJump", format!("Carrier jumped to {}", a.star_system));
+                if ts > self.last_carrier_ride && ts >= self.location.last_arrival && a.docked != Some(false) && !a.star_system.is_empty() {
+                    self.last_carrier_ride = ts;
+                    self.location.on_arrival(a, ts, ArrivalKind::CarrierJump);
+                    self.ship_follows(a, true);
+                    self.history.jump(JumpRecord {
+                        ts,
+                        system: a.star_system.clone(),
+                        address: a.system_address,
+                        pos: a.star_pos,
+                        dist: 0.0,
+                        fuel_used: 0.0,
+                        carrier: true,
+                    });
+                    self.exobio.on_system(a.system_address);
+                    self.exploration.enter_system(a.system_address, &a.star_system, a.star_pos, ts);
+                    self.mining.leave_body();
+                    self.feed(ts, "CarrierJump", format!("Carrier jumped to {}", a.star_system));
+                }
             }
             Event::StartJump(s) if s.jump_type == "Hyperspace" => {
                 self.location.hyperspace = true;
@@ -1013,20 +1018,20 @@ impl GameState {
             }
             Event::CarrierJumpRequest(r) => {
                 let squadron = CarrierKind::of(r.carrier_type.as_deref(), r.carrier_id, self.squadron_carrier.id) == Some(CarrierKind::Squadron);
-                if let Some(c) = self.carrier_for(r.carrier_type.as_deref(), r.carrier_id) {
-                    c.on_jump_request(r, ts);
+                if self.carrier_for(r.carrier_type.as_deref(), r.carrier_id).is_some_and(|c| c.on_jump_request(r, ts)) {
+                    let what = if squadron { "Squadron carrier" } else { "Carrier" };
+                    let when = r.departure_time.as_deref().and_then(Timestamp::parse).map(|t| format!("scheduled departure {}", t.to_local_string("%H:%M")))
+                        .unwrap_or_else(|| "departure time unknown".into());
+                    self.feed(ts, "CarrierJumpRequest", format!("{what} jump to {} ({when})", r.system_name));
+                    alerts.push_with(|| {
+                        Alert::new(ts, AlertKind::Carrier, Priority::Normal, format!("{what} jump scheduled"))
+                            .detail(format!("{} — {when}", r.system_name))
+                    });
                 }
-                let what = if squadron { "Squadron carrier" } else { "Carrier" };
-                let when = r.departure_time.as_deref().and_then(Timestamp::parse).map(|t| t.to_local_string("%H:%M")).unwrap_or_default();
-                self.feed(ts, "CarrierJumpRequest", format!("{what} jump to {} at {}", r.system_name, when));
-                alerts.push_with(|| {
-                    Alert::new(ts, AlertKind::Carrier, Priority::Normal, format!("{what} jump scheduled"))
-                        .detail(format!("{} — departs {}", r.system_name, when))
-                });
             }
             Event::CarrierJumpCancelled(c) => {
                 if let Some(k) = self.carrier_for(c.carrier_type.as_deref(), c.carrier_id) {
-                    k.on_jump_cancelled(c);
+                    k.on_jump_cancelled(c, ts);
                 }
             }
             Event::CarrierLocation(l) => {
@@ -1122,8 +1127,6 @@ impl GameState {
             Event::ReceiveText(_) | Event::Friends(_) => {}
             _ => {}
         }
-        self.carrier.settle_pending(ts);
-        self.squadron_carrier.settle_pending(ts);
         // Which ship what follows belongs to, and what the ships are called now.
         self.history.set_aboard(ts, self.aboard(), self.credited_ship());
         if matches!(event, Event::LoadGame(_) | Event::Loadout(_) | Event::ShipyardNew(_) | Event::ShipyardSwap(_) | Event::SetUserShipName(_) | Event::StoredShips(_) | Event::ShipRedeemed(_)) {

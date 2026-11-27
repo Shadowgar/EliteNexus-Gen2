@@ -331,6 +331,12 @@ The committed-update identity is in memory. Market precedence, persisted observa
 
 **Integration:** [PR #12](https://github.com/Shadowgar/Praetorium/pull/12), [`ff247b7`](https://github.com/Shadowgar/Praetorium/commit/ff247b7339736335d0ba7fe7848bea55a47fd0c7). Scoped static review of classification, market filtering, alert qualification and shared Ask/MCP output. Nine focused galaxy regressions reported passed by the owner; application compilation and desktop, Ask and MCP runtime acceptance remain deferred to 01D-W. No additional build or CI initiated. G2-024 implementation slices are complete; final acceptance remains outstanding.
 
+### G2-025 — Carrier movement authority
+
+- The carrier model keeps jump requests apart from journal-verified movements. Cancellation and rescheduling replace request state in timestamp order. An elapsed departure leaves the route and last confirmed system untouched.
+- Navigation binds a carrier route to its carrier ID and uses verified movements to advance it. The Fleet carrier page, Dashboard, Ask and MCP distinguish the last confirmed system from a scheduled or unconfirmed destination.
+- Eight model unit tests, two model journal scenarios and one journal parser regression passed on Rust 1.100.0 with `C:/PraetoriumBuild`. Application compilation and desktop, Ask and MCP runtime verification are tracked in 01D-W.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.

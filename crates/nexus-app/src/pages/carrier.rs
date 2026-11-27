@@ -62,8 +62,10 @@ pub fn jump_timer(ui: &mut Ui, kind: CarrierKind, c: &Carrier) {
         }
         return;
     };
-    ui.ctx().request_repaint_after(Duration::from_secs(1));
     let left = t.left(now);
+    if left.is_some() {
+        ui.ctx().request_repaint_after(Duration::from_secs(1));
+    }
     match &t {
         JumpTimer::Countdown { to, body, departs } => {
             let lockdown = left.is_some_and(|l| l <= timing::LOCKDOWN_SECS);
@@ -91,15 +93,20 @@ pub fn jump_timer(ui: &mut Ui, kind: CarrierKind, c: &Carrier) {
                 bar(ui, (now.0 - p.requested.0) as f32 / total, colr, 6.0, None);
             }
         }
-        JumpTimer::Cooldown { at, body, ready, estimated } => {
-            badge(ui, "COOLDOWN", pal::CYAN);
-            let big = left.map(duration).unwrap_or_default();
-            ui.label(RichText::new(if *estimated { format!("≈ {big}") } else { big }).font(display(size::TITLE)).color(pal::CYAN)).on_hover_text(TIMING_SOURCES);
-            destination(ui, icon::MAP_PIN, at, body.as_deref());
-            note(ui, &format!("Can jump again from about {}", local(*ready)));
-            if *estimated {
-                note(ui, "Counted from the departure: the journal records the arrival only when you're aboard, so the cooldown ends a little later, by however long the jump took.");
+        JumpTimer::AwaitingConfirmation { to, body, departs, earliest_ready } => {
+            badge(ui, "ARRIVAL UNCONFIRMED", pal::WARN);
+            destination(ui, icon::ARROW_FAT_RIGHT, to, body.as_deref());
+            note(ui, &format!("Scheduled departure was {}. Waiting for a matching journal observation.", local(*departs)));
+            if left.is_some() {
+                note(ui, &format!("Earliest estimated cooldown end {}", local(*earliest_ready)));
             }
+        }
+        JumpTimer::Cooldown { at, body, ready } => {
+            badge(ui, "ESTIMATED COOLDOWN", pal::CYAN);
+            let big = left.map(duration).unwrap_or_default();
+            ui.label(RichText::new(format!("≈ {big}")).font(display(size::TITLE)).color(pal::CYAN)).on_hover_text(TIMING_SOURCES);
+            destination(ui, icon::MAP_PIN, at, body.as_deref());
+            note(ui, &format!("Movement confirmed by the journal. Estimated cooldown ends at {}.", local(*ready)));
             bar(ui, 1.0 - left.unwrap_or(0) as f32 / timing::COOLDOWN_SECS as f32, pal::CYAN, 6.0, None);
         }
     }
@@ -111,14 +118,12 @@ pub fn jump_timer_line(c: &Carrier, now: Timestamp) -> Option<(String, Color32)>
     let left = t.left(now);
     Some(match &t {
         JumpTimer::Countdown { to, .. } => match left {
-            Some(l) if l <= timing::LOCKDOWN_SECS => (format!("{} Jumping to {to} in {} (lockdown)", icon::ARROW_FAT_RIGHT, duration(l)), pal::BAD),
-            Some(l) => (format!("{} Jumping to {to} in {}", icon::ARROW_FAT_RIGHT, duration(l)), pal::WARN),
+            Some(l) if l <= timing::LOCKDOWN_SECS => (format!("{} Scheduled to {to} in {} (lockdown)", icon::ARROW_FAT_RIGHT, duration(l)), pal::BAD),
+            Some(l) => (format!("{} Scheduled to {to} in {}", icon::ARROW_FAT_RIGHT, duration(l)), pal::WARN),
             None => (format!("{} Jump to {to} scheduled", icon::ARROW_FAT_RIGHT), pal::WARN),
         },
-        JumpTimer::Cooldown { at, estimated, .. } => {
-            let approx = if *estimated { "≈ " } else { "" };
-            (format!("{} Cooldown in {at}: can jump again in {approx}{}", icon::TIMER, duration(left.unwrap_or(0))), pal::CYAN)
-        }
+        JumpTimer::AwaitingConfirmation { to, .. } => (format!("{} Arrival at {to} unconfirmed", icon::ARROW_FAT_RIGHT), pal::WARN),
+        JumpTimer::Cooldown { at, .. } => (format!("{} Confirmed in {at} · cooldown ≈ {}", icon::TIMER, duration(left.unwrap_or(0))), pal::CYAN),
     })
 }
 
@@ -222,7 +227,7 @@ fn carrier_view(ui: &mut Ui, gs: &GameState, kind: CarrierKind, c: &Carrier) -> 
                     ui.label(RichText::new(&c.callsign).font(display(16.0)).color(pal::ACCENT));
                 }
                 ui.add_space(4.0);
-                ui.label(RichText::new(format!("{} {}", icon::MAP_PIN, c.system.clone().unwrap_or_else(|| "Unknown".into()))).color(pal::TEXT));
+                ui.label(RichText::new(format!("{} Last confirmed system · {}", icon::MAP_PIN, c.system.as_deref().unwrap_or("Unknown"))).color(pal::TEXT));
                 ui.horizontal_wrapped(|ui| {
                     if let Some(sq) = gs.cmdr.squadron.as_ref().filter(|_| squadron) {
                         badge(ui, &sq.name, pal::PURPLE);
@@ -389,7 +394,7 @@ fn carrier_view(ui: &mut Ui, gs: &GameState, kind: CarrierKind, c: &Carrier) -> 
             });
         });
         col.add(|ui| {
-            card(ui, "Jump history", |ui| {
+            card(ui, "Verified jump history", |ui| {
                 if c.jumps.is_empty() {
                     ui.label(RichText::new("No jumps recorded yet.").color(pal::DIM));
                 }

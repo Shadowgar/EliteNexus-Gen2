@@ -1349,7 +1349,7 @@ pub fn countdown(secs: i64) -> String {
 
 fn carrier_card(cj: &CarrierJump, now: i64) -> Card {
     let compact = Compact {
-        lead: vec![Piece::Glyph(icon(glyph::ANCHOR, Tint::Indigo, 20)), text(format!("Carrier → {}", cj.to), Style::Label, Tint::Dim)],
+        lead: vec![Piece::Glyph(icon(glyph::ANCHOR, Tint::Indigo, 20)), text(format!("Scheduled carrier jump to {}", cj.to), Style::Label, Tint::Dim)],
         trail: vec![text(countdown(cj.departs - now), Style::Value, Tint::Indigo)],
     };
     Card { moment: Moment::Carrier, compact, expanded: None }

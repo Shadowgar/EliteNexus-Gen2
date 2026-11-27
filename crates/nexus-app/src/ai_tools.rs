@@ -305,8 +305,23 @@ impl NexusTools {
         let now = nexus_journal::Timestamp::now();
         let carrier_json = |c: &nexus_model::carrier::Carrier| {
             c.active(now).then(|| {
+                let jump_request = c.pending_jump.as_ref().map(|p| json!({
+                    "status": if p.departure.is_some_and(|d| d <= now) { "awaiting_confirmation" } else { "scheduled" },
+                    "destination_system": p.system,
+                    "destination_body": p.body,
+                    "scheduled_departure": p.departure.map(|d| d.to_iso()),
+                    "earliest_estimated_cooldown_end": p.departure.map(|d| {
+                        nexus_journal::Timestamp(d.0 + nexus_model::carrier::timing::COOLDOWN_SECS).to_iso()
+                    }),
+                }));
                 json!({
-                    "name": c.name, "callsign": c.callsign, "system": c.system,
+                    "carrier_id": c.id, "name": c.name, "callsign": c.callsign, "system": c.system,
+                    "system_status": if c.system.is_some() { "last_confirmed" } else { "unknown" },
+                    "system_observed_at": (!c.located.is_zero()).then(|| c.located.to_iso()),
+                    "jump_request": jump_request,
+                    "last_verified_movement": c.jumps.last().map(|j| json!({
+                        "system": j.system, "body": j.body, "observed_at": j.ts.to_iso(),
+                    })),
                     "tritium_t": c.fuel, "cargo_t": c.space.cargo, "capacity_t": c.space.total_capacity,
                     "decommission_scrap_time": c.decommission.map(|d| d.scrap_time.to_iso()),
                 })
@@ -2029,7 +2044,7 @@ pub static TOOLS: &[Tool] = &[
     Tool {
         name: "commander",
         title: "Your ship, location and credits",
-        description: "The commander's current state: location, docked station, ship (type, landing pad, cargo capacity, jump range, fuel, rebuy), cargo hold, credits, fleet carrier and squadron carrier, ranks, unsold exploration and exobiology data.",
+        description: "The commander's current state: location, docked station, ship (type, landing pad, cargo capacity, jump range, fuel, rebuy), cargo hold, credits, fleet carrier and squadron carrier, ranks, unsold exploration and exobiology data. Carrier systems are last confirmed journal locations. Jump requests give scheduled destinations and departures. Report awaiting_confirmation as an unverified arrival.",
         params: || schema(json!({}), &[]),
         working: "Checking your ship…",
         noun: "your ship",

@@ -14,7 +14,7 @@ use egui_phosphor::regular as icon;
 use nexus_data::exploration::{is_scoopable, star_description};
 use nexus_galaxy::{GalaxyDb, Services, StationQuery};
 use nexus_journal::Timestamp;
-use nexus_model::carrier::CarrierKind;
+use nexus_model::carrier::{Carrier, CarrierKind};
 use nexus_model::location::distance;
 use nexus_model::GameState;
 use nexus_spansh::{CarrierRouteRequest, GalaxyAlgorithm, GalaxyRouteRequest, NeutronRouteRequest, RouteWaypoints, ServiceQuery, ShipProfile, Spansh};
@@ -44,11 +44,13 @@ pub struct PlannedRoute {
     done: usize,
     /// The system we were in when progress was last checked.
     at: String,
+    /// The carrier's journal identity and the time through which its movement has been considered.
+    carrier_progress: Option<(u64, Timestamp)>,
 }
 
 impl PlannedRoute {
     pub fn new(kind: &'static str, summary: String, web_url: String, waypoints: Vec<Waypoint>) -> Self {
-        PlannedRoute { kind, summary, web_url, waypoints, done: 0, at: String::new() }
+        PlannedRoute { kind, summary, web_url, waypoints, done: 0, at: String::new(), carrier_progress: None }
     }
 
     /// Follows the commander along the route: arriving at a waypoint (or one further on) marks it
@@ -79,6 +81,27 @@ impl PlannedRoute {
             "Carrier" => Some(CarrierKind::Personal),
             "Squadron carrier" => Some(CarrierKind::Squadron),
             _ => None,
+        }
+    }
+
+    fn follows_carrier(&self, kind: CarrierKind, carrier: &Carrier) -> bool {
+        self.carrier() == Some(kind) && self.carrier_progress.is_some_and(|(id, _)| carrier.id == Some(id))
+    }
+
+    pub fn advance_for(&mut self, gs: &GameState) {
+        let Some(kind) = self.carrier() else {
+            self.advance(&gs.location.system);
+            return;
+        };
+        let carrier = gs.carrier_of(kind);
+        if let Some((id, seen)) = self.carrier_progress
+            && carrier.id == Some(id)
+        {
+            let first_new = carrier.jumps.partition_point(|j| j.ts <= seen);
+            for jump in &carrier.jumps[first_new..] {
+                self.advance(&jump.system);
+                self.carrier_progress = Some((id, jump.ts));
+            }
         }
     }
 }
@@ -378,8 +401,8 @@ pub fn show(ui: &mut Ui, gs: &GameState, st: &mut NavUi, auto_copy: &mut bool, c
     // Ship routes start where you are, carrier routes where the carrier is, until something else is typed.
     follow(&mut st.from, &mut st.auto_from, &gs.location.system);
     let picked = crate::pages::carrier::pick(gs, *carrier, now);
-    let carrier_at = picked.and_then(|k| gs.carrier_of(k).system.clone()).unwrap_or_else(|| gs.location.system.clone());
-    follow(&mut st.carrier_from, &mut st.auto_carrier_from, &carrier_at);
+    let carrier_at = picked.map_or(gs.location.system.as_str(), |k| gs.carrier_of(k).system.as_deref().unwrap_or_default());
+    follow(&mut st.carrier_from, &mut st.auto_carrier_from, carrier_at);
     if std::mem::take(&mut st.route_to_carrier)
         && let Some(sys) = picked.and_then(|k| gs.carrier_of(k).system.clone())
     {
@@ -443,7 +466,7 @@ fn page(ui: &mut Ui, gs: &GameState, st: &mut NavUi, auto_copy: &mut bool, carri
     let timed = if st.planner == Planner::Carrier { picked } else { st.planned.as_ref().and_then(|p| p.carrier()) };
     if let Some(kind) = timed.filter(|k| gs.carrier_of(*k).active(now)) {
         let running = gs.carrier_of(kind).jump_timer(now).is_some();
-        let route = st.planned.as_ref().is_some_and(|p| p.carrier() == Some(kind) && !p.remaining().is_empty());
+        let route = st.planned.as_ref().is_some_and(|p| p.follows_carrier(kind, gs.carrier_of(kind)) && !p.remaining().is_empty());
         if running || route {
             carrier_timer(ui, gs, kind, st);
             ui.add_space(GAP);
@@ -647,7 +670,7 @@ fn carrier_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<Carrie
         });
         let here = c.system_address.map_or(sys.eq_ignore_ascii_case(&gs.location.system), |a| a == gs.location.system_address);
         let away = c.system_address.and_then(|a| system_pos(gs, a)).zip(gs.location.star_pos).map(|(a, b)| distance(a, b));
-        let known = if c.located.is_zero() { String::new() } else { format!(" Last known position, {}.", widgets::ago(c.located)) };
+        let known = if c.located.is_zero() { String::new() } else { format!(" Last confirmed position, {}.", widgets::ago(c.located)) };
         let squadron = if kind == CarrierKind::Squadron { " Other members may have moved it since: its place updates when the game next reports it." } else { "" };
         let whereabouts = match (here, away) {
             (true, _) => format!("You're in {sys} too.{known}{squadron}"),
@@ -671,7 +694,7 @@ fn carrier_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<Carrie
                 st.route_ship_to(&sys);
             }
             if let Some(next) = &leaving
-                && widgets::button(ui, &format!("{} Route to {next}", icon::ARROW_FAT_RIGHT)).on_hover_text("Where the carrier is jumping to.").clicked()
+                && widgets::button(ui, &format!("{} Route to {next}", icon::ARROW_FAT_RIGHT)).on_hover_text("Scheduled destination. Carrier arrival is unconfirmed.").clicked()
             {
                 st.route_ship_to(next);
             }
@@ -691,8 +714,7 @@ fn carrier_card(ui: &mut Ui, gs: &GameState, st: &mut NavUi, kind: Option<Carrie
                 }
             });
             ui.add_space(2.0);
-            let idle = if c.jump_timer(now).is_none() && kind == CarrierKind::Personal { " No jump scheduled." } else { "" };
-            note(ui, &format!("From carrier management, {}.{idle}", widgets::ago(c.stats_updated)));
+            note(ui, &format!("From carrier management, {}.", widgets::ago(c.stats_updated)));
         }
     });
 }
@@ -878,7 +900,7 @@ async fn find_admin(spansh: Spansh, key: (Near, String), db: Option<GalaxyDb>, p
 /// that carrier active, also the next leg and a rough time to the destination.
 fn carrier_timer(ui: &mut Ui, gs: &GameState, kind: CarrierKind, st: &NavUi) {
     let c = gs.carrier_of(kind);
-    let route = st.planned.as_ref().filter(|p| p.carrier() == Some(kind)).map(|p| p.remaining()).filter(|r| !r.is_empty());
+    let route = st.planned.as_ref().filter(|p| p.follows_carrier(kind, c)).map(|p| p.remaining()).filter(|r| !r.is_empty());
     let title = format!("{} jump", kind.label());
     cards(ui, if route.is_some() { 2 } else { 1 }, 300.0, |col| {
         col.add(|ui| {
@@ -888,13 +910,14 @@ fn carrier_timer(ui: &mut Ui, gs: &GameState, kind: CarrierKind, st: &NavUi) {
         col.add(|ui| {
             card_tinted(ui, icon::PATH, "Carrier route", pal::BLUE, |ui| {
                 let jumps: u32 = route.iter().map(|w| w.jumps.max(1)).sum();
-                let eta = c.route_estimate(Timestamp::now(), jumps);
-                ui.label(RichText::new(format!("≈ {}", widgets::duration(eta))).font(display(size::TITLE)).color(pal::TEXT)).on_hover_text(
+                let next = &route[0];
+                let eta = c.route_estimate(Timestamp::now(), &next.system, jumps);
+                let eta_label = if eta == 0 { "Awaiting arrival confirmation".into() } else { format!("ETA ≈ {}", widgets::duration(eta)) };
+                ui.label(RichText::new(eta_label).font(display(size::TITLE)).color(pal::TEXT)).on_hover_text(
                     "An estimate, and a minimum: the countdown or cooldown running now, then a 15-minute countdown for each jump and a 5-minute cooldown between jumps (Frontier's figures). Busy servers set later departures and each jump takes a little time, so the trip usually takes longer.",
                 );
                 ui.add(egui::Label::new(RichText::new(format!("to {} · {jumps} {} left", route.last().map(|w| w.system.as_str()).unwrap_or("?"), if jumps == 1 { "jump" } else { "jumps" })).size(size::FOOTNOTE).color(pal::DIM)).wrap());
                 ui.add_space(4.0);
-                let next = &route[0];
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new("Next leg").color(pal::DIM));
                     if ui.link(RichText::new(&next.system).color(pal::ACCENT)).on_hover_text("Click to copy").clicked() {
@@ -941,7 +964,7 @@ type PlanFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Plan
 fn make_request(gs: &GameState, st: &NavUi, carrier: Option<CarrierKind>, spansh: &Spansh) -> Option<PlanFuture> {
     let sp = spansh.clone();
     let (from, to, start) = match st.planner {
-        Planner::Carrier => (&st.carrier_from, &st.carrier_to, carrier.and_then(|k| gs.carrier_of(k).system.clone()).unwrap_or_else(|| gs.location.system.clone())),
+        Planner::Carrier => (&st.carrier_from, &st.carrier_to, carrier.map_or(gs.location.system.clone(), |k| gs.carrier_of(k).system.clone().unwrap_or_default())),
         _ => (&st.from, &st.to, gs.location.system.clone()),
     };
     let from = match from.trim() {
@@ -1003,11 +1026,22 @@ fn make_request(gs: &GameState, st: &NavUi, carrier: Option<CarrierKind>, spansh
                 None => CarrierRouteRequest::new(from.as_str(), [to.as_str()]),
             };
             let kind = if carrier == Some(CarrierKind::Squadron) { "Squadron carrier" } else { "Carrier" };
+            let tracked = carrier.map(|k| gs.carrier_of(k));
+            let progress = tracked.and_then(|c| c.id.map(|id| (id, c.located)));
+            let last_confirmed_system = tracked.and_then(|c| c.system.clone()).unwrap_or_default();
             Some(Box::pin(async move {
                 let p = sp.carrier_route(&req).await.map_err(|e| e.to_string())?;
-                let wps: Vec<Waypoint> = p.route.waypoints().iter().map(from_spansh).collect();
+                let mut waypoints = p.route.waypoints().into_iter().peekable();
+                // Spansh can include the starting point as a zero-jump row.
+                if waypoints.peek().is_some_and(|w| w.jumps == 0 && w.system.eq_ignore_ascii_case(&from)) {
+                    waypoints.next();
+                }
+                let wps: Vec<Waypoint> = waypoints.map(|w| from_spansh(&w)).collect();
                 let summary = format!("{} · {:.0} ly · {} t tritium", count(p.route.jump_count() as u64, "carrier jump"), p.route.distance(), p.route.tritium_used());
-                Ok(PlannedRoute::new(kind, summary, p.web_url, wps))
+                let mut route = PlannedRoute::new(kind, summary, p.web_url, wps);
+                route.carrier_progress = progress;
+                route.at = last_confirmed_system;
+                Ok(route)
             }))
         }
     }

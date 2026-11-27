@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Fleet and squadron carrier routes and jump history use verified journal movement for the specific carrier. The desktop and assistant show scheduled destinations and unconfirmed arrivals separately from the last confirmed system.
+
 - Market and assistant quote results distinguish reported open, restricted and unknown carrier docking access. New trade-route destinations, shopping-trip stops and price alerts require carriers reported open to everyone.
 
 - Price alerts use the active commander's system and current watches. Changing commander, location or watch settings discards pending alerts, and overlapping watches share one notification for each commodity and trade direction in a market update.

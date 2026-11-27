@@ -3165,6 +3165,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn carrier_movement_events_keep_request_and_observation_identity() {
+        let request = r#"{"CarrierType":"SquadronCarrier","CarrierID":3720000000,"SystemName":"Beta","SystemAddress":200,"BodyID":3,"DepartureTime":"2026-10-01T10:25:00Z"}"#;
+        assert!(matches!(Event::parse("CarrierJumpRequest", request).unwrap(), Event::CarrierJumpRequest(r)
+            if r.carrier_type.as_deref() == Some("SquadronCarrier") && r.carrier_id == 3720000000 && r.system_address == 200
+                && r.body_id == Some(3) && r.departure_time.as_deref() == Some("2026-10-01T10:25:00Z")));
+        let cancel = r#"{"CarrierID":3720000000}"#;
+        assert!(matches!(Event::parse("CarrierJumpCancelled", cancel).unwrap(), Event::CarrierJumpCancelled(c)
+            if c.carrier_id == 3720000000 && c.star_system.is_none()));
+        let location = r#"{"CarrierID":3720000000,"StarSystem":"Beta","SystemAddress":200,"BodyID":3}"#;
+        assert!(matches!(Event::parse("CarrierLocation", location).unwrap(), Event::CarrierLocation(l)
+            if l.carrier_id == 3720000000 && l.star_system.as_deref() == Some("Beta") && l.body_id == Some(3)));
+        let jump = r#"{"MarketID":3720000000,"Docked":true,"StarSystem":"Beta","SystemAddress":200,"BodyID":3}"#;
+        assert!(matches!(Event::parse("CarrierJump", jump).unwrap(), Event::CarrierJump(j)
+            if j.market_id == Some(3720000000) && j.docked == Some(true) && j.system_address == 200 && j.body_id == Some(3)));
+    }
+
+    #[test]
     fn parses_fsdjump_union() {
         let line = r#"{ "timestamp":"2026-09-05T01:06:02Z", "event":"FSDJump", "Taxi":false, "StarSystem":"Synuefe BR-L c24-23", "SystemAddress":6406446944978, "StarPos":[220.96875,-124.81250,-12.59375], "Population":107996107, "JumpDist":9.851, "FuelUsed":0.484949, "FuelLevel":7.515051, "Factions":[ { "Name":"Sacra Oculus", "FactionState":"None", "Government":"Theocracy", "Influence":0.162978, "Allegiance":"Independent", "Happiness":"$Faction_HappinessBand2;", "MyReputation":0.000000, "RecoveringStates":[ { "State":"Expansion", "Trend":0 } ] } ] }"#;
         let Event::FSDJump(j) = Event::parse("FSDJump", line).unwrap() else { panic!() };

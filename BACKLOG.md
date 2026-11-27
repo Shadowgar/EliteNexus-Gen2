@@ -21,7 +21,7 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [x] **G2-024C (ENX-035) — Market alert generation consistency.** Integrated PR #11. Eight focused galaxy tests reported passed; desktop compilation, alert regression execution and runtime acceptance deferred to 01D-W.
 - [x] **G2-024D (ENX-036) — Carrier access.** Integrated PR #12. Shared reported open/restricted/unknown qualification, conservative public destination filtering and docked-origin exception; nine focused galaxy regressions reported passed. Application compilation and desktop, Ask and MCP verification deferred to 01D-W.
 - [x] **G2-024 — Market freshness, deals, alerts and access.** All four implementation slices integrated as ENX-033–036; consolidated acceptance remains in 01D-W.
-- [ ] **G2-025 — Carrier movement authority.** Separate jump requests, estimates and verified movements by carrier identity. Do not infer authoritative route advancement or duplicate history from unrelated or repeated observations.
+- [x] **G2-025 — Carrier movement authority.** Separate scheduled requests, estimated timing and verified movement by carrier identity. Routes and history use verified movement. Application and runtime verification are tracked in 01D-W.
 - [ ] **G2-033 (market/carrier scope) — Worker outcomes.** Handle terminal failures and disconnected workers; retire superseded results and permit retry. Leave unrelated workers for 01D-D.
 
 ## 01D-C — Exploration, exobiology, colonisation and statistics (REL-02)
@@ -39,6 +39,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [ ] **G2-036 — Isolated clipboard UI.** Make the unavailable next-system clipboard action explicit without overwriting the ordinary saved preference.
 
 ## 01D-W — Comprehensive gameplay regression testing
+
+- [ ] G2-025: compile Praetorium and exercise Fleet carrier, Navigation, Dashboard, overlay, Ask and MCP with personal and squadron journal fixtures. Replay a cancellation, reschedule, unrelated location and duplicate arrival. Check that elapsed estimates preserve the last confirmed system and that only a matching carrier's verified movement advances its route, including in isolated mode.
 
 - [ ] G2-024D: compile the application and verify Market quotes, Deals, routes, shopping trips, price alerts, Ask and MCP using synthetic carriers with open, restricted, missing and unrecognized access. Confirm public recommendations require reported open access and that a route can start at the commander's current docked market. Check that changing access during a pending alert retires the earlier result.
 

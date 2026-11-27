@@ -270,7 +270,7 @@ fn holdings(ui: &mut Ui, gs: &GameState, hidden_depots: &[u64]) {
             let glyph = if kind == CarrierKind::Squadron { icon::USERS_THREE } else { icon::ANCHOR };
             ui.label(RichText::new(format!("{glyph} {}", crate::pages::carrier::carrier_name(kind, c))).font(display(size::HEADLINE)).color(pal::TEXT));
             let what = if kind == CarrierKind::Squadron { "Squadron carrier · " } else { "" };
-            sub(ui, format!("{what}{} · {} · {} t tritium · {}", c.callsign, c.system.clone().unwrap_or_else(|| "?".into()), c.fuel, short_credits(c.finance.carrier_balance)), pal::DIM);
+            sub(ui, format!("{what}{} · Last confirmed: {} · {} t tritium · {}", c.callsign, c.system.as_deref().unwrap_or("unknown"), c.fuel, short_credits(c.finance.carrier_balance)), pal::DIM);
             if let Some(line) = crate::pages::carrier::decommission_line(c) {
                 sub(ui, line, pal::BAD);
             }
