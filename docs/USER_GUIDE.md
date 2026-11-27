@@ -77,6 +77,10 @@ Market › Database & feed reports pending write messages and write errors separ
 
 In Market’s trade-route search, **Credits** shows the observed balance or **Unknown**. A zero balance rules out routes that require buying cargo. If the balance is unknown, routes are sized by cargo space, supply and demand without checking affordability. In Ask, you can specify a hypothetical budget in credits for a trade-route search.
 
+Market price alerts are evaluated from newly committed live reports for the active commander. Changing commander,
+system or watch settings discards pending evaluations. Distance-limited watches need your system coordinates.
+If several watches match the same commodity and trade direction in one report, you receive a single notification.
+
 ## Overlay
 
 The overlay is a small black island at the top centre of the game's screen, in a window of its own beside the main

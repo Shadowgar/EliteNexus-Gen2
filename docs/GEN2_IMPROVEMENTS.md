@@ -313,6 +313,14 @@ This is applicable to upstream desktop Deals wherever the same filter-only ident
 
 **Evidence:** [PR #10](https://github.com/Shadowgar/Praetorium/pull/10), [`c406bfc`](https://github.com/Shadowgar/Praetorium/commit/c406bfc50fb65eb1ab67362359ad7eea1047a5ad). Static review confirms full request identity and retired-result draining. Owner reports `git diff --check` passed; application check had not completed at handoff. No tests claimed passed. Application check, focused test compilation/execution and runtime acceptance deferred to 01D-W. Existing disconnected-worker behavior remains G2-033, including retired Deals scans. No additional build or CI initiated.
 
+### G2-024C — Market alert generation consistency
+
+Desktop price alerts subscribe to newly committed market updates for the active journal source, commander, location and enabled watches. Input changes retire queued observations and evaluations. The worker reads the committed market and delivery checks that the observation still represents that market. Identical watches are evaluated once, overlapping watches share a notification per commodity and trade direction, and unchanged watches keep their station cooldown when the commander moves.
+
+The committed-update identity is in memory. Market precedence, persisted observation timestamps and unknown quote age use the existing galaxy database rules. The desktop fix applies to upstream watchers that evaluate live markets asynchronously.
+
+**Evidence.** Eight focused galaxy integration tests passed on Windows with Rust 1.100.0 and `C:\PraetoriumBuild` using the filters `market_update_identity`, `quote_freshness`, `market_precedence` and `updates_are_published_after_commit`. Application compilation, focused alert tests and desktop verification are deferred to 01D-W.
+
 ## Upstream review opportunities
 
 The smallest standalone reviews are Windows credential protection failure handling (ENX-003), locked build and minimum-Rust CI policy (ENX-007), byte framing and numeric repair (ENX-010), and coordinate provenance (ENX-014). Credential destination handling (ENX-001 and ENX-002) and assistant and MCP retirement (ENX-004 to ENX-006) benefit from review as related groups. For journal work, the reader and watcher (ENX-008 and ENX-009) underpin source and session ownership (ENX-011), which in turn supports scoped history, qualified companions, background-result retirement and transient uplink retirement (ENX-012, ENX-013, ENX-015 and ENX-016). Each entry identifies the files and fixtures needed to review its behavior in upstream's architecture.

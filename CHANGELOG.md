@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Price alerts use the active commander's system and current watches. Changing commander, location or watch settings discards pending alerts, and overlapping watches share one notification for each commodity and trade direction in a market update.
+
 - Abnormal prices recalculates when the commander system, origin, ship capacity or search settings change. Superseded scans no longer show prices or offer row actions.
 
 - Find commodity refreshes open quote lists and selected market details every 30 seconds. Quote age uses the market report time. Reports without a usable observation timestamp have unknown age and are excluded by age limits.

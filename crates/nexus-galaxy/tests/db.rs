@@ -1302,6 +1302,39 @@ fn ring_hotspots() {
 }
 
 #[test]
+fn market_update_identity_follows_the_committed_listing_winner() {
+    let t = TempDb::new("update-identity");
+    let db = t.db();
+    let rx = db.subscribe_updates();
+    let ts = now() - 60;
+    let quote = |time, sell| market(1, "Alpha", "Alpha Port", time, &[("gold", 10, sell, 10, 10)]);
+    let Ingest::Market(preferred) = quote(ts, 20) else { unreachable!() };
+    db.ingest_many(vec![
+        quote(ts, 100),
+        Ingest::Market(MarketSnapshot { source: Source::Journal, ..preferred }),
+    ]);
+    db.flush().unwrap();
+
+    let superseded = rx.try_recv().unwrap();
+    let winning = rx.try_recv().unwrap();
+    assert_eq!(superseded.updated_unix, winning.updated_unix);
+    assert!(!superseded.is_current());
+    assert!(db.station_market_for_update(&superseded).unwrap().is_none());
+    assert!(winning.is_current());
+    assert_eq!(db.station_market_for_update(&winning).unwrap().unwrap().items[0].sell, 20);
+
+    db.ingest(quote(0, 500));
+    db.flush().unwrap();
+    assert!(winning.is_current());
+    assert!(rx.try_recv().is_err());
+
+    db.ingest(quote(ts + 1, 30));
+    db.flush().unwrap();
+    assert!(!winning.is_current());
+    assert!(rx.try_recv().unwrap().is_current());
+}
+
+#[test]
 fn updates_are_published_after_commit() {
     let t = TempDb::new("updates");
     let db = t.db();

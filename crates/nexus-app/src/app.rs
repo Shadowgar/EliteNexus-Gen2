@@ -442,7 +442,11 @@ impl NexusApp {
     fn drain_alerts(&mut self) {
         // Journal alerts first, then price alerts from the market watcher.
         let mut incoming: Vec<Alert> = self.core.alerts.try_iter().collect();
-        incoming.extend(self.market.alerts.try_iter());
+        {
+            let model = self.core.model.read();
+            self.market.set_watch_scope(Some(&model));
+            self.market.drain_price_alerts(&mut incoming);
+        }
         for a in incoming {
             let prio = match a.priority {
                 Priority::Low => 0,
@@ -1004,6 +1008,7 @@ impl NexusApp {
             self.speaker.say("Praetorium voice check. All systems nominal, commander.");
         }
         if restart {
+            self.market.set_watch_scope(None);
             self.assistant.replace_source();
             self.log = Default::default();
             self.nav = Default::default();
@@ -1354,8 +1359,6 @@ impl eframe::App for NexusApp {
         self.auto_copy_next();
         self.remember_deposits();
         self.follow_flight();
-        let here = self.core.model.read().active().and_then(|g| g.location.star_pos);
-        self.market.set_origin(here);
         self.overlay_logic(ctx);
         // egui's Ctrl +/−/0 zoom changes the factor directly; keep the setting in step with it.
         let zoom = ctx.zoom_factor();

@@ -11,9 +11,9 @@ use crossbeam_channel::{Receiver, Sender};
 use nexus_eddn::{EddnHandle, EddnStatsSnapshot, EddnSubscriber};
 use nexus_galaxy::{DbStats, GalaxyDb, ImportProgress, ImportSummary, MarketUpdate, StationMarket};
 use nexus_journal::{Companion, Timestamp};
-use nexus_model::{Alert, AlertKind, Priority};
-use parking_lot::{Mutex, RwLock};
-use rustc_hash::FxHashMap;
+use nexus_model::{Alert, AlertKind, Model, Priority};
+use parking_lot::Mutex;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,19 +47,19 @@ pub struct MarketService {
     stats_job: Option<Job<Option<DbStats>>>,
     stats_at: Option<Instant>,
     import: Option<ImportJob>,
-    watch: Arc<RwLock<WatchState>>,
-    /// Price alerts raised by the watcher thread (drained by the app with the core's alerts).
-    pub alerts: Receiver<Alert>,
+    watch: WatchState,
+    watch_requests: Sender<WatchRequest>,
+    watch_results: Receiver<WatchResult>,
     ctx: egui::Context,
 }
 
 impl MarketService {
     pub fn open(data_dir: &Path, ctx: &egui::Context) -> MarketService {
-        let watch = Arc::new(RwLock::new(WatchState::default()));
-        let (tx, alerts) = crossbeam_channel::unbounded();
+        let (watch_requests, requests) = crossbeam_channel::unbounded();
+        let (results, watch_results) = crossbeam_channel::unbounded();
         let (db, db_error) = match GalaxyDb::open(data_dir.join("galaxy.db")) {
             Ok(db) => {
-                start_watcher(db.clone(), watch.clone(), tx, ctx.clone());
+                start_watcher(db.clone(), requests, results, ctx.clone());
                 (Some(db), None)
             }
             Err(e) => {
@@ -67,22 +67,39 @@ impl MarketService {
                 (None, Some(format!("Cannot open the market database: {e}")))
             }
         };
-        MarketService { db, db_error, eddn: None, stats: None, stats_job: None, stats_at: None, import: None, watch, alerts, ctx: ctx.clone() }
+        MarketService {
+            db, db_error, eddn: None, stats: None, stats_job: None, stats_at: None, import: None,
+            watch: WatchState::default(), watch_requests, watch_results, ctx: ctx.clone(),
+        }
     }
 
     /// Replaces the price-alert rules (call when they change).
-    pub fn set_watches(&self, watches: &[PriceWatch]) {
-        let rules = watches
-            .iter()
-            .map(|w| (w.clone(), self.db.as_ref().and_then(|db| db.commodity_symbol(&w.commodity))))
-            .collect();
-        self.watch.write().rules = rules;
+    pub fn set_watches(&mut self, watches: &[PriceWatch]) {
+        let Some(db) = &self.db else { return };
+        let rules = watches.iter().filter(|watch| watch.enabled).filter_map(|watch| {
+            let commodity = db.commodity_symbol(&watch.commodity)?;
+            Some(PriceWatch { commodity, ..watch.clone() })
+        });
+        if self.watch.set_rules(rules) {
+            self.request_watches();
+        }
     }
 
-    /// The commander's position, for the rules' distance limits.
-    pub fn set_origin(&self, origin: Option<[f64; 3]>) {
-        if self.watch.read().origin != origin {
-            self.watch.write().origin = origin;
+    pub fn set_watch_scope(&mut self, model: Option<&Model>) {
+        if self.watch.set_scope(model.and_then(WatchScope::capture)) {
+            self.request_watches();
+        }
+    }
+
+    fn request_watches(&self) {
+        if let Some(db) = &self.db {
+            let _ = self.watch_requests.send(self.watch.request(db));
+        }
+    }
+
+    pub fn drain_price_alerts(&mut self, alerts: &mut Vec<Alert>) {
+        for result in self.watch_results.try_iter() {
+            self.watch.deliver(result, alerts);
         }
     }
 
@@ -221,54 +238,176 @@ fn ingest_thread(db: GalaxyDb, name: &str) -> Sender<(String, String)> {
 // Price alerts: every committed live market (EDDN or own journal) is checked against the rules
 // ---------------------------------------------------------------------------------------------
 
-#[derive(Default)]
-struct WatchState {
-    /// Each rule with its resolved commodity symbol (None = unknown commodity).
-    rules: Vec<(PriceWatch, Option<String>)>,
+#[derive(Clone, PartialEq)]
+struct WatchScope {
+    commander: (u64, u64),
+    system: String,
+    system_address: u64,
+    arrived: Timestamp,
+    hyperspace: bool,
     origin: Option<[f64; 3]>,
+}
+
+impl WatchScope {
+    fn capture(model: &Model) -> Option<Self> {
+        let location = &model.active()?.location;
+        Some(Self {
+            commander: (model.source_generation(), model.active_generation()),
+            system: location.system.clone(),
+            system_address: location.system_address,
+            arrived: location.last_arrival,
+            hyperspace: location.hyperspace,
+            origin: location.star_pos.filter(|_| !location.hyperspace),
+        })
+    }
 }
 
 /// The same rule does not fire again for the same station within this time.
 const WATCH_COOLDOWN: Duration = Duration::from_secs(3600);
 
-fn start_watcher(db: GalaxyDb, state: Arc<RwLock<WatchState>>, tx: Sender<Alert>, ctx: egui::Context) {
-    let updates = db.subscribe_updates();
-    let spawned = std::thread::Builder::new().name("price-alerts".into()).spawn(move || {
-        let mut fired: FxHashMap<(usize, u64), Instant> = FxHashMap::default();
-        for u in updates {
-            let (rules, origin) = {
-                let s = state.read();
-                if !s.rules.iter().any(|(w, sym)| w.enabled && sym.is_some()) {
-                    continue;
-                }
-                (s.rules.clone(), s.origin)
-            };
-            let dist = origin.zip(u.pos).map(|(a, b)| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt());
-            let mut market: Option<Option<StationMarket>> = None;
-            for (i, (w, sym)) in rules.iter().enumerate() {
-                let Some(sym) = sym.as_deref().filter(|_| w.enabled) else { continue };
-                if !rule_applies(w, &u, dist) {
-                    continue;
-                }
-                // One station lookup per update, only when some rule could match.
-                let Some(m) = market.get_or_insert_with(|| db.station_market(u.market_id).ok().flatten()) else { break };
-                let Some(alert) = check_rule(w, sym, &u, m, dist) else { continue };
-                if fired.get(&(i, u.market_id)).is_some_and(|t| t.elapsed() < WATCH_COOLDOWN) {
-                    continue;
-                }
-                fired.insert((i, u.market_id), Instant::now());
-                if tx.send(alert).is_err() {
-                    return;
-                }
-                ctx.request_repaint();
+struct WatchRule {
+    watch: PriceWatch,
+    fired: FxHashMap<u64, Instant>,
+}
+
+#[derive(Default)]
+struct WatchState {
+    scope: Option<WatchScope>,
+    rules: Vec<WatchRule>,
+    generation: u64,
+}
+
+impl WatchState {
+    fn set_rules(&mut self, watches: impl IntoIterator<Item = PriceWatch>) -> bool {
+        let mut rules = Vec::new();
+        for watch in watches {
+            if !rules.contains(&watch) {
+                rules.push(watch);
             }
-            if fired.len() > 10_000 {
-                fired.retain(|_, t| t.elapsed() < WATCH_COOLDOWN);
+        }
+        if self.rules.iter().map(|rule| &rule.watch).eq(rules.iter()) {
+            return false;
+        }
+        let mut previous = std::mem::take(&mut self.rules);
+        self.rules = rules.into_iter().map(|watch| {
+            match previous.iter().position(|rule| rule.watch == watch) {
+                Some(index) => previous.swap_remove(index),
+                None => WatchRule { watch, fired: FxHashMap::default() },
+            }
+        }).collect();
+        self.generation = self.generation.wrapping_add(1);
+        true
+    }
+
+    fn set_scope(&mut self, scope: Option<WatchScope>) -> bool {
+        if self.scope == scope {
+            return false;
+        }
+        if self.scope.as_ref().map(|s| s.commander) != scope.as_ref().map(|s| s.commander) {
+            for rule in &mut self.rules {
+                rule.fired.clear();
+            }
+        }
+        self.scope = scope;
+        self.generation = self.generation.wrapping_add(1);
+        true
+    }
+
+    fn request(&self, db: &GalaxyDb) -> WatchRequest {
+        let updates = if self.scope.is_some() && !self.rules.is_empty() {
+            db.subscribe_updates()
+        } else {
+            crossbeam_channel::never()
+        };
+        WatchRequest {
+            generation: self.generation,
+            origin: self.scope.as_ref().and_then(|scope| scope.origin),
+            rules: self.rules.iter().map(|rule| rule.watch.clone()).collect(),
+            updates,
+        }
+    }
+
+    fn deliver(&mut self, result: WatchResult, alerts: &mut Vec<Alert>) {
+        if result.generation != self.generation || !result.update.is_current() {
+            return;
+        }
+        let market_id = result.update.market_id;
+        let mut notified = FxHashSet::default();
+        for (index, alert) in result.matches {
+            let rule = &mut self.rules[index];
+            if rule.fired.get(&market_id).is_some_and(|t| t.elapsed() < WATCH_COOLDOWN) {
+                continue;
+            }
+            if rule.fired.len() > 10_000 {
+                rule.fired.retain(|_, t| t.elapsed() < WATCH_COOLDOWN);
+            }
+            rule.fired.insert(market_id, Instant::now());
+            if notified.insert((rule.watch.commodity.clone(), rule.watch.sell)) {
+                alerts.push(alert);
+            }
+        }
+    }
+}
+
+struct WatchRequest {
+    generation: u64,
+    origin: Option<[f64; 3]>,
+    rules: Vec<PriceWatch>,
+    updates: Receiver<MarketUpdate>,
+}
+
+struct WatchResult {
+    generation: u64,
+    update: MarketUpdate,
+    matches: Vec<(usize, Alert)>,
+}
+
+fn start_watcher(db: GalaxyDb, requests: Receiver<WatchRequest>, tx: Sender<WatchResult>, ctx: egui::Context) {
+    let spawned = std::thread::Builder::new().name("price-alerts".into()).spawn(move || {
+        let Ok(mut request) = requests.recv() else { return };
+        loop {
+            // Switch subscriptions before reading any more observations for the old inputs.
+            crossbeam_channel::select_biased! {
+                recv(requests) -> next => {
+                    let Ok(next) = next else { return };
+                    request = next;
+                }
+                recv(request.updates) -> update => {
+                    let Ok(update) = update else { return };
+                    if let Some(result) = request.evaluate(&db, update) {
+                        if tx.send(result).is_err() {
+                            return;
+                        }
+                        ctx.request_repaint();
+                    }
+                }
             }
         }
     });
     if let Err(e) = spawned {
         tracing::error!("galaxy: cannot start the price-alert thread: {e}");
+    }
+}
+
+impl WatchRequest {
+    fn evaluate(&self, db: &GalaxyDb, update: MarketUpdate) -> Option<WatchResult> {
+        let dist = self.origin.zip(update.pos).map(|(a, b)| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        });
+        let mut matches = self.rules.iter().enumerate().filter(|(_, watch)| rule_applies(watch, &update, dist)).peekable();
+        matches.peek()?;
+        let market = db.station_market_for_update(&update).ok()??;
+        // Earlier events in the same commit can carry different station metadata.
+        let station = &market.station;
+        if station.system_id64 != update.system_id64 || station.pos != update.pos
+            || station.system != update.system || station.name != update.station || station.is_carrier != update.is_carrier
+        {
+            return None;
+        }
+        let matches: Vec<_> = matches.filter_map(|(index, watch)| {
+            check_rule(watch, &update, &market, dist).map(|alert| (index, alert))
+        }).collect();
+        (!matches.is_empty()).then_some(WatchResult { generation: self.generation, update, matches })
     }
 }
 
@@ -287,14 +426,14 @@ fn pad_rank(p: char) -> u8 {
 }
 
 /// The alert a rule raises for a freshly updated market, if it matches.
-fn check_rule(w: &PriceWatch, symbol: &str, u: &MarketUpdate, m: &StationMarket, dist: Option<f64>) -> Option<Alert> {
+fn check_rule(w: &PriceWatch, u: &MarketUpdate, m: &StationMarket, dist: Option<f64>) -> Option<Alert> {
     // Every station has a small pad: S asks for nothing, as in the market searches (M and L need the pad reported).
     if let Some(p) = w.min_pad.filter(|p| pad_rank(*p) > 1)
         && m.station.max_pad.is_none_or(|have| pad_rank(have) < pad_rank(p))
     {
         return None;
     }
-    let row = m.items.iter().find(|r| r.symbol == symbol)?;
+    let row = m.items.iter().find(|r| r.symbol == w.commodity)?;
     let min_qty = w.min_qty.max(1);
     let (price, qty) = if w.sell {
         (row.sell >= w.price && row.demand >= min_qty).then_some((row.sell, row.demand))?
@@ -485,16 +624,62 @@ impl Read for BodyReader {
 mod tests {
     use super::*;
     use crate::testutil::{TempDb, good, station};
+    use nexus_galaxy::{Ingest, MarketItem, MarketSnapshot, Source};
+    use nexus_journal::EventCtx;
+    use nexus_model::Alerts;
     use serde_json::json;
+
+    fn sell_gold() -> PriceWatch {
+        PriceWatch {
+            commodity: "gold".into(), sell: true, price: 50_000, max_ly: 0.0,
+            min_pad: None, carriers: false, min_qty: 10, enabled: true,
+        }
+    }
+
+    fn switch_commander(model: &mut Model, fid: &str) {
+        let ts = Timestamp::now();
+        let line = json!({"timestamp": ts.to_iso(), "event": "Commander", "Name": fid, "FID": fid}).to_string();
+        let event = nexus_journal::raw::parse_event_lenient("Commander", &line).unwrap();
+        model.apply(&EventCtx { ts, name: "Commander", line: &line, live: true }, &event, &mut Alerts::disabled());
+    }
+
+    fn alert_state() -> WatchState {
+        let mut model = Model::default();
+        switch_commander(&mut model, "F1");
+        let mut state = WatchState::default();
+        assert!(state.set_scope(WatchScope::capture(&model)));
+        assert!(state.set_rules([sell_gold()]));
+        state
+    }
+
+    fn gold_report(timestamp: i64, sell: i64, source: Source) -> Ingest {
+        Ingest::Market(MarketSnapshot {
+            market_id: 5001, station_name: "Alpha Port".into(), system_name: "Alpha".into(),
+            timestamp, source,
+            items: vec![MarketItem { symbol: "gold".into(), sell, demand: 80, ..Default::default() }],
+            ..Default::default()
+        })
+    }
+
+    fn evaluate_gold(db: &GalaxyDb, request: &WatchRequest, timestamp: i64) -> WatchResult {
+        db.ingest(gold_report(timestamp, 60_000, Source::Eddn));
+        db.flush().unwrap();
+        request.evaluate(db, request.updates.try_recv().unwrap()).unwrap()
+    }
 
     #[test]
     fn price_alert_fires_for_the_matching_market_only() {
         let t = TempDb::new("alerts");
         let db = t.db();
-        let rule = PriceWatch { commodity: "Gold".into(), sell: true, price: 50_000, max_ly: 20.0, min_pad: Some('L'), carriers: false, min_qty: 10, enabled: true };
-        let state = Arc::new(RwLock::new(WatchState { rules: vec![(rule, db.commodity_symbol("Gold"))], origin: Some([0.0; 3]) }));
+        let mut state = alert_state();
+        let mut scope = state.scope.clone().unwrap();
+        scope.origin = Some([0.0; 3]);
+        state.set_scope(Some(scope));
+        state.set_rules([PriceWatch { max_ly: 20.0, min_pad: Some('L'), ..sell_gold() }]);
+        let (requests, pending) = crossbeam_channel::unbounded();
         let (tx, rx) = crossbeam_channel::unbounded();
-        start_watcher(db.clone(), state, tx, egui::Context::default());
+        requests.send(state.request(db)).unwrap();
+        start_watcher(db.clone(), pending, tx, egui::Context::default());
 
         station(db, ("Far", 1003, 100.0), "Far Port", 5003, json!([good("gold", 0, 0, 70_000, 80)])); // too far
         station(db, ("Beta", 1002, 10.0), "Beta Hub", 5002, json!([good("gold", 0, 0, 40_000, 80)])); // too cheap
@@ -502,14 +687,98 @@ mod tests {
         station(db, ("Alpha", 1001, 0.0), "Alpha Port", 5001, json!([good("gold", 0, 0, 60_000, 80)])); // match
         db.flush().unwrap();
 
-        let a = rx.recv_timeout(Duration::from_secs(5)).expect("an alert for Alpha Port");
+        let mut alerts = Vec::new();
+        state.deliver(rx.recv_timeout(Duration::from_secs(5)).expect("a match for Alpha Port"), &mut alerts);
+        assert_eq!(alerts.len(), 1);
+        let a = &alerts[0];
         assert_eq!(a.title, "Gold sells for 60,000 Cr");
         assert!(a.detail.contains("Alpha Port") && a.detail.contains("0.0 ly"), "{}", a.detail);
         assert!(a.speech.as_deref().is_some_and(|s| s.contains("60 thousand credits")));
-        // The same market again within the cooldown stays quiet.
-        station(db, ("Alpha", 1001, 0.0), "Alpha Port", 5001, json!([good("gold", 0, 0, 61_000, 80)]));
+    }
+
+    #[test]
+    fn price_alert_changed_and_removed_watches_retire_pending_results() {
+        let t = TempDb::new("alert-edits");
+        let db = t.db();
+        let mut state = alert_state();
+        let request = state.request(db);
+        let mut alerts = Vec::new();
+        state.deliver(evaluate_gold(db, &request, 99), &mut alerts);
+        let pending = evaluate_gold(db, &request, 100);
+
+        let edited = PriceWatch { price: 55_000, ..sell_gold() };
+        assert!(state.set_rules([edited.clone()]));
+        let current = state.request(db);
+        assert!(current.updates.try_recv().is_err(), "a new request starts with a fresh subscription");
+        state.deliver(pending, &mut alerts);
+        assert_eq!(alerts.len(), 1);
+        state.deliver(evaluate_gold(db, &current, 101), &mut alerts);
+        assert_eq!(alerts.len(), 2, "the edited watch does not inherit the old cooldown");
+
+        let pending = evaluate_gold(db, &current, 102);
+        assert!(state.set_rules([]));
+        assert!(state.set_rules([edited]));
+        state.deliver(pending, &mut alerts);
+        assert_eq!(alerts.len(), 2, "removal and re-addition still retire the old result");
+        let readded = state.request(db);
+        state.deliver(evaluate_gold(db, &readded, 103), &mut alerts);
+        assert_eq!(alerts.len(), 3, "the re-added watch has its own cooldown");
+    }
+
+    #[test]
+    fn price_alert_commander_and_location_changes_retire_pending_results() {
+        let t = TempDb::new("alert-scope");
+        let db = t.db();
+        let mut model = Model::default();
+        switch_commander(&mut model, "F1");
+        let mut state = WatchState::default();
+        state.set_rules([sell_gold()]);
+        state.set_scope(WatchScope::capture(&model));
+        let first = state.request(db);
+        let mut alerts = Vec::new();
+        state.deliver(evaluate_gold(db, &first, 100), &mut alerts);
+        let pending = evaluate_gold(db, &first, 101);
+
+        switch_commander(&mut model, "F2");
+        assert!(state.set_scope(WatchScope::capture(&model)), "same origin, different commander");
+        state.deliver(pending, &mut alerts);
+        assert_eq!(alerts.len(), 1);
+        let second = state.request(db);
+        state.deliver(evaluate_gold(db, &second, 102), &mut alerts);
+        assert_eq!(alerts.len(), 2, "the second commander can receive an alert at the same market");
+
+        let pending = evaluate_gold(db, &second, 103);
+        model.active_mut().unwrap().location.system_address = 1001;
+        assert!(state.set_scope(WatchScope::capture(&model)), "system changed with coordinates still unknown");
+        state.deliver(pending, &mut alerts);
+        assert_eq!(alerts.len(), 2);
+    }
+
+    #[test]
+    fn price_alert_superseded_and_duplicate_observations_stay_quiet() {
+        let t = TempDb::new("alert-observations");
+        let db = t.db();
+        let mut state = alert_state();
+        let overlapping = PriceWatch { price: 58_000, ..sell_gold() };
+        state.set_rules([sell_gold(), sell_gold(), overlapping]);
+        let request = state.request(db);
+        let pending = evaluate_gold(db, &request, 100);
+        db.ingest(gold_report(100, 40_000, Source::Journal));
         db.flush().unwrap();
-        assert!(rx.recv_timeout(Duration::from_millis(700)).is_err(), "only one alert");
+        assert!(request.evaluate(db, request.updates.try_recv().unwrap()).is_none());
+        let mut alerts = Vec::new();
+        state.deliver(pending, &mut alerts);
+        assert!(alerts.is_empty(), "the preferred observation invalidates a queued match");
+
+        let matching = evaluate_gold(db, &request, 101);
+        assert_eq!(matching.matches.len(), 2, "identical watches are evaluated once");
+        state.deliver(matching, &mut alerts);
+        assert_eq!(alerts.len(), 1, "overlapping watches produce one notification");
+        db.ingest(gold_report(101, 60_000, Source::Eddn));
+        db.flush().unwrap();
+        assert!(request.updates.try_recv().is_err(), "a duplicate observation produces no evaluation");
+        state.deliver(evaluate_gold(db, &request, 102), &mut alerts);
+        assert_eq!(alerts.len(), 1, "subsequent observations respect both watches' cooldowns");
     }
 
     /// Start-up history replay into the galaxy database with and without the body events, on this

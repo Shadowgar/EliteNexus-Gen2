@@ -264,7 +264,9 @@ impl GalaxyDb {
     /// Updates are dropped for a receiver whose channel is full; drop the receiver to unsubscribe.
     pub fn subscribe_updates(&self) -> Receiver<MarketUpdate> {
         let (tx, rx) = crossbeam_channel::bounded(self.inner.opts.update_channel_capacity.max(1));
-        self.inner.shared.subscribers.lock().push(tx);
+        let shared = &self.inner.shared;
+        let mut subscribers = shared.subscribers.lock();
+        subscribers.push((shared.commits.load(Ordering::Acquire), tx));
         rx
     }
 
@@ -362,6 +364,17 @@ impl GalaxyDb {
             }
         }
         Ok(m)
+    }
+
+    /// Reads a market for a live notification only while its committed update is current.
+    /// Check [`MarketUpdate::is_current`] again if delivery is deferred after this read.
+    pub fn station_market_for_update(&self, update: &MarketUpdate) -> Result<Option<StationMarket>> {
+        if !update.is_current() {
+            return Ok(None);
+        }
+        let market = self.station_market(update.market_id)?;
+        let _commit = self.inner.shared.market_commit.lock();
+        Ok(market.filter(|_| update.is_current()))
     }
 
     pub fn station(&self, market_id: u64) -> Result<Option<StationInfo>> {

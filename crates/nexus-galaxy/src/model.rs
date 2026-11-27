@@ -2,6 +2,8 @@
 
 use crate::services::{MaterialTrader, Services, TechBroker};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Where a piece of data came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
@@ -1011,6 +1013,24 @@ pub struct MarketUpdate {
     pub updated_unix: i64,
     pub is_carrier: bool,
     pub source: Source,
+    #[serde(skip)]
+    pub(crate) revision: Arc<MarketRevision>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct MarketRevision(pub(crate) AtomicBool);
+
+impl PartialEq for MarketRevision {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl MarketUpdate {
+    /// Whether this committed update still represents the station's market.
+    pub fn is_current(&self) -> bool {
+        self.revision.0.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

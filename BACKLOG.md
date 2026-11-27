@@ -18,7 +18,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [x] **G2-022 (ENX-032) — Market precedence.** Integrated from PR #8. Independent field clocks and sources, deterministic ties, incomplete report preservation, carrier location/access protection, schema-3 migration and same-time history reconciliation. Reported 27 galaxy tests passed at `22d8dc7`; focused history regression red/green at `a4ab34a`. Legacy history reconstruction is limited to existing points at the replaced timestamp. Production-size migration and live acceptance deferred to 01D-W.
 - [x] **G2-024A (ENX-033) — Market quote freshness.** Integrated from PR #9; seven focused galaxy regressions reported passed at `2e1dbc7`. Application compilation and runtime verification deferred to 01D-W.
 - [x] **G2-024B (ENX-034) — Deals request identity.** Integrated PR #10; full query and commander context retire superseded results. Application check pending at handoff, test compilation/execution and runtime deferred to 01D-W. Disconnected worker handling remains G2-033.
-- [ ] **G2-024 (remaining scope) — Alerts and access.** Scope alert generations and distinguish open, restricted and unknown carrier access across desktop and assistant tools.
+- [ ] **G2-024C — Market alert generation consistency.** Implementation in review. Alert evaluations follow the active commander, location and watch configuration. Application verification is deferred to 01D-W.
+- [ ] **G2-024 (remaining scope) — Carrier access.** Distinguish open, restricted and unknown carrier access across desktop and assistant tools.
 - [ ] **G2-025 — Carrier movement authority.** Separate jump requests, estimates and verified movements by carrier identity. Do not infer authoritative route advancement or duplicate history from unrelated or repeated observations.
 - [ ] **G2-033 (market/carrier scope) — Worker outcomes.** Handle terminal failures and disconnected workers; retire superseded results and permit retry. Leave unrelated workers for 01D-D.
 
@@ -37,6 +38,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [ ] **G2-036 — Isolated clipboard UI.** Make the unavailable next-system clipboard action explicit without overwriting the ordinary saved preference.
 
 ## 01D-W — Comprehensive gameplay regression testing
+
+- [ ] G2-024C: run `cargo +1.100.0 test --locked -p nexus-app --bin Praetorium price_alert_` using `C:\PraetoriumBuild`. With controlled market updates, modify or remove a watch, jump, and switch commanders while evaluations are pending. Verify that only current observations produce notifications, including speech and overlays, and that overlapping watches produce one notification per commodity and trade direction.
 
 - [ ] G2-024B: complete the pending application check and run `cargo +1.100.0 test --locked -p nexus-app --bin Praetorium deals_` using `C:\PraetoriumBuild`. In Abnormal prices, change system, ship capacity and filters during a scan, refresh while busy, and lose and regain origin for a radius scan. Verify only the current results can be opened or pinned.
 

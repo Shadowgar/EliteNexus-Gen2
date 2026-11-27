@@ -15,7 +15,7 @@ use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -100,7 +100,9 @@ pub(crate) struct ImportAck {
 /// State shared between the writer thread and the [`crate::GalaxyDb`] handles.
 #[derive(Default)]
 pub(crate) struct Shared {
-    pub subscribers: Mutex<Vec<Sender<MarketUpdate>>>,
+    pub subscribers: Mutex<Vec<(u64, Sender<MarketUpdate>)>>,
+    /// Serializes market revision retirement with validation of an alert's database read.
+    pub market_commit: Mutex<()>,
     pub commodities: RwLock<CommodityCache>,
     pub stations: RwLock<StationIndex>,
     pub ingested: AtomicU64,
@@ -146,6 +148,7 @@ pub(crate) struct Writer {
     rx: Receiver<WriterMsg>,
     ctx: Ctx,
     live_failure: Option<String>,
+    market_revisions: FxHashMap<u64, Weak<MarketRevision>>,
 }
 
 /// Everything the apply functions need besides the transaction.
@@ -162,6 +165,7 @@ struct Ctx {
 #[derive(Default)]
 struct BatchOutcome {
     updates: Vec<MarketUpdate>,
+    latest_market: FxHashMap<u64, Option<Arc<MarketRevision>>>,
     stale: u64,
     errors: u64,
 }
@@ -177,6 +181,7 @@ impl Writer {
             conn,
             rx,
             live_failure: None,
+            market_revisions: FxHashMap::default(),
             ctx: Ctx {
                 shared,
                 opts,
@@ -332,11 +337,29 @@ impl Writer {
                                 },
                             ));
                             outcome.errors += local.errors;
+                            outcome.latest_market.extend(local.latest_market);
                         }
                         WriterMsg::Flush(_) | WriterMsg::Checkpoint(_) => unreachable!("barrier is handled separately"),
                     }
                 }
-                tx.commit().map_err(|e| format!("commit: {e}"))
+                let _commit = self.ctx.shared.market_commit.lock();
+                tx.commit().map_err(|e| format!("commit: {e}")).map(|()| {
+                    self.ctx.shared.commits.fetch_add(1, Ordering::Release);
+                    for &market_id in self.ctx.dirty.borrow().iter() {
+                        if let Some(revision) = self.market_revisions.remove(&(market_id as u64)).and_then(|r| r.upgrade()) {
+                            revision.0.store(false, Ordering::Release);
+                        }
+                    }
+                    for (market_id, revision) in outcome.latest_market.drain() {
+                        if let Some(revision) = revision {
+                            revision.0.store(true, Ordering::Release);
+                            self.market_revisions.insert(market_id, Arc::downgrade(&revision));
+                        }
+                    }
+                    if self.market_revisions.len() > 1024 {
+                        self.market_revisions.retain(|_, revision| revision.strong_count() != 0);
+                    }
+                })
             }
             Err(e) => Err(format!("begin: {e}")),
         };
@@ -357,7 +380,6 @@ impl Writer {
         let mut dirty = std::mem::take(&mut *self.ctx.dirty.borrow_mut());
         let history_added = self.ctx.history_added.take();
         if committed {
-            shared.commits.fetch_add(1, Ordering::Relaxed);
             for (c, n) in counted {
                 c.fetch_add(n, Ordering::Relaxed);
             }
@@ -905,7 +927,10 @@ impl Ctx {
                 Ok(MarketResult::Stored(u)) => {
                     self.shared.market_snapshots.fetch_add(1, Ordering::Relaxed);
                     if live && m.timestamp > 0 {
+                        out.latest_market.insert(u.market_id, Some(u.revision.clone()));
                         out.updates.push(u);
+                    } else {
+                        out.latest_market.insert(u.market_id, None);
                     }
                     Ok(true)
                 }
@@ -1206,6 +1231,7 @@ impl Ctx {
             updated_unix: m.timestamp,
             is_carrier: row.is_carrier,
             source: m.source,
+            revision: Arc::default(),
         }))
     }
 
@@ -1517,7 +1543,11 @@ impl Ctx {
             return;
         }
         let mut subs = self.shared.subscribers.lock();
-        subs.retain(|s| {
+        let commit = self.shared.commits.load(Ordering::Relaxed);
+        subs.retain(|(after_commit, s)| {
+            if *after_commit == commit {
+                return true;
+            }
             for u in &updates {
                 match s.try_send(u.clone()) {
                     Ok(()) | Err(TrySendError::Full(_)) => {}
