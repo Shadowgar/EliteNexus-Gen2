@@ -19,7 +19,7 @@ use crate::index::StationFilter;
 use crate::model::*;
 use crate::query::{MAX_RADIUS, ReadPool, station};
 use crate::station::Pad;
-use crate::util::{dist, dist2, now_unix};
+use crate::util::{age_cutoff, dist, dist2};
 use crate::writer::Shared;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -63,10 +63,7 @@ pub(crate) fn trade_routes(
 ) -> Result<Vec<TradeRoute>> {
     let radius = q.radius_ly.clamp(0.0, MAX_RADIUS);
     let hop2 = q.max_hop_ly.max(0.0).powi(2);
-    let cutoff = match q.max_age_hours {
-        Some(h) if h.is_finite() && h > 0.0 => now_unix() - (h * 3600.0) as i64,
-        _ => 1, // any market data at all
-    };
+    let cutoff = age_cutoff(q.max_age_hours).max(1);
     let filter = StationFilter {
         min_pad: match q.min_pad.and_then(Pad::from_char) {
             Some(Pad::Medium) => 2,

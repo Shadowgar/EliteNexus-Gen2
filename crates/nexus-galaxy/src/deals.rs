@@ -12,7 +12,7 @@ use crate::index::StationFilter;
 use crate::model::*;
 use crate::query::{MAX_RADIUS, ReadPool, station};
 use crate::station::Pad;
-use crate::util::{dist, now_unix};
+use crate::util::{age_cutoff, dist};
 use crate::writer::Shared;
 use rayon::prelude::*;
 use rusqlite::Connection;
@@ -61,10 +61,7 @@ pub(crate) fn price_deals(pool: &ReadPool, shared: &Shared, q: &DealQuery) -> Re
     if q.min_ratio >= INDEXED_RATIO {
         return abnormal_prices(pool, shared, q);
     }
-    let cutoff = match q.max_age_hours {
-        Some(h) if h.is_finite() && h > 0.0 => now_unix() - (h * 3600.0) as i64,
-        _ => 1,
-    };
+    let cutoff = age_cutoff(q.max_age_hours).max(1);
     let filter = StationFilter {
         min_pad: match q.min_pad.and_then(Pad::from_char) {
             Some(Pad::Medium) => 2,
@@ -210,10 +207,7 @@ pub(crate) fn price_deals(pool: &ReadPool, shared: &Shared, q: &DealQuery) -> Re
 /// through the anomaly indexes. Unpriced rows (fleet carriers) are compared with the average the
 /// stations report for that commodity.
 fn abnormal_prices(pool: &ReadPool, shared: &Shared, q: &DealQuery) -> Result<Vec<Deal>> {
-    let cutoff = match q.max_age_hours {
-        Some(h) if h.is_finite() && h > 0.0 => now_unix() - (h * 3600.0) as i64,
-        _ => 1,
-    };
+    let cutoff = age_cutoff(q.max_age_hours).max(1);
     let filter = StationFilter {
         min_pad: match q.min_pad.and_then(Pad::from_char) {
             Some(Pad::Medium) => 2,

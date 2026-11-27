@@ -624,7 +624,7 @@ fn station_ops(
             station_name: name,
             station_type,
             carrier_docking_access: text(&st.carrier_docking_access),
-            timestamp: m.update_time.as_deref().and_then(parse_ts).unwrap_or(ts),
+            timestamp: crate::convert::market_timestamp(m.update_time.as_deref().and_then(parse_ts), None),
             station_timestamp: Some(ts),
             items,
             incomplete,

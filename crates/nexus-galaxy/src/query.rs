@@ -6,7 +6,7 @@ use crate::index::{StationFilter, StationIndex};
 use crate::model::*;
 use crate::services::{MaterialTrader, Services, TechBroker};
 use crate::station::Pad;
-use crate::util::{dist, now_unix};
+use crate::util::{age_cutoff, dist};
 use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::ops::Deref;
@@ -163,13 +163,6 @@ fn pad_code(c: Option<char>) -> i64 {
         Some(Pad::Medium) => 2,
         Some(Pad::Large) => 3,
         _ => 0,
-    }
-}
-
-fn age_cutoff(hours: Option<f64>) -> i64 {
-    match hours {
-        Some(h) if h.is_finite() && h > 0.0 => now_unix() - (h * 3600.0) as i64,
-        _ => i64::MIN,
     }
 }
 
@@ -474,7 +467,9 @@ pub(crate) fn commodity_summary(
             };
             let price: i64 = r.get(1)?;
             let updated: i64 = r.get(3)?;
-            s.newest_unix = Some(s.newest_unix.map_or(updated, |n| n.max(updated)));
+            if updated > 0 {
+                s.newest_unix = Some(s.newest_unix.map_or(updated, |n| n.max(updated)));
+            }
             let new = u32::from(counted.insert((selling, market_id)));
             let carrier = new * u32::from(st.is_carrier());
             if selling {
@@ -724,7 +719,7 @@ pub(crate) fn find_stations(
 
 pub(crate) fn recent_markets(conn: &Connection, limit: usize) -> Result<Vec<StationInfo>> {
     let sql = format!(
-        "SELECT {STATION_COLS} FROM stations AS s WHERE s.market_updated > 0 ORDER BY s.market_updated DESC LIMIT ?1"
+        "SELECT {STATION_COLS} FROM stations AS s WHERE (s.market_updated > 0 OR s.n_commodities > 0) ORDER BY s.market_updated DESC LIMIT ?1"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map([limit.clamp(1, 10_000) as i64], |r| station_info(r, 0))?;

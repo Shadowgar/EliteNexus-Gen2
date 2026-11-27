@@ -1911,3 +1911,89 @@ fn rare_goods_as_one_commodity() {
     assert_eq!(gold.len(), 1);
     assert!(gold[0].commodity.is_none());
 }
+
+#[test]
+fn quote_freshness_uses_market_observation_time() {
+    let t = TempDb::new("quote-freshness");
+    let db = t.db();
+    let stale = now() - 48 * 3600;
+    let fresh = now() - 60;
+    let quote = |price| [("gold", price, price - 1, 10, 10)];
+    let q = CommodityQuery {
+        commodity: "gold".into(),
+        max_age_hours: Some(24.0),
+        ..Default::default()
+    };
+    let unbounded = CommodityQuery { max_age_hours: None, ..q.clone() };
+
+    db.ingest(market(1, "Alpha", "Alpha Port", stale, &quote(100)));
+    db.ingest(Ingest::Station(StationUpdate {
+        market_id: 1,
+        timestamp: now(),
+        system_name: Some("Updated Location".into()),
+        source: Source::Journal,
+        ..Default::default()
+    }));
+    db.flush().unwrap();
+    assert!(db.latest_prices(&q).unwrap().is_empty());
+    let old = db.latest_prices(&unbounded).unwrap().pop().unwrap();
+    assert_eq!((old.buy, old.updated_unix), (100, stale));
+
+    db.ingest(market(1, "Alpha", "Alpha Port", fresh, &quote(200)));
+    db.ingest(market(1, "Alpha", "Alpha Port", stale, &quote(300)));
+    db.flush().unwrap();
+    let refreshed = db.latest_prices(&q).unwrap().pop().unwrap();
+    assert_eq!((refreshed.buy, refreshed.updated_unix), (200, fresh));
+    assert_eq!(refreshed.system, "Updated Location");
+    assert_eq!(db.search_commodity(&q).unwrap()[0].updated_unix, fresh);
+}
+
+#[test]
+fn quote_freshness_keeps_missing_market_timestamps_unknown() {
+    let t = TempDb::new("quote-unknown");
+    let db = t.db();
+    let report = |id, price| serde_json::json!({
+        "$schemaRef": "https://eddn.edcd.io/schemas/commodity/3",
+        "header": {"gatewayTimestamp": "2026-01-01T00:00:00Z"},
+        "message": {
+            "marketId": id, "stationName": "Alpha Port", "systemName": "Alpha",
+            "commodities": [{"name": "gold", "buyPrice": price, "sellPrice": 1, "stock": 10, "demand": 10}]
+        }
+    });
+    db.ingest_many(Ingest::from_eddn(&report(1, 100)));
+    db.flush().unwrap();
+
+    let q = CommodityQuery { commodity: "gold".into(), max_age_hours: None, ..Default::default() };
+    assert_eq!(db.latest_prices(&q).unwrap()[0].updated_unix, 0);
+    let stored = db.station_market(1).unwrap().unwrap();
+    assert_eq!(stored.items[0].updated_unix, 0);
+    assert_eq!(stored.station.name, "Alpha Port");
+    assert_eq!(db.commodity_summary("gold", None).unwrap().unwrap().newest_unix, None);
+    let bounded = CommodityQuery { max_age_hours: Some(f64::MAX), ..q.clone() };
+    assert!(db.latest_prices(&bounded).unwrap().is_empty());
+
+    let fresh = now() - 60;
+    db.ingest(market(1, "Alpha", "Alpha Port", fresh, &[("gold", 200, 1, 10, 10)]));
+    db.ingest_many(Ingest::from_eddn(&report(1, 300)));
+    db.flush().unwrap();
+    let refreshed = db.latest_prices(&bounded).unwrap().pop().unwrap();
+    assert_eq!((refreshed.buy, refreshed.updated_unix), (200, fresh));
+}
+
+#[test]
+fn quote_freshness_does_not_use_spansh_station_time() {
+    let t = TempDb::new("quote-spansh");
+    let db = t.db();
+    let data = gzip(&dump_framing(&[serde_json::json!({
+        "id64": 100, "name": "Alpha", "coords": {"x": 0, "y": 0, "z": 0},
+        "stations": [{
+            "id": 1, "name": "Alpha Port", "updateTime": "2026-01-01T00:00:00Z",
+            "market": {"commodities": [{"symbol": "gold", "buyPrice": 100, "sellPrice": 90, "supply": 10, "demand": 10}]}
+        }]
+    })]));
+    db.import_spansh_dump(&data[..], |_| true).unwrap();
+    let stored = db.station_market(1).unwrap().unwrap();
+    assert!(stored.station.updated_unix > 0);
+    assert_eq!(stored.station.market_updated_unix, 0);
+    assert_eq!(stored.items[0].updated_unix, 0);
+}

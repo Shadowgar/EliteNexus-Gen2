@@ -419,6 +419,7 @@ pub struct MarketUi {
     /// Whether the shown page is the Rare Goods page, and the query it was loaded with: any change (filters,
     /// commodity, position) reloads it.
     page_key: Option<(bool, CommodityQuery)>,
+    page_at: Option<std::time::Instant>,
     /// A new commodity is loading: once it arrives, an empty list may give way to one with results.
     fresh: bool,
     /// Text that matched no commodity.
@@ -426,6 +427,7 @@ pub struct MarketUi {
     pick: Option<PickKey>,
     detail: Slot<Result<PickDetail, String>>,
     detail_key: Option<(u64, String)>,
+    detail_at: Option<std::time::Instant>,
     /// Station tab: the open markets as the database has them, by market id; reloaded when the tiles change, a little
     /// after the game writes a market, and every few seconds while the tab shows.
     tiles_live: Slot<Result<FxHashMap<u64, Option<StationMarket>>, String>>,
@@ -516,11 +518,13 @@ impl MarketUi {
             commodities: Vec::new(),
             page: Slot::default(),
             page_key: None,
+            page_at: None,
             fresh: true,
             not_found: None,
             pick: None,
             detail: Slot::default(),
             detail_key: None,
+            detail_at: None,
             tiles_live: Slot::default(),
             tiles_key: None,
             tiles_at: None,
@@ -1000,9 +1004,17 @@ fn pad_rank(p: Option<char>) -> u8 {
 
 /// How old a price is ("5m", "3h", "2d"), in a colour from fresh to stale.
 pub(crate) fn age(updated_unix: i64) -> (String, egui::Color32) {
+    if updated_unix <= 0 {
+        return ("Age unknown".into(), pal::DIM);
+    }
     let s = (nexus_journal::Timestamp::now().0 - updated_unix).max(0);
     let col = if s < 3600 { pal::GOOD } else if s < 6 * 3600 { pal::CYAN } else if s < 48 * 3600 { pal::WARN } else { pal::FAINT };
     (span(s), col)
+}
+
+fn reported_age(updated_unix: i64) -> (String, Color32) {
+    let (text, color) = age(updated_unix);
+    if updated_unix > 0 { (format!("{text} ago"), color) } else { (text, color) }
 }
 
 /// A stretch of time in its largest whole unit: "40s", "5m", "3h", "2d".
@@ -1471,7 +1483,8 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
     }
     ui.add_space(8.0);
 
-    // (Re)load whenever the commodity, a filter or the position changes; one query at a time.
+    // Refresh open quotes even when the commander and search inputs have not moved.
+    const QUOTE_REFRESH: std::time::Duration = std::time::Duration::from_secs(30);
     let p = &st.prefs;
     if p.commodity.trim().is_empty() && p.rare_goods.is_none() {
         empty(ui, icon::MAGNIFYING_GLASS, "Find the best price for anything", "Type a commodity: where to buy it, where to sell it, and the latest prices, nearest or best first.");
@@ -1491,10 +1504,22 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
         sort: p.sort,
     };
     let key = (p.rare_goods.is_some(), q);
-    if st.page_key.as_ref() != Some(&key) && !st.page.busy() {
+    ui.ctx().request_repaint_after(QUOTE_REFRESH);
+    let refresh_due = |last: Option<std::time::Instant>| last.is_none_or(|t| t.elapsed() >= QUOTE_REFRESH);
+    let changed = st.page_key.as_ref() != Some(&key);
+    if (changed || refresh_due(st.page_at)) && !st.page.busy() {
+        if changed {
+            st.page.last = None;
+        }
         st.page_key = Some(key.clone());
+        st.page_at = Some(std::time::Instant::now());
         let db = db.clone();
-        st.page.run(ui.ctx(), move || load_page(&db, key.0, &key.1).map_err(|e| e.to_string()));
+        let request = key.clone();
+        st.page.run(ui.ctx(), move || load_page(&db, request.0, &request.1).map_err(|e| e.to_string()));
+    }
+    if st.page_key.as_ref() != Some(&key) {
+        ui.spinner();
+        return None;
     }
     let page = match &st.page.last {
         None => {
@@ -1551,7 +1576,9 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
     // The picked row: its market's details and its commodity's price history there.
     if let Some((id, symbol)) = st.pick.clone() {
         let key = (id, symbol.clone());
-        if st.detail_key.as_ref() != Some(&key) && !st.detail.busy() {
+        let changed = st.detail_key.as_ref() != Some(&key);
+        if (changed || refresh_due(st.detail_at)) && !st.detail.busy() {
+            st.detail_at = Some(std::time::Instant::now());
             st.detail_key = Some(key.clone());
             let db = db.clone();
             st.detail.run(ui.ctx(), move || {
@@ -1561,7 +1588,7 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
                 Ok(PickDetail { market, history, since })
             });
         }
-        let current = st.detail_key.as_ref().is_some_and(|k| k.0 == id) && !st.detail.busy();
+        let current = !st.detail.busy();
         match (&st.detail.last, current) {
             (Some(Ok(d)), true) => match pick_card(ui, d, (&symbol, &row_name(page, &st.commodities, &symbol)), origin, &st.prefs, st.side == Side::Sell) {
                 PickAction::None => {}
@@ -1810,7 +1837,7 @@ fn empty_side(ui: &mut Ui, page: &CommodityPage, side: Side, p: &MarketPrefs, ha
             let kind = if h.is_carrier { " (fleet carrier)" } else { "" };
             ui.add(
                 egui::Label::new(
-                    RichText::new(format!("The nearest market that {verb} it: {}{kind} in {}{dist}, {}{qty}, {} ago.", h.station, h.system, cr(h.price), age(h.updated_unix).0))
+                    RichText::new(format!("The nearest market that {verb} it: {}{kind} in {}{dist}, {}{qty}, {}.", h.station, h.system, cr(h.price), reported_age(h.updated_unix).0))
                         .size(size::CALLOUT)
                         .color(pal::TEXT),
                 )
@@ -2250,8 +2277,8 @@ fn pick_card(ui: &mut Ui, d: &PickDetail, (symbol, name): (&str, &str), origin: 
                                 ui.label(RichText::new(format!("Buys {} for {} · {} wanted", name, cr(r.sell), nexus_data::names::group_digits(r.demand))).color(pal::GOOD));
                                 since(ui, d.since.and_then(|s| s.sell), false, r.updated_unix);
                             }
-                            let (a, col) = age(r.updated_unix);
-                            ui.label(RichText::new(format!("Updated {a} ago · {} goods on this market", m.items.len())).size(size::FOOTNOTE).color(col));
+                            let (a, col) = reported_age(r.updated_unix);
+                            ui.label(RichText::new(format!("{a} · {} goods on this market", m.items.len())).size(size::FOOTNOTE).color(col));
                         }
                         None => {
                             ui.label(RichText::new(format!("Its latest market no longer lists {}.", name)).color(pal::DIM));
@@ -2704,8 +2731,8 @@ fn pins_panel(ui: &mut Ui, gs: &GameState, st: &mut MarketUi) -> Option<Nav> {
                         } else if in_system {
                             ui.label(RichText::new("in this system").color(pal::GOOD));
                         } else if let Some(Some(n)) = &now {
-                            let (a, c) = age(n.updated);
-                            ui.label(RichText::new(format!("{a} ago")).color(c)).on_hover_text("When its market was last reported");
+                            let (a, c) = reported_age(n.updated);
+                            ui.label(RichText::new(a).color(c)).on_hover_text("When its market was last reported");
                         }
                     });
                     row.col(|ui| {
@@ -3767,11 +3794,11 @@ fn list_row(ui: &mut Ui, name: &str, carrier: bool, access: Option<Option<&str>>
 /// What a market says under its name in the list after `lead` (its kind, a note): how many goods it trades and how old
 /// its prices are, the age in its colour from fresh to stale.
 fn market_line(lead: &str, s: &StationInfo) -> Vec<(String, Color32)> {
-    if s.market_updated_unix <= 0 {
+    if s.market_updated_unix <= 0 && s.commodity_count == 0 {
         return vec![(format!("{lead}no market in the database"), pal::FAINT)];
     }
-    let (a, col) = age(s.market_updated_unix);
-    vec![(format!("{lead}{} goods · ", s.commodity_count), pal::DIM), (format!("reported {a} ago"), col)]
+    let (a, col) = reported_age(s.market_updated_unix);
+    vec![(format!("{lead}{} goods · ", s.commodity_count), pal::DIM), (a, col)]
 }
 
 /// A plain line under a name in the list.
@@ -3868,7 +3895,7 @@ fn station_search(ui: &mut Ui, db: &GalaxyDb, st: &mut MarketUi) -> Option<u64> 
             .iter()
             .filter(|s| s.name.to_lowercase().starts_with(&q))
             .map(|s| {
-                let what = if s.market_updated_unix > 0 { format!("{} goods", s.commodity_count) } else { "no market".to_string() };
+                let what = if s.market_updated_unix > 0 || s.commodity_count > 0 { format!("{} goods", s.commodity_count) } else { "no market".to_string() };
                 Suggestion { text: label(s), detail: what, starred: false }
             })
             .collect()
@@ -3916,7 +3943,7 @@ fn here_list(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, dock
         });
         return;
     };
-    let has_market = |s: &StationInfo| s.market_updated_unix > 0;
+    let has_market = |s: &StationInfo| s.market_updated_unix > 0 || s.commodity_count > 0;
     let mut stations: Vec<&StationInfo> = recorded.iter().filter(|s| !s.is_carrier && Some(s.market_id) != docked).collect();
     stations.sort_by(|a, b| has_market(b).cmp(&has_market(a)).then_with(|| cmp_text(&a.name, &b.name)));
     let gone: Vec<&StationInfo> = recorded.iter().filter(|s| s.is_carrier && !listed.iter().any(|(_, c)| c.eq_ignore_ascii_case(&s.name))).collect();
@@ -4279,9 +4306,9 @@ fn tile_header(ui: &mut Ui, m: &StationMarket, cx: &TileCtx, action: &mut Option
         if !facts.is_empty() {
             ui.label(RichText::new(format!("· {}", facts.join(" · "))).size(size::FOOTNOTE).color(pal::DIM));
         }
-        if s.market_updated_unix > 0 {
-            let (a, col) = age(s.market_updated_unix);
-            ui.label(RichText::new(format!("· {a} ago")).size(size::FOOTNOTE).color(col)).on_hover_text("When this market was last reported");
+        if s.market_updated_unix > 0 || s.commodity_count > 0 {
+            let (a, col) = reported_age(s.market_updated_unix);
+            ui.label(RichText::new(format!("· {a}")).size(size::FOOTNOTE).color(col)).on_hover_text("When this market was last reported");
         }
         if !m.prohibited.is_empty() {
             ui.label(RichText::new(format!("· {} {} prohibited", icon::PROHIBIT, m.prohibited.len())).size(size::FOOTNOTE).color(pal::DIM))

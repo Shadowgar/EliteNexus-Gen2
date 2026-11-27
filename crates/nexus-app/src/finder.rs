@@ -303,11 +303,15 @@ fn why_missing(db: &GalaxyDb, origin: [f64; 3], (symbol, name, tonnes): &Line, f
     if *tonnes > 1 && h.quantity < *tonnes {
         fails.push(format!("only {} t in stock", nexus_data::names::group_digits(h.quantity)));
     }
-    let hours = (nexus_journal::Timestamp::now().0 - h.updated_unix).max(0) as f64 / 3600.0;
-    if let Some(max) = f.max_age_hours
-        && hours > max
-    {
-        fails.push(format!("prices {hours:.0} h old"));
+    if let Some(max) = f.max_age_hours {
+        if h.updated_unix <= 0 {
+            fails.push("price age unknown".into());
+        } else {
+            let hours = (nexus_journal::Timestamp::now().0 - h.updated_unix).max(0) as f64 / 3600.0;
+            if hours > max {
+                fails.push(format!("prices {hours:.0} h old"));
+            }
+        }
     }
     // S leaves nothing out (every station has one), as in the database's searches.
     if f.min_pad.is_some_and(|m| m != 'S') && pad_rank(h.max_pad) < pad_rank(f.min_pad) {
@@ -405,7 +409,8 @@ impl<'a> Candidates<'a> {
     /// where it's sold (a buy price) with the tonnes asked for in stock, at a price no older than the filters allow; the
     /// station passed the filters for the good that brought it in.
     fn complete(&mut self, db: &GalaxyDb, lines: &[Line], f: &TripFilters, wanted: u16) -> Result<(), String> {
-        let cutoff = f.max_age_hours.map(|h| nexus_journal::Timestamp::now().0 - (h * 3600.0) as i64);
+        let cutoff = f.max_age_hours.filter(|h| h.is_finite() && *h > 0.0)
+            .map(|h| (nexus_journal::Timestamp::now().0 - (h * 3600.0) as i64).max(1));
         for s in 0..self.stations.len() {
             let Candidate { market, goods, .. } = self.stations[s];
             if goods & wanted == wanted || !self.read.insert(market) {

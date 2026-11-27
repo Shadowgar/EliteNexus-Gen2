@@ -113,6 +113,11 @@ fn clamp_ts(ts: Option<i64>, gateway: Option<i64>) -> i64 {
     t
 }
 
+/// Quote freshness requires a usable timestamp from the observation itself.
+pub(crate) fn market_timestamp(ts: Option<i64>, gateway: Option<i64>) -> i64 {
+    ts.filter(|&t| t > 0 && clamp_ts(Some(t), gateway) == t).unwrap_or(0)
+}
+
 fn bracket(v: Option<&Value>) -> Option<i8> {
     match v? {
         Value::String(s) if s.trim().is_empty() => Some(-1),
@@ -175,8 +180,8 @@ fn commodity_snapshot(msg: &Value, gateway: Option<i64>) -> Option<MarketSnapsho
         station_name,
         station_type: get_text(msg, "stationType"),
         carrier_docking_access: get_text(msg, "carrierDockingAccess"),
-        timestamp: clamp_ts(get_ts(msg, "timestamp"), gateway),
-        station_timestamp: None,
+        timestamp: market_timestamp(get_ts(msg, "timestamp"), gateway),
+        station_timestamp: Some(clamp_ts(get_ts(msg, "timestamp"), gateway)),
         items,
         incomplete,
         prohibited,
@@ -302,7 +307,7 @@ fn convert_journal_event(
             }
             on_foot(v, ts, source, get_body_id(v, "BodyID"), get_text(v, "Body"))
         }
-        "Market" => market_json(v, ts, source)
+        "Market" => market_json(v, market_timestamp(get_ts(v, "timestamp"), gateway), ts, source)
             .map(Ingest::Market)
             .into_iter()
             .collect(),
@@ -689,7 +694,7 @@ fn ring_signals(
 }
 
 /// Market.json (or a `Market` event that carries `Items`).
-fn market_json(v: &Value, ts: i64, source: Source) -> Option<MarketSnapshot> {
+fn market_json(v: &Value, timestamp: i64, station_timestamp: i64, source: Source) -> Option<MarketSnapshot> {
     let list = v.get("Items")?.as_array()?;
     let market_id = get_id(v, "MarketID")?;
     let station_name = get_text(v, "StationName").unwrap_or_default();
@@ -728,8 +733,8 @@ fn market_json(v: &Value, ts: i64, source: Source) -> Option<MarketSnapshot> {
         station_name,
         station_type: get_text(v, "StationType"),
         carrier_docking_access: get_text(v, "CarrierDockingAccess"),
-        timestamp: ts,
-        station_timestamp: None,
+        timestamp,
+        station_timestamp: Some(station_timestamp),
         items,
         incomplete,
         prohibited: None,

@@ -195,6 +195,10 @@ fn trip_good(text: &str) -> (String, i64) {
     (words.join(" "), tonnes)
 }
 
+fn quote_age_hours(unix: i64) -> Option<f64> {
+    (unix > 0).then(|| hours_ago(unix))
+}
+
 fn hours_ago(unix: i64) -> f64 {
     let h = (nexus_journal::Timestamp::now().0 - unix).max(0) as f64 / 3600.0;
     (h * 10.0).round() / 10.0
@@ -352,7 +356,7 @@ impl NexusTools {
             "results": hits.iter().map(|h| json!({
                 "station": h.station, "system": h.system, "distance_ly": h.distance_ly.map(r1), "price": h.price,
                 "quantity": h.quantity, "pad": h.max_pad.map(String::from), "fleet_carrier": h.is_carrier,
-                "arrival_distance_ls": h.dist_ls.map(|d| d.round()), "age_hours": hours_ago(h.updated_unix),
+                "arrival_distance_ls": h.dist_ls.map(|d| d.round()), "age_hours": quote_age_hours(h.updated_unix),
             })).collect::<Vec<_>>(),
         }))
     }
@@ -420,7 +424,7 @@ impl NexusTools {
                 "commodity": d.commodity_name, "station": d.station, "system": d.system, "distance_ly": d.distance_ly.map(r1),
                 "price": d.price, "galactic_average": d.average, "percent_better": ((d.ratio - 1.0) * 100.0).round(),
                 "quantity": d.quantity, "credits_better_than_average_per_hold": d.extra_value, "credits_for_one_hold": d.trade_value,
-                "pad": d.max_pad.map(String::from), "fleet_carrier": d.is_carrier, "age_hours": hours_ago(d.updated_unix),
+                "pad": d.max_pad.map(String::from), "fleet_carrier": d.is_carrier, "age_hours": quote_age_hours(d.updated_unix),
             })).collect::<Vec<_>>(),
         }))
     }
@@ -442,7 +446,7 @@ impl NexusTools {
             "best_single_stops": plan.stops.iter().take(5).map(|s| json!({
                 "station": s.hit.station, "system": s.hit.system, "distance_ly": s.hit.distance_ly.map(r1), "total_credits": s.total,
                 "buys": s.lines.iter().map(|(n, t, p)| json!({ "name": n, "tonnes": t, "price": p })).collect::<Vec<_>>(),
-                "fleet_carrier": s.hit.is_carrier, "age_hours": hours_ago(s.hit.updated_unix),
+                "fleet_carrier": s.hit.is_carrier, "age_hours": quote_age_hours(s.hit.updated_unix),
             })).collect::<Vec<_>>(),
             "best_buyer_per_item": plan.per_item.iter().map(|(n, t, hits)| json!({
                 "name": n, "tonnes": t,
@@ -479,8 +483,8 @@ impl NexusTools {
             "near": near, "cargo_capacity_t": q.cargo_capacity, "capital_cr": q.capital, "landing_pad": me.pad.map(String::from),
             "routes": routes.iter().map(|r| json!({
                 "commodity": r.commodity_name, "profit_per_ton": r.profit_per_ton, "tonnes": r.units, "profit_per_trip": r.total_profit,
-                "buy_at": { "station": r.from.station, "system": r.from.system, "price": r.buy_price, "stock": r.supply, "distance_ly": r1(r.from.distance_from_origin_ly), "age_hours": hours_ago(r.from.market_updated_unix) },
-                "sell_at": { "station": r.to.station, "system": r.to.system, "price": r.sell_price, "demand": r.demand, "distance_ly": r1(r.to.distance_from_origin_ly), "age_hours": hours_ago(r.to.market_updated_unix) },
+                "buy_at": { "station": r.from.station, "system": r.from.system, "price": r.buy_price, "stock": r.supply, "distance_ly": r1(r.from.distance_from_origin_ly), "age_hours": quote_age_hours(r.from.market_updated_unix) },
+                "sell_at": { "station": r.to.station, "system": r.to.system, "price": r.sell_price, "demand": r.demand, "distance_ly": r1(r.to.distance_from_origin_ly), "age_hours": quote_age_hours(r.to.market_updated_unix) },
                 "hop_ly": r1(r.hop_ly),
             })).collect::<Vec<_>>(),
         }))
@@ -517,7 +521,7 @@ impl NexusTools {
             "near": near, "total_ly": r1(trip.total_ly),
             "stops": trip.stops.iter().map(|s| json!({
                 "station": s.hit.station, "system": s.hit.system, "ly_from_previous": r1(s.leg_ly), "pad": s.hit.max_pad.map(String::from),
-                "fleet_carrier": s.hit.is_carrier, "arrival_distance_ls": s.hit.dist_ls.map(f64::round), "age_hours": hours_ago(s.hit.updated_unix),
+                "fleet_carrier": s.hit.is_carrier, "arrival_distance_ls": s.hit.dist_ls.map(f64::round), "age_hours": quote_age_hours(s.hit.updated_unix),
                 "buy": s.buys.iter().map(|b| json!({ "name": b.name, "tonnes": b.tonnes, "price": b.price, "stock": b.stock })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "left_out": trip.missing.iter().map(|m| json!({ "name": m.name, "why": m.why })).collect::<Vec<_>>(),
@@ -605,7 +609,7 @@ impl NexusTools {
         Ok(json!({
             "commodity": commodity, "near": near,
             "hotspots": spots.iter().map(|h| json!({ "ring": h.body_name, "system": h.system, "hotspots": h.count, "distance_ly": r1(h.distance_ly), "ring_type": h.ring_type })).collect::<Vec<_>>(),
-            "best_sell_prices": sells.iter().map(|h| json!({ "station": h.station, "system": h.system, "price": h.price, "demand": h.quantity, "distance_ly": h.distance_ly.map(r1), "age_hours": hours_ago(h.updated_unix) })).collect::<Vec<_>>(),
+            "best_sell_prices": sells.iter().map(|h| json!({ "station": h.station, "system": h.system, "price": h.price, "demand": h.quantity, "distance_ly": h.distance_ly.map(r1), "age_hours": quote_age_hours(h.updated_unix) })).collect::<Vec<_>>(),
             "note": if spots.is_empty() { "No hotspots known nearby yet: they come from ring scans shared over EDDN and the Spansh import." } else { "" },
         }))
     }
@@ -633,7 +637,7 @@ impl NexusTools {
                 "sides": h.sides.iter().map(|s| json!({ "faction": s.faction, "days_won": s.won_days, "stands_to_lose": s.stake, "allegiance": s.allegiance })).collect::<Vec<_>>(),
                 "days_won_known": h.detailed,
                 "government": h.government, "security": h.security,
-                "report_age_hours": hours_ago(h.updated_unix),
+                "report_age_hours": quote_age_hours(h.updated_unix),
             })).collect::<Vec<_>>(),
             "note": "From EDDN reports Praetorium received while it ran and the commander's journal, so a war that began after a system's last report is missing. \
                      Wars and civil wars have conflict zones (fight there after picking a side); elections have none. Without days_won_known only the \

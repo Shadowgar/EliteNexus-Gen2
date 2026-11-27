@@ -81,7 +81,7 @@ pub struct MarketSnapshot {
     /// Raw station type in journal or Spansh spelling (`Coriolis`, `FleetCarrier`, `Planetary Port`).
     pub station_type: Option<String>,
     pub carrier_docking_access: Option<String>,
-    /// Unix seconds (UTC) of the snapshot.
+    /// Unix seconds (UTC) of the market observation, or zero when unknown.
     pub timestamp: i64,
     /// Timestamp of the embedded station details, when the source dates them separately.
     pub station_timestamp: Option<i64>,

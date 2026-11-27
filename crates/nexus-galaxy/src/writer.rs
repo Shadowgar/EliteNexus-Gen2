@@ -904,7 +904,7 @@ impl Ctx {
             Ingest::Market(m) => match self.apply_market(tx, m, live) {
                 Ok(MarketResult::Stored(u)) => {
                     self.shared.market_snapshots.fetch_add(1, Ordering::Relaxed);
-                    if live {
+                    if live && m.timestamp > 0 {
                         out.updates.push(u);
                     }
                     Ok(true)
@@ -1057,8 +1057,9 @@ impl Ctx {
 
         // Previous prices, for the history table.
         let history = live
+            && m.timestamp > 0
             && self.opts.price_history
-            && existing.as_ref().is_some_and(|e| e.n_commodities > 0);
+            && existing.as_ref().is_some_and(|e| e.n_commodities > 0 && e.market_updated > 0);
         let saved_baseline: Option<String> = if replaces_same_time {
             tx.prepare_cached(
                 "SELECT value_key FROM market_observations
@@ -1078,7 +1079,7 @@ impl Ctx {
         // too (`history_at`: an older one stores reports without first appearances and leaves both columns alone);
         // otherwise, or for a market stored before this was kept, from that last report. A market seen for the first
         // time, or replaced without comparing (an import), starts afresh with this report.
-        let follow = self.opts.price_history && row.is_carrier;
+        let follow = self.opts.price_history && row.is_carrier && m.timestamp > 0;
         row.history_since = match &existing {
             Some(e) if replaces_same_time && follow => e.history_since.or(Some(m.timestamp)),
             Some(e) if history && follow => match e.history_since {
@@ -1151,7 +1152,7 @@ impl Ctx {
                     hist_set.execute(params![mid, cid, m.timestamp, it.buy, it.sell])?;
                     continue;
                 }
-                if !live || !self.opts.price_history {
+                if !live || !self.opts.price_history || m.timestamp <= 0 {
                     continue;
                 }
                 // A change: the price before it (at its report) and this one. New on a carrier's market reported

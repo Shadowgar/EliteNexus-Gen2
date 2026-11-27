@@ -2,6 +2,14 @@
 
 use serde_json::Value;
 
+/// A finite age limit excludes listings without an observation timestamp.
+pub(crate) fn age_cutoff(hours: Option<f64>) -> i64 {
+    match hours {
+        Some(h) if h.is_finite() && h > 0.0 => (now_unix() - (h * 3600.0) as i64).max(1),
+        _ => i64::MIN,
+    }
+}
+
 pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

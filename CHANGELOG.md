@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Find commodity refreshes open quote lists and selected market details every 30 seconds. Quote age uses the market report time. Reports without a usable observation timestamp have unknown age and are excluded by age limits.
+
 - Market and station updates now track timestamps and sources separately for station details and commodity listings. Incomplete reports preserve existing listings, and older observations cannot roll back carrier location or docking access.
 
 - Trade routes respect a known zero-credit balance. Market leaves affordability unchecked when the balance is unknown, and Ask can use an explicit hypothetical budget.
