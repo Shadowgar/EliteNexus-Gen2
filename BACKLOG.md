@@ -21,7 +21,7 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [x] **G2-024C (ENX-035) — Market alert generation consistency.** Integrated PR #11. Eight focused galaxy tests reported passed; desktop compilation, alert regression execution and runtime acceptance deferred to 01D-W.
 - [x] **G2-024D (ENX-036) — Carrier access.** Integrated PR #12. Shared reported open/restricted/unknown qualification, conservative public destination filtering and docked-origin exception; nine focused galaxy regressions reported passed. Application compilation and desktop, Ask and MCP verification deferred to 01D-W.
 - [x] **G2-024 — Market freshness, deals, alerts and access.** All four implementation slices integrated as ENX-033–036; consolidated acceptance remains in 01D-W.
-- [x] **G2-025 — Carrier movement authority.** Separate scheduled requests, estimated timing and verified movement by carrier identity. Routes and history use verified movement. Application and runtime verification are tracked in 01D-W.
+- [x] **G2-025 (ENX-037) — Carrier movement authority.** Integrated PR #13. Separate scheduled requests, estimated timing and verified movement by carrier identity; routes and history use verified movements. Eleven focused model/journal regressions reported passed. Application compilation and runtime verification deferred to 01D-W.
 - [ ] **G2-033 (market/carrier scope) — Worker outcomes.** Handle terminal failures and disconnected workers; retire superseded results and permit retry. Leave unrelated workers for 01D-D.
 
 ## 01D-C — Exploration, exobiology, colonisation and statistics (REL-02)

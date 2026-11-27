@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 36 substantive entries, ENX-001 through ENX-036.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 37 substantive entries, ENX-001 through ENX-037.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -331,11 +331,14 @@ The committed-update identity is in memory. Market precedence, persisted observa
 
 **Integration:** [PR #12](https://github.com/Shadowgar/Praetorium/pull/12), [`ff247b7`](https://github.com/Shadowgar/Praetorium/commit/ff247b7339736335d0ba7fe7848bea55a47fd0c7). Scoped static review of classification, market filtering, alert qualification and shared Ask/MCP output. Nine focused galaxy regressions reported passed by the owner; application compilation and desktop, Ask and MCP runtime acceptance remain deferred to 01D-W. No additional build or CI initiated. G2-024 implementation slices are complete; final acceptance remains outstanding.
 
-### G2-025 — Carrier movement authority
+
+### ENX-037 — Carrier movement authority (G2-025)
 
 - The carrier model keeps jump requests apart from journal-verified movements. Cancellation and rescheduling replace request state in timestamp order. An elapsed departure leaves the route and last confirmed system untouched.
 - Navigation binds a carrier route to its carrier ID and uses verified movements to advance it. The Fleet carrier page, Dashboard, Ask and MCP distinguish the last confirmed system from a scheduled or unconfirmed destination.
 - Eight model unit tests, two model journal scenarios and one journal parser regression passed on Rust 1.100.0 with `C:/PraetoriumBuild`. Application compilation and desktop, Ask and MCP runtime verification are tracked in 01D-W.
+
+**Integration:** [PR #13](https://github.com/Shadowgar/Praetorium/pull/13), [`d35248d`](https://github.com/Shadowgar/Praetorium/commit/d35248dd555464279e79352c48fb613ef4f3e574). Scoped static review covered carrier identity, observation authority, cancellation and route progress. Eleven focused model/journal regressions reported passed; application compilation and runtime verification remain deferred to 01D-W. No additional build or CI initiated.
 
 ## Upstream review opportunities
 
