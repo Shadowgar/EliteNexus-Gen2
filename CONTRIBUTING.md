@@ -103,6 +103,8 @@ What works on Linux and what doesn't yet is collected in [discussion #17](https:
 
 ## Sending changes
 
+Follow the single-branch, single-PR and resource-budget policy in [AGENTS.md](AGENTS.md). Do not open another implementation PR before the current one is resolved. Review upstream changes explicitly. See the [licensing boundary](docs/LICENSING.md), [upstream additional terms](LICENSE-ADDITIONAL-TERMS.md) and [naming policy](NAME-POLICY.md). Praetorium has an independent SemVer in the workspace manifest; synchronize the workspace lock entries and changelog for version changes, without changing third-party dependency versions.
+
 * Read [AGENTS.md](AGENTS.md) first: the conventions (no `unwrap()` on external data, `#[serde(default)]` on external
   structs, UI text that says where data comes from and what it can't show, limits that are real, uploads that stay
   opt-in), the build and UI checks, commits and releases.

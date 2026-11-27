@@ -4,6 +4,8 @@
 
 *Omnia sub uno imperio.*
 
+**Independent development version: `0.1.0-alpha.1` — not a public release.** Based on the Elite Nexus 0.8.2 source lineage. The workspace manifest is the authoritative version source.
+
 Praetorium is an independent, open-source project that aims to bring together the capabilities of the Elite Dangerous third-party ecosystem into a comprehensive, intelligent and interconnected command platform.
 
 This application began as a modified version of Elite Nexus, created by CMDR Alka Uruskan and its contributors. Praetorium is a separate project and is not an official Elite Nexus release, successor or endorsed product.
@@ -12,7 +14,7 @@ This application began as a modified version of Elite Nexus, created by CMDR Alk
 
 We discovered Elite Nexus while looking for a technical foundation for a broader project. Its native Rust architecture, attention to performance and breadth of existing functionality stood out. We chose to build on the work already done by CMDR Alka Uruskan and contributors. We are grateful to them and to the Elite Nexus community for the care and time they invested.
 
-Praetorium is separate because its intended direction is different. We want to connect capabilities from multiple community tools and services through a shared command platform. That goal may lead to substantial changes to the architecture, interfaces and workflows. Keeping the projects separate lets each develop according to its own goals. As Praetorium grows, its implementation and user experience may look quite different from the initial application. We will preserve its attribution and document improvements that may be useful upstream.
+Praetorium is separate because its intended direction is different, not because we consider Elite Nexus inadequate or lacking. We do not expect its maintainer to change the original project's priorities to accommodate our vision. We want to connect capabilities from multiple community tools and services through a shared command platform. That goal may lead to substantial changes to the architecture, interfaces and workflows. Keeping the projects separate lets each develop according to its own goals. As Praetorium grows, its implementation and user experience may look quite different from the initial application. We will preserve its attribution and document improvements that may be useful upstream.
 
 ## What we aim to build
 

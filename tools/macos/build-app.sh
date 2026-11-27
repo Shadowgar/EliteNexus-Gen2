@@ -28,6 +28,7 @@ done
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+bundle_version="${version%%[-+]*}" # Apple numeric bundle version; full SemVer remains in the app and archive name.
 arch="$(uname -m)"   # arm64 or x86_64
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 out="$target_dir/macos"
@@ -56,8 +57,9 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>io.github.shadowgar.praetorium</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$version</string>
-  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleShortVersionString</key><string>$bundle_version</string>
+  <key>CFBundleVersion</key><string>$bundle_version</string>
+  <key>PraetoriumSemanticVersion</key><string>$version</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -69,7 +71,7 @@ PLIST
 plutil -lint -s "$app/Contents/Info.plist"
 
 # The licences travel with the program (GPL for Praetorium, SIL OFL for the bundled Inter font).
-cp LICENSE NOTICE.md README.md "$app/Contents/Resources/"
+cp LICENSE LICENSE-ADDITIONAL-TERMS.md NAME-POLICY.md NOTICE.md README.md "$app/Contents/Resources/"
 cp docs/USER_GUIDE.md docs/LICENSING.md docs/UPSTREAM-ACKNOWLEDGMENTS.md docs/PROFILE_MIGRATION.md docs/THIRD-PARTY-LICENSES.txt "$app/Contents/Resources/"
 cp data/fonts/inter/LICENSE.txt "$app/Contents/Resources/Inter-LICENSE.txt"
 

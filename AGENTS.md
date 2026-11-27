@@ -2,7 +2,17 @@
 
 Praetorium is a native Rust (egui) development project for Windows, Linux and macOS, based on Elite Nexus by CMDR Alka Uruskan and contributors. The following rules protect players' games and data.
 
-## Read first
+## Development scope and resource budget
+
+* One active implementation objective, one feature branch from verified `main`, and one open implementation PR at a time. Do not stack milestones. Preserve commit history; merge only after owner review and required checks, then retire the merged branch when safe. Existing historical drafts may be consolidated as a one-time transition.
+* Start independent assignments in fresh sessions with a concise handoff. Read only the files and documentation relevant to the authorized task; do not repeat the foundation audit. Keep tool output and diffs bounded to relevant evidence.
+* No subagents, parallel AI reviewers or model/reasoning escalation without explicit owner approval. No repeated CI, build, or test polling; start required checks once, record the command or CI link and stop at the checkpoint if they are pending. Do not use model turns merely to wait. Inspect finished logs once when asked.
+* Run focused checks during implementation. Use existing results for unchanged source; do not repeat comprehensive suites without a technical reason. Hosted CI supplies the cross-platform matrix. Keep safety and acceptance gates intact. If blocked, preserve work and report the blocker instead of expanding scope.
+* Stop after the authorized deliverable or a safe checkpoint. Report the branch, commit, changed paths, checks and remaining work concisely. Do not start a new assignment, publish a release or rewrite history autonomously.
+* Track upstream separately; reconcile relevant changes explicitly and preserve license and attribution obligations. Do not blindly sync or import upstream release credentials or branding.
+* `Cargo.toml` workspace version is the authoritative independent Praetorium SemVer. Coordinate version changes with the workspace entries in `Cargo.lock`, changelog and platform metadata; do not update third-party dependencies merely to bump the product version. Preserve the historical upstream version as provenance only. A version or tag is not authorization to publish. Before claiming a milestone verified, record the exact tested revision and distinguish pending from passed checks.
+
+## Consult as relevant
 
 * `docs/ARCHITECTURE.md`: crates, threads, the design system, code conventions.
 * `docs/DESIGN.md`: how the app looks and why: principles, colours, type, components, charts and a checklist for new
@@ -147,9 +157,9 @@ egui 0.36 layout lessons learned here:
   `footnote`, `empty`) and `theme.rs` (`pal`, `size`): no raw egui styling, no text below 12 pt. `docs/DESIGN.md`
   says which component and which colour to use where.
 
-## Working in parallel
+## Worktree isolation
 
-* Use your own worktree or branch if you can, and always your own `CARGO_TARGET_DIR` (`target-agents\<name>` is
+* Use a separate worktree if needed, not another active development branch, and your own `CARGO_TARGET_DIR` (`target-agents\<name>` is
   git-ignored): a shared `target\` means lock waits and half-built binaries. `tools\dev\cargo.ps1 -TargetDir ...`
   and `tools\dev\shot.ps1 -Exe ...` take it.
 * Files most features touch: `crates/nexus-app/src/app.rs` (page wiring), `widgets.rs`, `theme.rs`, `ai_tools.rs`
@@ -157,7 +167,7 @@ egui 0.36 layout lessons learned here:
   commit them early, and rebase often.
 * Keep shared crates compiling between edits: someone may be building against them.
 * Don't run `cargo fmt` over the workspace. Much of the code is hand-formatted with long lines; a mass reformat
-  makes every parallel branch conflict. Match the surrounding style.
+  creates unnecessary conflicts. Match the surrounding style.
 
 ## PowerShell 5.1 traps
 
@@ -176,7 +186,7 @@ egui 0.36 layout lessons learned here:
 
 ## Releases
 
-Publication, signing and production updates require separate owner approval and a Gen2 trust root. The release workflow is an informational placeholder. Local packaging uses Gen2-named artifacts. Keep original Elite Nexus executables, profiles and signed manifests separate.
+Publication, signing and production updates require separate owner approval and a Praetorium trust root. The release workflow is an informational placeholder. Local packaging uses Praetorium-named artifacts. Keep original Elite Nexus executables, profiles and signed manifests separate.
 
 ## Improvement documentation
 

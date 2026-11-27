@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 $version = (Select-String -LiteralPath (Join-Path $root 'Cargo.toml') -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 $targetDir = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR) } else { Join-Path $root 'target' }
 $built = Join-Path $targetDir "release\$exe"
-$docSources = @('LICENSE', 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md', 'docs\LICENSING.md', 'docs\UPSTREAM-ACKNOWLEDGMENTS.md', 'docs\PROFILE_MIGRATION.md', 'docs\THIRD-PARTY-LICENSES.txt')
+$docSources = @('LICENSE', 'LICENSE-ADDITIONAL-TERMS.md', 'NAME-POLICY.md', 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md', 'docs\LICENSING.md', 'docs\UPSTREAM-ACKNOWLEDGMENTS.md', 'docs\PROFILE_MIGRATION.md', 'docs\THIRD-PARTY-LICENSES.txt')
 $docFiles = @($docSources | ForEach-Object { Split-Path -Leaf $_ }) + @('Inter-LICENSE.txt')
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 foreach ($f in $docSources) { Copy-Item -LiteralPath (Join-Path $root $f) -Destination $dist -Force }

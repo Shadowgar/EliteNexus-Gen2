@@ -1,6 +1,6 @@
 [package]
 name = "nexus-app"
-description = "Elite Nexus desktop application"
+description = "Praetorium intelligent shipboard command platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
