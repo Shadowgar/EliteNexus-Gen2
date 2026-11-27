@@ -83,7 +83,11 @@ pub struct MarketSnapshot {
     pub carrier_docking_access: Option<String>,
     /// Unix seconds (UTC) of the snapshot.
     pub timestamp: i64,
+    /// Timestamp of the embedded station details, when the source dates them separately.
+    pub station_timestamp: Option<i64>,
     pub items: Vec<MarketItem>,
+    /// An incomplete commodity list cannot replace a complete report.
+    pub incomplete: bool,
     /// Prohibited commodity symbols, when the source provides them.
     pub prohibited: Option<Vec<String>>,
     /// Station economies (display name, proportion), when the source provides them.
@@ -283,6 +287,7 @@ pub struct StationUpdate {
     /// Hint for sources that know the station is on a planet but not its type (ApproachSettlement).
     pub planetary: Option<bool>,
     pub timestamp: i64,
+    pub source: Source,
 }
 
 /// Ring hotspots of one ring (replaces what is stored for that ring).

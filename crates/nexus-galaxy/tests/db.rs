@@ -96,7 +96,10 @@ fn compatible_older_schema_and_interrupted_write_recover_in_place() {
     temp.db = None;
     let mut sql = rusqlite::Connection::open(&path).unwrap();
     sql.execute_batch("PRAGMA user_version=1; ALTER TABLE stations DROP COLUMN history_at;
-                       INSERT INTO systems (id64,name,name_lower) VALUES(4242,'Older','older');").unwrap();
+                       DROP TABLE market_observations;
+                       INSERT INTO systems (id64,name,name_lower) VALUES(4242,'Older','older');
+                       INSERT INTO stations (market_id,system_id64,system_name,system_name_lower,name,type,carrier_access,updated)
+                       VALUES(4242,4242,'Older','older','Legacy Carrier','Fleet Carrier','friends',200);").unwrap();
     let transaction = sql.transaction().unwrap();
     transaction.execute("DELETE FROM systems WHERE id64=4242", []).unwrap();
     drop(transaction);
@@ -104,10 +107,15 @@ fn compatible_older_schema_and_interrupted_write_recover_in_place() {
     temp.db = Some(GalaxyDb::open(&path).unwrap());
     let sql = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = sql.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     let name: String = sql.query_row("SELECT name FROM systems WHERE id64=4242", [], |r| r.get(0)).unwrap();
     assert_eq!(name, "Older");
     assert!(sql.prepare("SELECT history_at FROM stations").is_ok());
+    let legacy: (i64, Option<i64>) = sql.query_row(
+        "SELECT observed,source FROM market_observations WHERE market_id=4242 AND field='access'",
+        [], |r| Ok((r.get(0)?, r.get(1)?)),
+    ).unwrap();
+    assert_eq!(legacy, (200, None));
 }
 
 #[test]
@@ -535,6 +543,124 @@ fn carrier_report(mid: u64, sys_name: &str, name: &str, ts: i64, items: &[(&str,
         Ingest::Market(m) => Ingest::Market(MarketSnapshot { station_type: Some("FleetCarrier".into()), ..m }),
         other => other,
     }
+}
+
+#[test]
+fn market_precedence_converges_across_arrival_order_and_reopen() {
+    let ts = now() - 60;
+    let report = |at, source, price, access| {
+        let Ingest::Market(mut m) = carrier_report(77, "Alpha", "AAA-777", at, &[("gold", price, 0, 5, 0)]) else {
+            unreachable!()
+        };
+        m.source = source;
+        m.carrier_docking_access = access;
+        Ingest::Market(m)
+    };
+    let relocate = Ingest::Station(StationUpdate {
+        market_id: 77,
+        name: "AAA-777".into(),
+        system_id64: Some(SYS_B),
+        system_name: Some("Beta".into()),
+        timestamp: ts + 30,
+        source: Source::Journal,
+        ..Default::default()
+    });
+    let observations = [
+        report(ts, Source::Journal, 1_000, Some("owner".into())),
+        report(ts + 10, Source::Eddn, 9_000, Some("friends".into())),
+        report(ts + 10, Source::Journal, 2_000, None),
+        report(ts + 10, Source::Journal, 3_000, None),
+        report(ts + 20, Source::Eddn, 4_000, None),
+        relocate,
+        Ingest::Station(StationUpdate {
+            market_id: 77,
+            name: "AAA-777".into(),
+            system_id64: Some(SYS_A),
+            system_name: Some("Alpha".into()),
+            carrier_docking_access: Some("owner".into()),
+            timestamp: ts + 5,
+            source: Source::Journal,
+            ..Default::default()
+        }),
+    ];
+    for reverse in [false, true] {
+        let mut tmp = TempDb::new("precedence");
+        tmp.db().ingest_many(vec![system(SYS_A, "Alpha", [0.0, 0.0, 0.0]), system(SYS_B, "Beta", [10.0, 0.0, 0.0])]);
+        let mut batch = observations.to_vec();
+        // With the winner at the same timestamp, source outranks payload and ties use the value key.
+        batch.remove(4);
+        if reverse { batch.reverse(); }
+        tmp.db().ingest_many(batch);
+        tmp.db().flush().unwrap();
+        assert_eq!(tmp.db().station_market(77).unwrap().unwrap().items[0].buy, 3_000);
+        tmp.reopen();
+        let db = tmp.db();
+        db.ingest(observations[4].clone());
+        db.flush().unwrap();
+        let stored = db.stats().unwrap().market_snapshots;
+        db.ingest(observations[4].clone());
+        db.ingest(observations[0].clone());
+        db.ingest(observations[6].clone());
+        db.flush().unwrap();
+        assert_eq!(db.stats().unwrap().market_snapshots, stored);
+        let m = db.station_market(77).unwrap().unwrap();
+        assert_eq!((m.station.system_id64, m.station.pos), (Some(SYS_B), Some([10.0, 0.0, 0.0])));
+        assert_eq!(m.station.carrier_docking_access.as_deref(), Some("friends"));
+        assert_eq!(m.station.market_updated_unix, ts + 20);
+        assert_eq!(m.items[0].buy, 4_000);
+        let sql = rusqlite::Connection::open(db.path()).unwrap();
+        let rank = |field| sql.query_row(
+            "SELECT observed,source FROM market_observations WHERE market_id=77 AND field=?1",
+            [field], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+        ).unwrap();
+        assert_eq!(rank("location"), (ts + 30, 1));
+        assert_eq!(rank("access"), (ts + 10, 0));
+        assert_eq!(rank("listings"), (ts + 20, 0));
+    }
+}
+
+#[test]
+fn market_precedence_import_uses_station_time_for_location_and_access() {
+    let tmp = TempDb::new("precedence-import");
+    let db = tmp.db();
+    let Ingest::Market(mut imported) = carrier_report(77, "Alpha", "AAA-777", 300, &[("gold", 4_000, 0, 5, 0)]) else {
+        unreachable!()
+    };
+    imported.source = Source::Spansh;
+    imported.station_timestamp = Some(100);
+    imported.carrier_docking_access = Some("owner".into());
+    let Ingest::Market(mut current) = carrier_report(77, "Beta", "AAA-777", 200, &[("gold", 3_000, 0, 5, 0)]) else {
+        unreachable!()
+    };
+    current.carrier_docking_access = Some("friends".into());
+    db.ingest_many(vec![Ingest::Market(current), Ingest::Market(imported)]);
+    db.flush().unwrap();
+    let m = db.station_market(77).unwrap().unwrap();
+    assert_eq!(m.station.system, "Beta");
+    assert_eq!(m.station.carrier_docking_access.as_deref(), Some("friends"));
+    assert_eq!((m.station.market_updated_unix, m.items[0].buy), (300, 4_000));
+}
+
+#[test]
+fn market_precedence_incomplete_report_keeps_listings_and_accepts_metadata() {
+    let tmp = TempDb::new("precedence-incomplete");
+    let db = tmp.db();
+    db.ingest(carrier_report(77, "Alpha", "AAA-777", 100, &[("gold", 3_000, 0, 5, 0)]));
+    let message = |items| json!({
+        "timestamp": "2026-10-01T10:00:00Z", "MarketID": 77,
+        "StarSystem": "Beta", "CarrierDockingAccess": "friends", "Items": items
+    });
+    db.ingest_journal("Market", &message(json!([{"Name":"gold","BuyPrice":0}])));
+    db.flush().unwrap();
+    let m = db.station_market(77).unwrap().unwrap();
+    assert_eq!(m.station.name, "AAA-777");
+    assert_eq!(m.station.system, "Beta");
+    assert_eq!(m.station.carrier_docking_access.as_deref(), Some("friends"));
+    assert_eq!(m.station.market_updated_unix, 100);
+    assert_eq!(m.items[0].buy, 3_000);
+    db.ingest_journal("Market", &message(json!([])));
+    db.flush().unwrap();
+    assert!(db.station_market(77).unwrap().unwrap().items.is_empty());
 }
 
 /// How long a carrier's buy order has stood, from the reports the database compared: since a change, since it

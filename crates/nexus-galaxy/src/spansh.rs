@@ -573,11 +573,13 @@ fn station_ops(
             carrier_docking_access: text(&st.carrier_docking_access),
             planetary: on_body.then_some(true),
             timestamp: ts,
+            source: Source::Spansh,
         })));
 
     let Some(m) = &st.market else { return };
     let commodities = m.commodities.as_deref().unwrap_or_default();
     let mut items = Vec::with_capacity(commodities.len());
+    let mut incomplete = m.commodities.is_none();
     for c in commodities {
         let raw = c
             .symbol
@@ -590,8 +592,10 @@ fn station_ops(
             names::key(raw)
         };
         if symbol.is_empty() {
+            incomplete = true;
             continue;
         }
+        incomplete |= [c.buy_price, c.sell_price, c.supply, c.demand].iter().any(|n| n.f64().is_none());
         if !known.contains(&symbol) && seen_hint.insert(symbol.clone()) {
             out.hints.push(CommodityHint {
                 symbol: symbol.clone(),
@@ -621,7 +625,9 @@ fn station_ops(
             station_type,
             carrier_docking_access: text(&st.carrier_docking_access),
             timestamp: m.update_time.as_deref().and_then(parse_ts).unwrap_or(ts),
+            station_timestamp: Some(ts),
             items,
+            incomplete,
             prohibited: m.prohibited_commodities.clone(),
             economies: None,
             source: Source::Spansh,

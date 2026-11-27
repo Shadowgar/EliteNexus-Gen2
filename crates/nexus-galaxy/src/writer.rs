@@ -631,11 +631,6 @@ impl StationRow {
             self.is_planetary = kind.is_planetary();
             self.is_settlement = kind.is_settlement();
         }
-        if self.max_pad == 0
-            && let Some(p) = kind.default_max_pad()
-        {
-            self.max_pad = p.code();
-        }
     }
 
     /// `economies` sorted highest proportion first.
@@ -814,6 +809,33 @@ fn replace_conflicts(tx: &Transaction, id64: i64, conflicts: Option<&[ConflictUp
     Ok(())
 }
 
+/// Timestamp first, source on ties, then a stable value key for conflicting reports from one source.
+fn accept_observation(
+    tx: &Transaction, market_id: i64, field: &str, timestamp: i64, source: Source, value: &str,
+) -> Result<bool> {
+    fn priority(source: Source) -> i32 {
+        match source {
+            Source::Journal => 4,
+            Source::Eddn => 3,
+            Source::EddnArchive => 2,
+            Source::Spansh => 1,
+        }
+    }
+    let previous: Option<(i64, Option<i64>, String)> = tx.prepare_cached(
+        "SELECT observed, source, value_key FROM market_observations WHERE market_id = ?1 AND field = ?2",
+    )?.query_row(params![market_id, field], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+    if let Some((time, code, key)) = previous
+        && (timestamp, priority(source), value) <= (time, code.map_or(0, |c| priority(Source::from_code(c))), key.as_str())
+    {
+        return Ok(false);
+    }
+    tx.prepare_cached(
+        "INSERT OR REPLACE INTO market_observations (market_id, field, observed, source, value_key)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?.execute(params![market_id, field, timestamp, source.code(), value])?;
+    Ok(true)
+}
+
 fn price_changed(old: i64, new: i64, min_rel: f64) -> bool {
     if old == new {
         return false;
@@ -887,7 +909,7 @@ impl Ctx {
                 Err(e) => Err(e),
             },
             Ingest::System(s) => self.apply_system(tx, s),
-            Ingest::Station(s) => self.apply_station(tx, s),
+            Ingest::Station(s) => self.apply_station(tx, s, true),
             Ingest::RingSignals(r) => self.apply_rings(tx, r),
             Ingest::Body(b) => self.apply_body(tx, b),
             Ingest::Raw(_) => Ok(false), // expanded before we get here
@@ -978,46 +1000,51 @@ impl Ctx {
         m: &MarketSnapshot,
         live: bool,
     ) -> Result<MarketResult> {
-        if m.market_id == 0 || m.market_id > i64::MAX as u64 || m.station_name.trim().is_empty() {
+        if m.market_id == 0 || m.market_id > i64::MAX as u64 {
             return Ok(MarketResult::Ignored);
         }
         let mid = m.market_id as i64;
+        self.apply_station(tx, &StationUpdate {
+            market_id: m.market_id,
+            name: m.station_name.clone(),
+            system_name: Some(m.system_name.clone()),
+            station_type: m.station_type.clone(),
+            carrier_docking_access: m.carrier_docking_access.clone(),
+            economies: m.economies.clone(),
+            timestamp: m.station_timestamp.unwrap_or(m.timestamp),
+            source: m.source,
+            ..Default::default()
+        }, false)?;
         let existing = StationRow::load(tx, mid)?;
-        if let Some(e) = &existing
-            && e.market_updated > 0
-            && e.market_updated >= m.timestamp
-        {
-            return Ok(MarketResult::Stale);
-        }
-        let name = clean_station_name(&m.station_name);
-        let mut row = existing
-            .clone()
-            .unwrap_or_else(|| StationRow::new(mid, &name, &m.system_name));
-        row.name = name;
-        let sys_lower = m.system_name.trim().to_lowercase();
-        let same_system = existing
-            .as_ref()
-            .is_some_and(|e| e.system_id64.is_some() && e.system_name_lower == sys_lower);
-        if !same_system && !sys_lower.is_empty() {
-            match resolve_system(tx, &sys_lower)? {
-                Some((id, name, pos)) => row.set_system(Some(id), &name, pos),
-                None => row.set_system(None, m.system_name.trim(), None),
+        let Some(mut row) = existing.clone() else { return Ok(MarketResult::Ignored) };
+        if let Some(p) = &m.prohibited {
+            let mut symbols = p.clone();
+            symbols.sort_unstable();
+            symbols.dedup();
+            let value = serde_json::json!(symbols).to_string();
+            if accept_observation(tx, mid, "prohibited", m.timestamp, m.source, &value)? {
+                row.prohibited = Some(value);
             }
         }
-        if let Some(t) = &m.station_type {
-            row.apply_type(t);
+        let mut items: Vec<_> = m.items.iter().map(|item| {
+            let symbol = normalize_symbol(&item.symbol);
+            let key = serde_json::json!([
+                item.buy, item.sell, item.mean, item.stock, item.stock_bracket,
+                crate::schema::real_demand(item.demand, item.demand_bracket), item.demand_bracket
+            ]).to_string();
+            (symbol, key, item)
+        }).collect();
+        let incomplete = m.incomplete || items.iter().any(|(symbol, _, _)| symbol.is_empty());
+        items.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+        items.dedup_by(|a, b| a.0 == b.0);
+        let key = serde_json::json!(items.iter().map(|(symbol, value, _)| (symbol, value)).collect::<Vec<_>>()).to_string();
+        if incomplete || !accept_observation(tx, mid, "listings", m.timestamp, m.source, &key)? {
+            if existing.as_ref() != Some(&row) {
+                row.save(tx, existing.as_ref(), &mut self.dirty.borrow_mut())?;
+            }
+            return Ok(if incomplete { MarketResult::Ignored } else { MarketResult::Stale });
         }
-        if let Some(a) = &m.carrier_docking_access {
-            row.carrier_access = Some(a.clone());
-        }
-        if let Some(p) = &m.prohibited {
-            row.prohibited = Some(serde_json::to_string(p).unwrap_or_default());
-        }
-        if let Some(e) = &m.economies
-            && !e.is_empty()
-        {
-            row.set_economies(e, None);
-        }
+        let replaces_same_time = row.market_updated == m.timestamp && row.n_commodities > 0;
         row.market_updated = m.timestamp;
 
         // Previous prices, for the history table.
@@ -1072,15 +1099,8 @@ impl Ctx {
             let mut hist_set = tx.prepare_cached(
                 "UPDATE price_history SET buy = ?4, sell = ?5 WHERE market_id = ?1 AND commodity_id = ?2 AND ts = ?3",
             )?;
-            let mut seen = rustc_hash::FxHashSet::default();
-            for it in &m.items {
-                if it.symbol.is_empty() {
-                    continue;
-                }
-                let cid = self.commodity_id(tx, &it.symbol)?;
-                if !seen.insert(cid) {
-                    continue; // duplicate entry in one snapshot: first one wins
-                }
+            for (symbol, _, it) in &items {
+                let cid = self.commodity_id(tx, symbol)?;
                 ins.execute(params![
                     mid,
                     cid,
@@ -1094,6 +1114,10 @@ impl Ctx {
                     m.timestamp
                 ])?;
                 n += 1;
+                if replaces_same_time {
+                    hist_set.execute(params![mid, cid, m.timestamp, it.buy, it.sell])?;
+                    continue;
+                }
                 // A change: the price before it (at its report) and this one. New on a carrier's market reported
                 // before (a new order): its last report, without it (0, 0), and this one.
                 let before = match old.get(&cid) {
@@ -1251,91 +1275,115 @@ impl Ctx {
     }
 
     /// Adds or updates a station's details; returns whether anything changed.
-    fn apply_station(&self, tx: &Transaction, st: &StationUpdate) -> Result<bool> {
+    fn apply_station(&self, tx: &Transaction, st: &StationUpdate, station_report: bool) -> Result<bool> {
         let name = clean_station_name(&st.name);
         let name = name.as_str();
-        if st.market_id == 0 || st.market_id > i64::MAX as u64 || name.is_empty() {
+        if st.market_id == 0 || st.market_id > i64::MAX as u64 {
             return Ok(false);
         }
         let mid = st.market_id as i64;
         let existing = StationRow::load(tx, mid)?;
-        if let Some(e) = &existing
-            && st.timestamp < e.updated
-        {
-            return Ok(false); // older than what we have
+        if existing.is_none() && name.is_empty() {
+            return Ok(false);
         }
         let mut row = existing.clone().unwrap_or_else(|| {
-            StationRow::new(mid, name, st.system_name.as_deref().unwrap_or_default())
+            StationRow::new(mid, name, "")
         });
-        row.name = name.to_string();
-        if let Some(id) = st.system_id64.filter(|i| *i > 1 && *i <= i64::MAX as u64) {
-            let (sys_name, pos) = ensure_system(
-                tx,
-                id as i64,
-                st.system_name.as_deref(),
-                &mut self.dirty.borrow_mut(),
-            )?;
-            let name = if sys_name.is_empty() {
-                st.system_name.clone().unwrap_or_default()
-            } else {
-                sys_name
-            };
-            row.set_system(Some(id as i64), &name, pos);
-        } else if let Some(sys) = st
-            .system_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            let lower = sys.to_lowercase();
-            if row.system_id64.is_none() || row.system_name_lower != lower {
-                match resolve_system(tx, &lower)? {
-                    Some((id, n, pos)) => row.set_system(Some(id), &n, pos),
-                    None => row.set_system(None, sys, None),
+        let accept = |field, key: &str| accept_observation(tx, mid, field, st.timestamp, st.source, key);
+        if !name.is_empty() && accept("name", name)? {
+            row.name = name.to_string();
+        }
+        let system_id = st.system_id64.filter(|i| *i > 1 && *i <= i64::MAX as u64);
+        let system_name = st.system_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let location = serde_json::json!([system_id.is_some(), system_id, system_name]).to_string();
+        if (system_id.is_some() || system_name.is_some()) && accept("location", &location)? {
+            if let Some(id) = system_id {
+                let (sys_name, pos) = ensure_system(
+                    tx, id as i64, system_name, &mut self.dirty.borrow_mut(),
+                )?;
+                if sys_name.is_empty() && row.system_id64 != Some(id as i64) {
+                    row.system_name.clear();
+                    row.system_name_lower.clear();
+                }
+                row.set_system(Some(id as i64), &sys_name, pos);
+            } else if let Some(sys) = system_name {
+                let lower = sys.to_lowercase();
+                if row.system_id64.is_none() || row.system_name_lower != lower {
+                    match resolve_system(tx, &lower)? {
+                        Some((id, n, pos)) => row.set_system(Some(id), &n, pos),
+                        None => row.set_system(None, sys, None),
+                    }
                 }
             }
         }
-        if let Some(t) = &st.station_type {
+        if let Some(t) = &st.station_type
+            && StationKind::parse(t).is_some_and(|kind| kind != StationKind::Other)
+            && accept("type", t)?
+        {
             row.apply_type(t);
+            let explicit_pad = tx.prepare_cached(
+                "SELECT 1 FROM market_observations WHERE market_id = ?1 AND field = 'pad'",
+            )?.exists([mid])?;
+            if !explicit_pad {
+                row.max_pad = StationKind::parse(t).and_then(StationKind::default_max_pad).map_or(0, Pad::code);
+            }
         }
-        if st.planetary == Some(true) {
+        if st.planetary == Some(true) && row.kind.is_none() && accept("planetary", "true")? {
             row.is_planetary = true;
         }
-        if let Some(d) = st.dist_ls {
+        if let Some(d) = st.dist_ls.filter(|d| d.is_finite() && *d >= 0.0)
+            && accept("distance", &d.to_string())?
+        {
             row.dist_ls = Some(d);
         }
         if let Some(p) = st.landing_pads
             && let Some(pad) = Pad::from_counts(p.small, p.medium, p.large)
+            && accept("pad", &pad.code().to_string())?
         {
             row.max_pad = pad.code();
         }
-        if let Some(s) = st.services {
+        if let Some(s) = st.services && accept("services", &s.bits().to_string())? {
             row.services = s.bits() as i64;
         }
-        match (&st.economies, &st.primary_economy) {
-            (Some(e), p) if !e.is_empty() => row.set_economies(e, p.as_deref()),
-            (_, Some(p)) => {
-                if row.economy.as_deref() != Some(p.as_str()) {
-                    row.second_economy = None;
-                }
-                row.economy = Some(p.clone());
-            }
-            _ => {}
+        let primary = st.primary_economy.as_deref().or_else(|| {
+            st.economies.as_ref()?.first().map(|(name, _)| name.as_str())
+        }).filter(|name| !name.trim().is_empty());
+        let mut economy = row.economy.clone();
+        if let Some(primary) = primary && accept("economy", primary)? {
+            economy = Some(primary.to_string());
         }
-        if st.faction.is_some() {
-            row.faction.clone_from(&st.faction);
-            row.faction_state.clone_from(&st.faction_state);
+        if let Some(e) = &st.economies && !e.is_empty()
+            && accept("economies", &serde_json::json!(e).to_string())?
+        {
+            row.set_economies(e, economy.as_deref());
+        } else if row.economy != economy {
+            row.second_economy = row.economies.as_deref()
+                .and_then(|json| serde_json::from_str::<std::collections::BTreeMap<String, f64>>(json).ok())
+                .and_then(|economies| economies.into_iter().filter(|(name, _)| Some(name) != economy.as_ref())
+                    .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0))))
+                .map(|(name, _)| name);
         }
-        if st.government.is_some() {
-            row.government.clone_from(&st.government);
+        row.economy = economy;
+        if let Some(faction) = &st.faction && accept("faction", faction)? {
+            row.faction = Some(faction.clone());
         }
-        if st.allegiance.is_some() {
-            row.allegiance.clone_from(&st.allegiance);
+        if let Some(state) = &st.faction_state && accept("faction_state", state)? {
+            row.faction_state = Some(state.clone());
         }
-        if st.carrier_docking_access.is_some() {
-            row.carrier_access.clone_from(&st.carrier_docking_access);
+        if let Some(government) = &st.government && accept("government", government)? {
+            row.government = Some(government.clone());
         }
-        row.updated = row.updated.max(st.timestamp);
+        if let Some(allegiance) = &st.allegiance && accept("allegiance", allegiance)? {
+            row.allegiance = Some(allegiance.clone());
+        }
+        if let Some(access) = st.carrier_docking_access.as_deref().map(str::trim).filter(|s| !s.is_empty())
+            && accept("access", access)?
+        {
+            row.carrier_access = Some(access.to_string());
+        }
+        if station_report {
+            row.updated = row.updated.max(st.timestamp);
+        }
         row.recompute_traders();
         let changed = existing.as_ref() != Some(&row);
         if changed {

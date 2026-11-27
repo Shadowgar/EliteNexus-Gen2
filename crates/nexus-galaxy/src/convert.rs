@@ -126,18 +126,23 @@ fn price(v: &Value, key: &str) -> i64 {
 
 fn commodity_snapshot(msg: &Value, gateway: Option<i64>) -> Option<MarketSnapshot> {
     let market_id = get_id(msg, "marketId")?;
-    let system_name = get_text(msg, "systemName")?;
-    let station_name = get_text(msg, "stationName")?;
-    let list = msg.get("commodities")?.as_array()?;
+    let system_name = get_text(msg, "systemName").unwrap_or_default();
+    let station_name = get_text(msg, "stationName").unwrap_or_default();
+    let list = msg.get("commodities").and_then(Value::as_array);
+    let mut incomplete = list.is_none();
+    let list = list.map(Vec::as_slice).unwrap_or_default();
     let mut items = Vec::with_capacity(list.len());
     for c in list {
         let Some(name) = get_str(c, "name") else {
+            incomplete = true;
             continue;
         };
         let symbol = normalize_symbol(name);
         if symbol.is_empty() {
+            incomplete = true;
             continue;
         }
+        incomplete |= ["buyPrice", "sellPrice", "stock", "demand"].iter().any(|key| get_i64(c, key).is_none());
         items.push(MarketItem {
             symbol,
             buy: price(c, "buyPrice"),
@@ -171,7 +176,9 @@ fn commodity_snapshot(msg: &Value, gateway: Option<i64>) -> Option<MarketSnapsho
         station_type: get_text(msg, "stationType"),
         carrier_docking_access: get_text(msg, "carrierDockingAccess"),
         timestamp: clamp_ts(get_ts(msg, "timestamp"), gateway),
+        station_timestamp: None,
         items,
+        incomplete,
         prohibited,
         economies,
         source: Source::Eddn,
@@ -183,6 +190,21 @@ fn sort_economies(e: &mut [(String, f64)]) {
 }
 
 pub(crate) fn convert_journal(
+    event: &str,
+    v: &Value,
+    source: Source,
+    gateway: Option<i64>,
+) -> Vec<Ingest> {
+    let mut items = convert_journal_event(event, v, source, gateway);
+    for item in &mut items {
+        if let Ingest::Station(station) = item {
+            station.source = source;
+        }
+    }
+    items
+}
+
+fn convert_journal_event(
     event: &str,
     v: &Value,
     source: Source,
@@ -599,6 +621,7 @@ fn station_common(
         carrier_docking_access: None,
         planetary: None,
         timestamp: ts,
+        source: Source::default(),
     }
 }
 
@@ -669,21 +692,25 @@ fn ring_signals(
 fn market_json(v: &Value, ts: i64, source: Source) -> Option<MarketSnapshot> {
     let list = v.get("Items")?.as_array()?;
     let market_id = get_id(v, "MarketID")?;
-    let station_name = get_text(v, "StationName")?;
-    let system_name = get_text(v, "StarSystem")?;
+    let station_name = get_text(v, "StationName").unwrap_or_default();
+    let system_name = get_text(v, "StarSystem").unwrap_or_default();
     let mut items = Vec::with_capacity(list.len());
+    let mut incomplete = false;
     for it in list {
         if get_str(it, "Category").is_some_and(|c| c.to_ascii_lowercase().contains("nonmarketable"))
         {
             continue; // limpets; EDDN drops them too
         }
         let Some(name) = get_str(it, "Name") else {
+            incomplete = true;
             continue;
         };
         let symbol = normalize_symbol(name);
         if symbol.is_empty() {
+            incomplete = true;
             continue;
         }
+        incomplete |= ["BuyPrice", "SellPrice", "Stock", "Demand"].iter().any(|key| get_i64(it, key).is_none());
         items.push(MarketItem {
             symbol,
             buy: price(it, "BuyPrice"),
@@ -702,7 +729,9 @@ fn market_json(v: &Value, ts: i64, source: Source) -> Option<MarketSnapshot> {
         station_type: get_text(v, "StationType"),
         carrier_docking_access: get_text(v, "CarrierDockingAccess"),
         timestamp: ts,
+        station_timestamp: None,
         items,
+        incomplete,
         prohibited: None,
         economies: None,
         source,

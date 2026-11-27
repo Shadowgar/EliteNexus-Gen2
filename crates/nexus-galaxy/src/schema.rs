@@ -5,9 +5,18 @@ use rusqlite::{Connection, TransactionBehavior};
 use std::time::Duration;
 
 /// The schema understood by this build. Compatible older stores migrate in place.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 const TABLES: &str = r#"
+CREATE TABLE IF NOT EXISTS market_observations (
+    market_id INTEGER NOT NULL,
+    field TEXT NOT NULL,
+    observed INTEGER NOT NULL,
+    source INTEGER,
+    value_key TEXT NOT NULL,
+    PRIMARY KEY (market_id, field)
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS systems (
     id64                      INTEGER PRIMARY KEY,
     name                      TEXT NOT NULL,
@@ -242,6 +251,9 @@ pub(crate) fn open_writer(path: &std::path::Path, shared: &crate::writer::Shared
     tx.execute_batch(RETIRED)?;
     tx.execute_batch(crate::deals::ANOMALY_INDEXES)?;
     add_missing_columns(&tx)?;
+    if tx.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? < 3 {
+        seed_market_observations(&tx)?;
+    }
     run_fixes(&tx)?;
     seed_commodities(&tx)?;
     // Build the read projections before advancing the version. They are private until open succeeds.
@@ -250,6 +262,33 @@ pub(crate) fn open_writer(path: &std::path::Path, shared: &crate::writer::Shared
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(conn)
+}
+
+fn seed_market_observations(conn: &Connection) -> Result<()> {
+    // Older stores only tracked station and listing timestamps. Keep their known values
+    // protected at those timestamps without inventing a source or populating unknown fields.
+    for (field, present, clock) in [
+        ("name", "name <> ''", "max(updated, market_updated)"),
+        ("location", "system_id64 IS NOT NULL OR system_name <> ''", "max(updated, market_updated)"),
+        ("type", "type IS NOT NULL", "max(updated, market_updated)"),
+        ("access", "carrier_access IS NOT NULL", "max(updated, market_updated)"),
+        ("economies", "economies IS NOT NULL", "max(updated, market_updated)"),
+        ("economy", "economy IS NOT NULL", "max(updated, market_updated)"),
+        ("prohibited", "prohibited IS NOT NULL", "market_updated"),
+        ("listings", "market_updated > 0", "market_updated"),
+        ("distance", "dist_ls IS NOT NULL", "updated"),
+        ("pad", "max_pad > 0", "updated"),
+        ("services", "services <> 0", "updated"),
+        ("faction", "faction IS NOT NULL", "updated"),
+        ("faction_state", "faction_state IS NOT NULL", "updated"),
+        ("government", "government IS NOT NULL", "updated"),
+        ("allegiance", "allegiance IS NOT NULL", "updated"),
+    ] {
+        conn.execute(&format!(
+            "INSERT OR IGNORE INTO market_observations SELECT market_id, ?1, {clock}, NULL, '' FROM stations WHERE {present}"
+        ), [field])?;
+    }
+    Ok(())
 }
 
 fn ensure_supported_schema(conn: &Connection) -> Result<()> {
