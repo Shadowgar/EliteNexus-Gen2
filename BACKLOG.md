@@ -19,7 +19,8 @@ One requirement or coherent slice at a time. Original G2 identifiers and phase n
 - [x] **G2-024A (ENX-033) — Market quote freshness.** Integrated from PR #9; seven focused galaxy regressions reported passed at `2e1dbc7`. Application compilation and runtime verification deferred to 01D-W.
 - [x] **G2-024B (ENX-034) — Deals request identity.** Integrated PR #10; full query and commander context retire superseded results. Application check pending at handoff, test compilation/execution and runtime deferred to 01D-W. Disconnected worker handling remains G2-033.
 - [x] **G2-024C (ENX-035) — Market alert generation consistency.** Integrated PR #11. Eight focused galaxy tests reported passed; desktop compilation, alert regression execution and runtime acceptance deferred to 01D-W.
-- [ ] **G2-024D (ENX-036) — Carrier access.** Implemented shared open, restricted and unknown qualification across desktop Market, Ask and MCP. Nine focused galaxy regressions passed. Application compilation and runtime verification remain in 01D-W.
+- [x] **G2-024D (ENX-036) — Carrier access.** Integrated PR #12. Shared reported open/restricted/unknown qualification, conservative public destination filtering and docked-origin exception; nine focused galaxy regressions reported passed. Application compilation and desktop, Ask and MCP verification deferred to 01D-W.
+- [x] **G2-024 — Market freshness, deals, alerts and access.** All four implementation slices integrated as ENX-033–036; consolidated acceptance remains in 01D-W.
 - [ ] **G2-025 — Carrier movement authority.** Separate jump requests, estimates and verified movements by carrier identity. Do not infer authoritative route advancement or duplicate history from unrelated or repeated observations.
 - [ ] **G2-033 (market/carrier scope) — Worker outcomes.** Handle terminal failures and disconnected workers; retire superseded results and permit retry. Leave unrelated workers for 01D-D.
 
