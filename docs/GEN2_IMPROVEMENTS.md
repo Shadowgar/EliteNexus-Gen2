@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 29 substantive entries, ENX-001 through ENX-029.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 30 substantive entries, ENX-001 through ENX-030.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -270,6 +270,16 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 **Class and subsystem:** Development resource management. The [project configuration](../.codex/config.toml) sets low effort, 64K compaction threshold, 2K tool-output and skills-catalog budgets, default service tier and disables agent delegation, goals and fast-mode controls. The [local command wrapper](../tools/dev/Dev.ps1) uses one pinned incremental Cargo operation, requires a selected package test scope and launches the existing executable only in isolated mode. The [usage reader](../tools/dev/usage.py) reports cumulative token-counter advances and separate account quota snapshots without network calls or exporting prompts. The [resource budget](DEVELOPMENT_BUDGET.md), [roadmap](../ROADMAP.md) and [backlog](../BACKLOG.md) provide a bounded working queue and acceptance targets without requiring historical audit context. No gameplay source, lockfile or tests changed.
 
 **Verification and limitations:** Configuration keys checked against the official Codex reference. Local client loading, Windows command execution and actual savings must be measured during the next small authorized assignment; no full CI, release or application acceptance is implied. Local usage counters do not establish billed quota. Historical private research stays separate.
+
+## Phase 01D-B — Trading, market and fleet carriers
+
+### ENX-030 — Reconcile commander credits after carrier bank transfers
+
+**Class and subsystem:** Journal/model accounting correction. `CarrierBankTransfer.PlayerBalance` is optional, so a reported zero is distinguishable from an omitted balance. After recording the existing transfer arithmetic and category, the model reconciles commander credits and credit history with the reported value when present. Omitted balances retain the prior calculation. Own-carrier transfers retain their non-spending classification.
+
+**Evidence:** [PR #6](https://github.com/Shadowgar/Praetorium/pull/6), implementation [64074f7](https://github.com/Shadowgar/Praetorium/commit/64074f7841791813fd9750678df6efcba19f7932). The implementation report records a focused scenario regression failing with stale 400,000 Cr and passing with reported 0 Cr, using Rust 1.100.0 and the persistent local target. Static review covered the journal field, model reconciliation, ledger category and regression. No new full suite or runtime verification was performed during integration. The original G2-004 shared trade-budget defect remains open.
+
+**Upstream applicability:** Independently reviewable journal and model correction; consumers of the event type should accommodate optional player balance. No production service or release change.
 
 ## Upstream review opportunities
 

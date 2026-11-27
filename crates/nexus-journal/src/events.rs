@@ -2683,7 +2683,7 @@ pub struct CarrierBankTransfer {
     #[serde(rename = "Withdraw")]
     pub withdraw: Option<i64>,
     #[serde(rename = "PlayerBalance")]
-    pub player_balance: i64,
+    pub player_balance: Option<i64>,
     #[serde(rename = "CarrierBalance")]
     pub carrier_balance: i64,
 }

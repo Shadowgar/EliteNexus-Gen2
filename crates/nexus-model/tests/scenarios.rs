@@ -580,6 +580,24 @@ fn carrier_transfer_is_not_spending() {
     assert_eq!(gs.cmdr.credits, 500_000);
 }
 
+#[test]
+fn carrier_transfer_distinguishes_zero_player_balance_from_missing() {
+    let mut m = Model::default();
+    feed(&mut m, LOGIN);
+    feed(
+        &mut m,
+        &[r#"{ "timestamp":"2026-10-01T10:30:00Z", "event":"CarrierBankTransfer", "CarrierID":3716323840, "Deposit":500000, "CarrierBalance":500000 }"#],
+    );
+    assert_eq!(m.active().unwrap().cmdr.credits, 500_000);
+
+    // The reported balance reconciles a stale estimate that differs from the transfer amount.
+    feed(
+        &mut m,
+        &[r#"{ "timestamp":"2026-10-01T10:31:00Z", "event":"CarrierBankTransfer", "CarrierID":3716323840, "Deposit":100000, "PlayerBalance":0, "CarrierBalance":600000 }"#],
+    );
+    assert_eq!(m.active().unwrap().cmdr.credits, 0);
+}
+
 /// The carrier jump timer through real journal lines: request, cancel, request again, arrive
 /// while docked aboard, cool down, ready.
 #[test]
