@@ -1,5 +1,5 @@
 @echo off
-rem Starts the local Gen2 build, building it from source if needed.
+rem Starts the local Praetorium build, building it from source if needed.
 setlocal
 set "DIR=%~dp0dist\Praetorium"
 if not exist "%DIR%\Praetorium.exe" (
