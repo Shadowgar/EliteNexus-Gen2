@@ -190,9 +190,21 @@ mod tests {
     fn the_real_changelog_reads() {
         let log = include_str!("../../../CHANGELOG.md");
         let all = sections(log);
-        assert!(all.len() > 5, "{} sections", all.len());
+        assert!(!all.is_empty(), "Praetorium has a versioned development changelog");
+        assert_eq!(Version::parse(&all[0].version), Some(Version::current()));
         for s in &all {
             assert!(Version::parse(&s.version).is_some(), "{} is a version", s.version);
+            assert!(!s.blocks.is_empty(), "{} has text", s.version);
+        }
+        assert!(all.windows(2).all(|pair| Version::parse(&pair[0].version) > Version::parse(&pair[1].version)),
+            "Praetorium versions are distinct and ordered newest first");
+
+        // The inherited release history is preserved, but is not part of Praetorium's update notes.
+        let upstream = sections(include_str!("../../../docs/UPSTREAM-CHANGELOG.md"));
+        assert!(upstream.len() > 5, "{} upstream sections", upstream.len());
+        assert_eq!(upstream[0].version, "0.8.2");
+        for s in &upstream {
+            assert!(Version::parse(&s.version).is_some(), "{} is an upstream version", s.version);
             assert!(!s.blocks.is_empty(), "{} has text", s.version);
         }
     }
