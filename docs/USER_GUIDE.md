@@ -2,7 +2,7 @@
 
 Praetorium is a development application based on Elite Nexus by CMDR Alka Uruskan and its contributors. Run the local `Praetorium.exe` build on Windows, `./Praetorium` on Linux or `Praetorium.app` on macOS. The app follows the selected journal folder. Isolated runs use an explicit journal folder or an empty fixture and disable service traffic and protected game operations.
 
-The support card links to the original project's sponsorship pages and acknowledges its contributors. Settings ? About shows the application version, origin, repository and data folder. See [profile migration](PROFILE_MIGRATION.md) for copying compatible local data from a previous development profile.
+The support card links to the original project's sponsorship pages and acknowledges its contributors. Settings › About shows the application version, origin, repository and data folder. See [profile migration](PROFILE_MIGRATION.md) for copying compatible local data from a previous development profile.
 
 ## The window
 
@@ -226,7 +226,7 @@ folder each time, settings and database included, and Praetorium says so.
 
 ## Updates
 
-Settings ? About shows that Praetorium update checks and installation are disabled pending approval of Praetorium
+Settings › About shows that Praetorium update checks and installation are disabled pending approval of Praetorium
 release signing. Use a local development build from this repository during this phase. On Windows,
 `tools/build-release.ps1` packages the built app as `dist/Praetorium` after you close the local copy. On macOS,
 `tools/macos/build-app.sh --install` installs `Praetorium.app` for local testing.

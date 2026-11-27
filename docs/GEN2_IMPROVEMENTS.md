@@ -225,13 +225,13 @@ On November 26, 2026, the owner accepted the first Windows gameplay milestone af
 - **Regression evidence and upstream applicability.** Recording-transport fixtures exercise restart, source retirement, rapid pause and resume, and fresh authorized sends, including the actual typed Market companion. The retirement behavior can be reviewed upstream independently of Gen2 authorization. Upstream would need to choose an explicit policy for cross-process queue resume.
 - **Profile snapshot follow-up.** An explicitly authorized Inara snapshot uses the identity from its own replay, checked against the verified current context. A stale observation of an empty queue can no longer defer a newly queued snapshot. A recording-transport test covers a live session that has processed its file header while the login event was retired during a configuration change.
 
-## Phase 01E ? Praetorium identity
+## Phase 01E — Praetorium identity
 
-### ENX-026 ? Independent identity, attribution and profile migration
+### ENX-026 — Independent identity, attribution and profile migration
 
 **Class and subsystem:** Project identity, attribution and local data protection. Praetorium introduces its own executable, OS IDs, original icon, profile and transport identifiers. It identifies Elite Nexus as its source in the app and in distribution notices. The [copy-based migration](PROFILE_MIGRATION.md) preserves the source profile and limits what can be carried forward. Update and service authorization remain independently gated. The visual identity is specific to Praetorium. Reserved profile paths and scope-limited migration are adaptable upstream.
 
-The transition starts at the verified [Phase 01D-A draft](https://github.com/Shadowgar/EliteNexus-Gen2/pull/4) at `c873bbb7af2e392489e491e19060222b6030145a`. Its [hosted matrix](https://github.com/Shadowgar/EliteNexus-Gen2/actions/runs/45940440246) passed all nine jobs. Earlier ENX entries retain their development-era names and evidence.
+The transition starts at the verified [Phase 01D-A draft](https://github.com/Shadowgar/EliteNexus-Gen2/pull/4) at `c873bbb7af2e392489e491e19060222b6030145a`. Its [hosted matrix](https://github.com/Shadowgar/EliteNexus-Gen2/actions/runs/45940440246) passed all nine jobs. Earlier ENX entries retain their development-era names and evidence. [Phase 01E draft and verification](https://github.com/Shadowgar/EliteNexus-Gen2/pull/5).
 
 ## Upstream review opportunities
 
