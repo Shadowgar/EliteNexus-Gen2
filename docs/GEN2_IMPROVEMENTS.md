@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 31 substantive entries, ENX-001 through ENX-031.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 32 substantive entries, ENX-001 through ENX-032.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -288,6 +288,14 @@ Praetorium begins its independent development version series at `0.1.0-alpha.1`.
 **Evidence:** [PR #7](https://github.com/Shadowgar/Praetorium/pull/7), implementation [8434cea](https://github.com/Shadowgar/Praetorium/commit/8434cea51cce4740e4d08bbdb7aa53ca89b58e2f), test correction [ee7cb85](https://github.com/Shadowgar/Praetorium/commit/ee7cb85cc3faaf67dabe0fb8644c3188ee37190c). Focused galaxy trade-route and commander-balance regressions reported passed on Rust 1.100.0 using the persistent local target. Owner's subsequent Ask test compilation failed with E0599 on an erroneous write-lock unwrap; static correction removes the redundant unwrap. Corrected Ask test compilation and execution remain unverified and are explicitly deferred to 01D-W. Integrated on owner direction without another build or broader test suite. No release or service authorization.
 
 **Upstream applicability:** Shared route constraint and balance qualification are independently reviewable; optional journal field requires compatible consumers. Verify the deferred Ask fixture before consolidated acceptance.
+
+### ENX-032 — Market observation precedence and history reconciliation (G2-022)
+
+**Class and subsystem:** Galaxy ingestion and persistence. Independent field timestamps and source provenance; newer observations win, ties prefer Journal, live EDDN, archived EDDN, then Spansh and stable value comparison. Incomplete listings and missing metadata preserve known values. Independent station timestamps protect carrier location/access. Additive schema-3 migration seeds legacy clocks with unknown source. Same-time replacements retain a comparison baseline and reconcile rejected and accepted price-history points.
+
+**Evidence:** [PR #8](https://github.com/Shadowgar/Praetorium/pull/8), [22d8dc7](https://github.com/Shadowgar/Praetorium/commit/22d8dc77027c1ca6afd0357dc427944bb5c87e35), [a4ab34a](https://github.com/Shadowgar/Praetorium/commit/a4ab34a45e878ed19d5cecb75f7530bbe9f114ba). Owner reports 27 galaxy tests passed on the initial revision and focused history regression red/green on the follow-up, Rust 1.100.0 with persistent target. Static review completed; full package suite not repeated after follow-up. Legacy reports without comparison baseline permit reconciliation only of existing history at the replaced timestamp. Production-size migration, storage measurement and live acceptance deferred to 01D-W. Keep schema-2 backup for rollback; older builds reject schema 3. No additional CI or release build.
+
+**Upstream applicability:** Coordinated conversion, persistence and migration changes. No production service or release authorization.
 
 ## Upstream review opportunities
 
