@@ -836,6 +836,14 @@ fn accept_observation(
     Ok(true)
 }
 
+/// The comparison state needed to undo and replay history for the latest market report.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct MarketHistoryBaseline {
+    previous_time: Option<i64>,
+    prices: FxHashMap<i64, (i64, i64, i64)>,
+    inserted_before: Vec<(i64, i64)>,
+}
+
 fn price_changed(old: i64, new: i64, min_rel: f64) -> bool {
     if old == new {
         return false;
@@ -1044,14 +1052,26 @@ impl Ctx {
             }
             return Ok(if incomplete { MarketResult::Ignored } else { MarketResult::Stale });
         }
-        let replaces_same_time = row.market_updated == m.timestamp && row.n_commodities > 0;
+        let replaces_same_time = row.market_updated == m.timestamp && row.market_updated > 0;
         row.market_updated = m.timestamp;
 
         // Previous prices, for the history table.
-        let mut old: FxHashMap<i64, (i64, i64, i64)> = FxHashMap::default();
         let history = live
             && self.opts.price_history
             && existing.as_ref().is_some_and(|e| e.n_commodities > 0);
+        let saved_baseline: Option<String> = if replaces_same_time {
+            tx.prepare_cached(
+                "SELECT value_key FROM market_observations
+                 WHERE market_id = ?1 AND field = 'history_baseline' AND observed = ?2",
+            )?.query_row(params![mid, m.timestamp], |r| r.get(0)).optional()?
+        } else {
+            None
+        };
+        let legacy_replacement = replaces_same_time && saved_baseline.is_none();
+        let mut baseline: MarketHistoryBaseline = match saved_baseline {
+            Some(saved) => serde_json::from_str(&saved)?,
+            None => MarketHistoryBaseline::default(),
+        };
         // Since when the history has every change here, for fleet carriers only: theirs is the "since when" the
         // Market page tells, and a station's rows that aren't for sale (limpets) come and go with whoever sent the
         // report. Compared with the last report, it goes on from where it began, if this version stored that report
@@ -1060,6 +1080,7 @@ impl Ctx {
         // time, or replaced without comparing (an import), starts afresh with this report.
         let follow = self.opts.price_history && row.is_carrier;
         row.history_since = match &existing {
+            Some(e) if replaces_same_time && follow => e.history_since.or(Some(m.timestamp)),
             Some(e) if history && follow => match e.history_since {
                 Some(since) if e.history_at == Some(e.market_updated) => Some(since),
                 _ => Some(e.market_updated),
@@ -1068,7 +1089,19 @@ impl Ctx {
             _ => None,
         };
         row.history_at = row.history_since.map(|_| m.timestamp);
-        if history {
+        if replaces_same_time && !legacy_replacement {
+            let mut remove = tx.prepare_cached(
+                "DELETE FROM price_history WHERE market_id = ?1 AND commodity_id = ?2 AND ts = ?3",
+            )?;
+            let mut removed = tx.prepare_cached(
+                "DELETE FROM price_history WHERE market_id = ?1 AND ts = ?2",
+            )?.execute(params![mid, m.timestamp])?;
+            for (cid, timestamp) in baseline.inserted_before.drain(..) {
+                removed += remove.execute(params![mid, cid, timestamp])?;
+            }
+            self.history_added.set(self.history_added.get() - removed as i64);
+        } else if !replaces_same_time && history {
+            baseline.previous_time = existing.as_ref().map(|e| e.market_updated);
             let mut stmt = tx.prepare_cached(
                 "SELECT commodity_id, buy, sell, updated FROM market WHERE market_id = ?1",
             )?;
@@ -1077,7 +1110,7 @@ impl Ctx {
             })?;
             for r in rows {
                 let (cid, v) = r?;
-                old.insert(cid, v);
+                baseline.prices.insert(cid, v);
             }
         }
 
@@ -1114,21 +1147,28 @@ impl Ctx {
                     m.timestamp
                 ])?;
                 n += 1;
-                if replaces_same_time {
+                if legacy_replacement {
                     hist_set.execute(params![mid, cid, m.timestamp, it.buy, it.sell])?;
+                    continue;
+                }
+                if !live || !self.opts.price_history {
                     continue;
                 }
                 // A change: the price before it (at its report) and this one. New on a carrier's market reported
                 // before (a new order): its last report, without it (0, 0), and this one.
-                let before = match old.get(&cid) {
+                let before = match baseline.prices.get(&cid) {
                     Some(&(ob, os, ou)) => {
                         let min = self.opts.price_history_min_change;
                         (price_changed(ob, it.buy, min) || price_changed(os, it.sell, min)).then_some((ou, ob, os))
                     }
-                    None => (history && follow && (it.buy > 0 || it.sell > 0)).then(|| (existing.as_ref().map_or(0, |e| e.market_updated), 0, 0)),
+                    None if follow && (it.buy > 0 || it.sell > 0) => baseline.previous_time.map(|ts| (ts, 0, 0)),
+                    None => None,
                 };
                 if let Some((ou, ob, os)) = before {
                     let mut rows = hist_old.execute(params![mid, cid, ou, ob, os])?;
+                    if rows != 0 {
+                        baseline.inserted_before.push((cid, ou));
+                    }
                     let point = params![mid, cid, m.timestamp, it.buy, it.sell];
                     match hist_new.execute(point)? {
                         0 => _ = hist_set.execute(point)?,
@@ -1137,6 +1177,20 @@ impl Ctx {
                     self.history_added.set(self.history_added.get() + rows as i64);
                 }
             }
+        }
+        if legacy_replacement {
+            // A report stored before baselines were kept can only be reconciled at its own timestamp.
+            let removed = tx.prepare_cached(
+                "DELETE FROM price_history WHERE market_id = ?1 AND ts = ?2 AND NOT EXISTS (
+                    SELECT 1 FROM market WHERE market_id = ?1 AND commodity_id = price_history.commodity_id
+                )",
+            )?.execute(params![mid, m.timestamp])?;
+            self.history_added.set(self.history_added.get() - removed as i64);
+        } else {
+            tx.prepare_cached(
+                "INSERT OR REPLACE INTO market_observations (market_id, field, observed, value_key)
+                 VALUES (?1, 'history_baseline', ?2, ?3)",
+            )?.execute(params![mid, m.timestamp, serde_json::to_string(&baseline)?])?;
         }
         row.n_commodities = n;
         row.recompute_traders();

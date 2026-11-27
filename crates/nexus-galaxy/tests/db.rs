@@ -546,6 +546,28 @@ fn carrier_report(mid: u64, sys_name: &str, name: &str, ts: i64, items: &[(&str,
 }
 
 #[test]
+fn same_timestamp_market_replacement_reconciles_price_history() {
+    let mut tmp = TempDb::new("same-time-history");
+    let ts = now() - 60;
+    let report = |at, items: &[(&str, i64, i64, i64, i64)]| carrier_report(77, "Alpha", "AAA-777", at, items);
+    tmp.db().ingest(report(ts, &[("gold", 3_000, 0, 5, 0)]));
+    tmp.db().ingest(report(ts + 10, &[("silver", 2_000, 0, 5, 0)]));
+    tmp.db().flush().unwrap();
+    assert_eq!(tmp.db().price_history(77, "silver").unwrap().len(), 2);
+    tmp.reopen();
+
+    let Ingest::Market(mut winner) = report(ts + 10, &[("tritium", 4_000, 0, 5, 0)]) else { unreachable!() };
+    winner.source = Source::Journal;
+    let db = tmp.db();
+    db.ingest(Ingest::Market(winner));
+    db.flush().unwrap();
+    let tritium = db.price_history(77, "tritium").unwrap();
+    assert_eq!(tritium.iter().map(|p| (p.ts_unix, p.buy)).collect::<Vec<_>>(), [(ts, 0), (ts + 10, 4_000)]);
+    assert!(db.price_history(77, "silver").unwrap().is_empty());
+    assert_eq!(db.stats().unwrap().price_history_rows, Some(2));
+}
+
+#[test]
 fn market_precedence_converges_across_arrival_order_and_reopen() {
     let ts = now() - 60;
     let report = |at, source, price, access| {
