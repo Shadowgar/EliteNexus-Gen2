@@ -4,12 +4,13 @@ One item at a time. This is a compact public working queue, not a replacement fo
 
 ## Next
 
-- [ ] **DEV-01 — Local alpha acceptance:** use one fresh session only if needed; check the targeted changelog regression, build the pinned Windows application once and inspect name/version, isolated journal read and profile separation. Record actual results and quota before/after. Do not run full CI or a broad workspace test.
-- [ ] **DEV-02 — Measure workflow:** compare actual fresh-session counters using the local usage command. Review excessive context, model calls and tool-output volume only if the budget was missed. Keep any raw session records private.
+- [x] **DEV-01 — Local alpha build and initial dashboard acceptance:** owner reports targeted changelog regression passed; locked Rust 1.100.0 Windows release build at `8dd4efb` succeeded in 8m 35s using a short persistent Cargo target (three nonblocking manifest warnings). Owner screenshot confirms Praetorium 0.1.0-alpha.1, commander/ship/location data and offline isolated dashboard. Live journal updates, explicit profile-separation acceptance and effective Codex configuration remain unverified; no full workspace verification or release approval implied.
+- [ ] **DEV-02 — Measure workflow during normal feature development:** record actual same-account quota before/after a fresh focused assignment and compare local usage counters when available. Do not commission a separate AI assignment solely to measure usage. Keep raw session records private.
 
 ## Reliability queue
 
 - [ ] **REL-01 — Market and finances:** verify zero vs unknown credits/stock, per-field source precedence, market freshness, trade eligibility and observed vs estimated carrier data. Split into individual changes.
+  - [ ] **REL-01A — Commander credits:** verify whether an explicitly reported zero-credit balance is incorrectly ignored or retains a stale nonzero value. If reproduced, fix only that distinction and add focused regression coverage; absent/unknown balances must remain distinct from observed zero.
 - [ ] **REL-02 — Colonization and exobiology:** verify remote depot scope, attribution/accounting, biological eligibility and mapping/predictor data correctness.
 - [ ] **REL-03 — Limits and workers:** review compressed-import and fitting-payload bounds, terminal worker failures, scoped input and clipboard preference behavior.
 - [ ] **REL-04 — Performance and UX:** profile observed bottlenecks, check responsiveness, accessibility and map usability; avoid speculative refactoring.
