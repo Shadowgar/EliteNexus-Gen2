@@ -6,7 +6,7 @@ The [changelog](../CHANGELOG.md) describes user-facing changes. The [architectur
 
 ## Current development baseline — November 27, 2026
 
-**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 37 substantive entries, ENX-001 through ENX-037.
+**Project:** [Shadowgar/Praetorium](https://github.com/Shadowgar/Praetorium). **Version:** `0.1.0-alpha.1`. **Status:** Integrated on `main`, not released or fully verified. **Register:** 38 substantive entries, ENX-001 through ENX-038.
 
 All changes from historical PRs #1–5 are included in [consolidation commit `d110cfc`](https://github.com/Shadowgar/Praetorium/commit/d110cfc0a1f57e2eb47ea6948182375c5bef2883). PR #1 was recognized by GitHub as merged; PRs #2–5 were closed after their exact head commits were verified as ancestors of `main`. No commits were squashed or discarded. Historical branch references remain until safe retirement. Upstream history through `cdcaed99275753497c1b75b9f25a576cbb62275a` is included; at consolidation, the branch was zero commits behind upstream. The original Elite Nexus 0.8.2 lineage is provenance, not Praetorium's product version.
 
@@ -17,6 +17,8 @@ All changes from historical PRs #1–5 are included in [consolidation commit `d1
 | 01C / 01C-W | ENX-017–022 | Integrated; nine hosted jobs passed on the recorded source; owner passed 21/21 Windows gameplay checks. |
 | 01D-A | ENX-023–025 | Integrated; 892 Windows tests passed on each exact toolchain and nine hosted jobs passed on the recorded source. |
 | 01E | ENX-026–027 | Integrated; predecessor Windows verification and isolated smoke recorded; independent version's final application CI cancelled. Final consolidated acceptance remains open. |
+| Workflow | ENX-028–029 | Lean development and local verification workflow; effective session configuration remains to be confirmed. |
+| 01D-B | ENX-030–038 | Implementation integrated; focused checks recorded individually, consolidated Windows acceptance pending. |
 
 Historical verification applies only to the revisions identified below. The owner directed integration without another full verification cycle. No production release, signing, automatic update, hosted AI or outbound service authorization is granted by consolidation. Native packaging, consolidated executable version display, independent review and remaining runtime/service acceptance are outstanding. Follow [AGENTS.md](../AGENTS.md) for focused verification and the single-active-PR policy.
 
@@ -340,11 +342,14 @@ The committed-update identity is in memory. Market precedence, persisted observa
 
 **Integration:** [PR #13](https://github.com/Shadowgar/Praetorium/pull/13), [`d35248d`](https://github.com/Shadowgar/Praetorium/commit/d35248dd555464279e79352c48fb613ef4f3e574). Scoped static review covered carrier identity, observation authority, cancellation and route progress. Eleven focused model/journal regressions reported passed; application compilation and runtime verification remain deferred to 01D-W. No additional build or CI initiated.
 
-### G2-033 — Market and carrier worker outcomes
+
+### ENX-038 — Market and carrier worker outcomes (G2-033)
 
 - Market queries and Fleet Carrier Navigation plots and administration searches finish with a visible error if their worker exits without an answer. The affected controls permit retry.
 - Market and carrier requests discard results belonging to superseded inputs, commanders, journal sources or carrier selections. Retired Deals scans can finish in the background while a replacement starts.
 - Three shared worker regressions passed in a standalone harness on Rust 1.100.0 with `C:/PraetoriumBuild`. Application compilation, the Deals and Navigation regressions, and runtime acceptance are tracked in 01D-W. The remaining consumers are tracked in 01D-D.
+
+**Integration:** [PR #14](https://github.com/Shadowgar/Praetorium/pull/14), [`6986aaa`](https://github.com/Shadowgar/Praetorium/commit/6986aaa5af3b4b496cd555f11c88aa75881a3a18). Scoped static review of completion handling, request retirement, market worker retries and carrier navigation. Three standalone worker tests reported passed; not an application build. Retiring a receiver does not cancel its underlying work; assess overlapping retired reads in consolidated acceptance/performance measurements. Remaining consumers retain their 01D-D scope. Application verification remains deferred to 01D-W.
 
 ## Upstream review opportunities
 
