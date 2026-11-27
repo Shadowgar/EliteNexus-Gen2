@@ -1,4 +1,4 @@
-//! Gen2's updater stays inactive until an owner-approved release key is configured. The signed manifest and
+//! Praetorium's updater stays inactive until an owner-approved release key is configured. The signed manifest and
 //! installer live in the nexus-update crate.
 
 use crate::jobs::Job;
@@ -18,7 +18,7 @@ const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
 
 /// The first check, after start-up and the journals.
 const FIRST_CHECK: Duration = Duration::from_secs(60);
-/// Then one every 12 hours while EliteNexus-Gen2 runs.
+/// Then one every 12 hours while Praetorium runs.
 const EVERY: Duration = Duration::from_secs(12 * 3600);
 /// After a check that didn't get through, the next comes sooner.
 const RETRY: Duration = Duration::from_secs(3600);
@@ -83,7 +83,7 @@ pub fn finish_at_exit(plan: ExitPlan, data_dir: &Path) {
             if plan.restart
                 && let Err(e) = install::launch(&plan.exe, &["--updated", &plan.from])
             {
-                tracing::warn!("the updated EliteNexus-Gen2 didn't start: {e}");
+                tracing::warn!("the updated Praetorium didn't start: {e}");
             }
         }
         Err(e) => {
@@ -146,7 +146,7 @@ pub struct Updater {
     notes: Notes,
     notes_open: bool,
     download: Option<Download>,
-    /// A version waiting beside the program, put in place when EliteNexus-Gen2 closes.
+    /// A version waiting beside the program, put in place when Praetorium closes.
     ready: Option<String>,
     failed: Option<String>,
     banner_closed: bool,
@@ -173,7 +173,7 @@ impl Updater {
             demo: shot_tab.is_some(),
             auto: enabled && prefs.check && !cfg!(debug_assertions),
             rt,
-            http: enabled.then(|| reqwest::Client::builder().https_only(true).user_agent(concat!("EliteNexus-Gen2/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(20)).build().ok()).flatten(),
+            http: enabled.then(|| reqwest::Client::builder().https_only(true).user_agent(concat!("Praetorium/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(20)).build().ok()).flatten(),
             next_check: None,
             check: None,
             checked: None,
@@ -212,7 +212,7 @@ impl Updater {
         }
         if u.enabled && let Ok(why) = std::fs::read_to_string(data_dir.join(SWAP_ERROR)) {
             let _ = std::fs::remove_file(data_dir.join(SWAP_ERROR));
-            u.failed = Some(format!("{} nexus.log in the data folder has the details.", why.trim()));
+            u.failed = Some(format!("{} praetorium.log in the data folder has the details.", why.trim()));
         }
         // Updated since the last run, by this or by hand: the banner says what's new.
         let last = Version::parse(&prefs.last_version);
@@ -238,7 +238,7 @@ impl Updater {
         let tab = tab.to_ascii_lowercase();
         // A screenshot build can't update itself (it's built from source): the states show a copy that can, or one in
         // a folder it can't write to, the most common reason it can't.
-        self.installable = if tab.contains("blocked") { Err(install::Blocked::ReadOnly(PathBuf::from(r"C:\Program Files\EliteNexus-Gen2"))) } else { Ok(()) };
+        self.installable = if tab.contains("blocked") { Err(install::Blocked::ReadOnly(PathBuf::from(r"C:\Program Files\Praetorium"))) } else { Ok(()) };
         match tab.as_str() {
             "update" | "update-blocked" => self.found = Some(found),
             "update-notes" => {
@@ -356,7 +356,7 @@ impl Updater {
     fn start_check(&mut self, ctx: &egui::Context) {
         let Some(key) = PRODUCTION_PUBLIC_KEY.filter(|_| self.enabled) else { return };
         let Some(http) = self.http.clone() else {
-            self.checked = Some((Instant::now(), Some("EliteNexus-Gen2 couldn't set up its connection.".into())));
+            self.checked = Some((Instant::now(), Some("Praetorium couldn't set up its connection.".into())));
             return;
         };
         self.check = Some(Job::spawn_async(ctx, &self.rt, check(http, key, self.current.is_pre())));
@@ -405,7 +405,7 @@ impl Updater {
         }
     }
 
-    /// Closes EliteNexus-Gen2, puts the waiting version in place and starts it.
+    /// Closes Praetorium, puts the waiting version in place and starts it.
     fn restart(&mut self, ctx: &egui::Context) {
         if !self.enabled {
             return;
@@ -440,7 +440,7 @@ impl Updater {
             let (got, total) = (d.got.load(Ordering::Relaxed), d.total.max(1));
             let detail = format!("{} of {}. It's checked against the release's signed manifest before anything changes.", megabytes(got), megabytes(total));
             let mut cancel = false;
-            banner(ui, Tone::Info, &format!("Downloading EliteNexus-Gen2 {}…", d.version), &detail, |ui| cancel = widgets::button(ui, "Cancel").clicked(), |ui| {
+            banner(ui, Tone::Info, &format!("Downloading Praetorium {}…", d.version), &detail, |ui| cancel = widgets::button(ui, "Cancel").clicked(), |ui| {
                 widgets::bar(ui, (got as f32 / total as f32).clamp(0.0, 1.0), pal::BLUE, 4.0, None);
             });
             if cancel && let Some(d) = &self.download {
@@ -453,7 +453,7 @@ impl Updater {
         }
         if let Some(e) = self.failed.clone() {
             let (mut again, mut page, mut close) = (false, false, false);
-            let detail = format!("{e} EliteNexus-Gen2 {cur} keeps running as it was.");
+            let detail = format!("{e} Praetorium {cur} keeps running as it was.");
             banner(
                 ui,
                 Tone::Warn,
@@ -482,15 +482,15 @@ impl Updater {
         }
         if let Some(version) = self.ready.clone() {
             let detail = if self.playing {
-                "It takes this one's place when you close EliteNexus-Gen2, so nothing stops while you play. Restart now does it at once, in a few seconds.".to_string()
+                "It takes this one's place when you close Praetorium, so nothing stops while you play. Restart now does it at once, in a few seconds.".to_string()
             } else {
-                "It takes this one's place when you close EliteNexus-Gen2. Restart now does it at once, in a few seconds; your settings and data stay as they are.".to_string()
+                "It takes this one's place when you close Praetorium. Restart now does it at once, in a few seconds; your settings and data stay as they are.".to_string()
             };
             let (mut restart, mut notes, mut close) = (false, false, false);
             banner(
                 ui,
                 Tone::Info,
-                &format!("EliteNexus-Gen2 {version} is ready."),
+                &format!("Praetorium {version} is ready."),
                 &detail,
                 |ui| {
                     close = close_button(ui);
@@ -513,14 +513,14 @@ impl Updater {
             let has_asset = found.manifest.asset(&nexus_update::manifest::this_platform()).is_some();
             let can = self.installable.is_ok() && has_asset;
             let detail = match &self.installable {
-                Ok(()) if has_asset => format!("You have {cur}. Update downloads it, checks it, and puts it in place when you close EliteNexus-Gen2 or restart it. Your settings and data stay as they are."),
+                Ok(()) if has_asset => format!("You have {cur}. Update downloads it, checks it, and puts it in place when you close Praetorium or restart it. Your settings and data stay as they are."),
                 Ok(()) => format!("You have {cur}. This release has no archive for this computer: the release page has what there is."),
                 Err(why) => format!("You have {cur}. {}", why.why()),
             };
             banner(
                 ui,
                 Tone::Info,
-                &format!("EliteNexus-Gen2 {} is out.", found.version),
+                &format!("Praetorium {} is out.", found.version),
                 &detail,
                 |ui| {
                     close = close_button(ui);
@@ -550,7 +550,7 @@ impl Updater {
             banner(
                 ui,
                 Tone::Info,
-                &format!("Updated to EliteNexus-Gen2 {cur}."),
+                &format!("Updated to Praetorium {cur}."),
                 &format!("From {from}. Your settings and data are as they were."),
                 |ui| {
                     close = close_button(ui);
@@ -666,7 +666,7 @@ impl Updater {
         }
         if !self.enabled && !self.demo {
             let status = if PRODUCTION_PUBLIC_KEY.is_none() {
-                "Disabled pending approval of the Gen2 signing key."
+                "Disabled pending approval of the Praetorium signing key."
             } else {
                 "Disabled for this run."
             };
@@ -726,7 +726,7 @@ impl Updater {
         if g.switch(
             &mut prefs.check,
             "Check for updates",
-            "A minute after start and every 12 hours, EliteNexus-Gen2 asks GitHub which version is newest: a download, like opening the release page. Nothing about you, your commander or your game is sent. Updating always takes a click.",
+            "A minute after start and every 12 hours, Praetorium asks GitHub which version is newest: a download, like opening the release page. Nothing about you, your commander or your game is sent. Updating always takes a click.",
         ) {
             self.set_auto(prefs.check, live);
             changed = true;
@@ -740,7 +740,7 @@ impl Updater {
             return format!("Downloading {}: {} of {}.", d.version, megabytes(d.got.load(Ordering::Relaxed)), megabytes(d.total));
         }
         if let Some(v) = &self.ready {
-            return format!("{v} is downloaded and checked: it's put in place when you close EliteNexus-Gen2.");
+            return format!("{v} is downloaded and checked: it's put in place when you close Praetorium.");
         }
         if let Some(e) = &self.failed {
             return format!("The last update didn't work: {e}");

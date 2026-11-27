@@ -22,7 +22,7 @@ pub enum TtsCmd {
     /// Windows: the voice's id (empty: the engine's default voice).
     #[cfg_attr(not(windows), allow(dead_code))]
     Voice(String),
-    /// Windows: list the engine's voices again, so one installed while Elite Nexus runs shows up.
+    /// Windows: list the engine's voices again, so one installed while Praetorium runs shows up.
     ListVoices,
 }
 
@@ -59,7 +59,7 @@ pub struct VoiceInfo {
     pub name: String,
 }
 
-/// What happened the last time Elite Nexus tried to speak, for Settings (under Test voice).
+/// What happened the last time Praetorium tried to speak, for Settings (under Test voice).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum VoiceStatus {
     #[default]

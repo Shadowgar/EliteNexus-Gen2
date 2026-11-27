@@ -160,7 +160,7 @@ fn fights(ui: &mut Ui, gs: &GameState, db: Option<&GalaxyDb>, feed: bool, st: &m
     }
 
     let Some(db) = db else {
-        empty(ui, icon::DATABASE, "The galaxy database isn't open", "Wars are looked up in Elite Nexus's galaxy database, which couldn't be opened. Market › Database says why.");
+        empty(ui, icon::DATABASE, "The galaxy database isn't open", "Wars are looked up in Praetorium's galaxy database, which couldn't be opened. Market › Database says why.");
         return action;
     };
     let asked = Asked { system: gs.location.system.clone(), address: gs.location.system_address, pos: gs.location.star_pos, prefs };
@@ -177,7 +177,7 @@ fn fights(ui: &mut Ui, gs: &GameState, db: Option<&GalaxyDb>, feed: bool, st: &m
                     .filter(|s| s.name.eq_ignore_ascii_case(&system))
                     .and_then(|s| s.pos),
                 None => None,
-            }.ok_or_else(|| format!("Elite Nexus doesn't know where {system} is yet."))?;
+            }.ok_or_else(|| format!("Praetorium doesn't know where {system} is yet."))?;
             let q = ConflictQuery { origin, max_distance_ly: prefs.range.ly(), since_unix: Timestamp::now().0 - prefs.fresh.secs(), elections: prefs.elections, limit: 60 };
             db.conflicts_near(&q).map_err(|e| e.to_string())
         });
@@ -187,7 +187,7 @@ fn fights(ui: &mut Ui, gs: &GameState, db: Option<&GalaxyDb>, feed: bool, st: &m
 
     ui.add_space(6.0);
     match &st.scan.last {
-        None if gs.location.system.is_empty() => empty(ui, icon::CROSSHAIR, "Where are you?", "Elite Nexus finds the fights nearest to you once the game says where you are: start the game, or jump once."),
+        None if gs.location.system.is_empty() => empty(ui, icon::CROSSHAIR, "Where are you?", "Praetorium finds the fights nearest to you once the game says where you are: start the game, or jump once."),
         None => {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -236,12 +236,12 @@ fn list(ui: &mut Ui, gs: &GameState, scan: &ConflictScan, prefs: CombatPrefs, fe
         // The current system, at war, is among those reported.
         let reported = scan.systems_reported.saturating_sub(usize::from(here));
         let hint = if reported == 0 && !feed {
-            "Elite Nexus fills its galaxy database from the live EDDN feed, which is switched off: turn on \"Receive the live market feed\" in Accounts & sync. \
+            "Praetorium fills its galaxy database from the live EDDN feed, which is switched off: turn on \"Receive the live market feed\" in Accounts & sync. \
              Until then only the systems you visit yourself are reported."
                 .to_string()
         } else if reported == 0 {
             format!(
-                "No{other} populated system {within} has been reported in {}. Elite Nexus fills its galaxy database from the live EDDN feed while it runs: \
+                "No{other} populated system {within} has been reported in {}. Praetorium fills its galaxy database from the live EDDN feed while it runs: \
                  leave it open for a while (a few hours cover the populated bubble), or look further.",
                 prefs.fresh.words()
             )
@@ -281,9 +281,9 @@ fn list(ui: &mut Ui, gs: &GameState, scan: &ConflictScan, prefs: CombatPrefs, fe
     }
     ui.add_space(10.0);
     let mut note = format!(
-        "From the reports of players' game clients that Elite Nexus receives from EDDN while it runs, and your own journal: {} populated systems {within} reported in {}. \
+        "From the reports of players' game clients that Praetorium receives from EDDN while it runs, and your own journal: {} populated systems {within} reported in {}. \
          A system nobody has visited since a war began, or since it ended, shows its last report, so check the system in the game's galaxy map before a long trip. \
-         Days won, sides and stakes come from the game's own list of a system's conflicts; where Elite Nexus has only the factions' states (reports stored by an \
+         Days won, sides and stakes come from the game's own list of a system's conflicts; where Praetorium has only the factions' states (reports stored by an \
          earlier version, a Spansh dump), the card says the score isn't reported.",
         nexus_data::names::group_digits(scan.systems_reported as i64),
         prefs.fresh.words()
@@ -390,7 +390,7 @@ fn sides(ui: &mut Ui, hit: &ConflictHit) {
         };
         ui.add(egui::Label::new(RichText::new(who).size(size::BODY).color(pal::TEXT)).wrap());
         ui.label(RichText::new("Score not reported").size(size::FOOTNOTE).color(pal::FAINT)).on_hover_text(
-            "Elite Nexus has only the factions' states for this system (a report stored by an earlier version, a Spansh dump, or a sender that left \
+            "Praetorium has only the factions' states for this system (a report stored by an earlier version, a Spansh dump, or a sender that left \
              the game's list of conflicts out): which factions are at war is known, not the days each has won or what's at stake. The next report \
              from someone there fills it in.",
         );

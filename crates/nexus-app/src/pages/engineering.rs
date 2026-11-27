@@ -391,7 +391,7 @@ fn blueprint_card(ui: &mut Ui, gs: &GameState, st: &mut EngineeringUi, inv: &Has
 }
 
 /// What a roll is, and why the counts differ by grade and rank.
-const ROLLS_TIP: &str = "A roll is one craft at the engineer: it takes one set of the grade's materials. Since the game's August 2024 update (18.08) each roll fills a fixed share of its grade, set by the grade and your rank with the engineer, so luck no longer comes into it. At an engineer's top rank, G1 takes 1 roll and G5 takes 5. Below it, commanders report 5 rolls at the rank that opens a grade and one fewer for each rank above. The pen changes the counts, and Elite Nexus keeps yours for your next plans.";
+const ROLLS_TIP: &str = "A roll is one craft at the engineer: it takes one set of the grade's materials. Since the game's August 2024 update (18.08) each roll fills a fixed share of its grade, set by the grade and your rank with the engineer, so luck no longer comes into it. At an engineer's top rank, G1 takes 1 roll and G5 takes 5. Below it, commanders report 5 rolls at the rank that opens a grade and one fewer for each rank above. The pen changes the counts, and Praetorium keeps yours for your next plans.";
 
 /// The rolls planned at each of the plan's grades, on chips, and a pen that opens all five to change: the commander's
 /// own counts, kept for later plans. Says when the journal's rank with the engineer for the plan needs more. Returns

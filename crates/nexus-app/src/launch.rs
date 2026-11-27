@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const GPU_RESET: &str = "--gpu-reset";
-pub const DATA_HOME: &str = "ELITE_NEXUS_GEN2_HOME";
+pub const DATA_HOME: &str = "PRAETORIUM_HOME";
 
 static ISOLATED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 

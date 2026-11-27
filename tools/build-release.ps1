@@ -1,11 +1,11 @@
-# Builds and packages a local EliteNexus-Gen2 development copy, without publication or update signing.
+# Builds and packages a local Praetorium development copy, without publication or update signing.
 #   powershell -ExecutionPolicy Bypass -File .\tools\build-release.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'env.ps1')
 Set-Location $root
 
-$name = 'EliteNexus-Gen2'
+$name = 'Praetorium'
 $exe = "$name.exe"
 $dist = Join-Path $root "dist\$name"
 $target = Join-Path $dist $exe
@@ -18,8 +18,8 @@ if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 $version = (Select-String -LiteralPath (Join-Path $root 'Cargo.toml') -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 $targetDir = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR) } else { Join-Path $root 'target' }
 $built = Join-Path $targetDir "release\$exe"
-$docSources = @('LICENSE', 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md')
-$docFiles = @('LICENSE', 'README.md', 'NOTICE.md', 'USER_GUIDE.md', 'Inter-LICENSE.txt')
+$docSources = @('LICENSE', 'README.md', 'NOTICE.md', 'docs\USER_GUIDE.md', 'docs\LICENSING.md', 'docs\UPSTREAM-ACKNOWLEDGMENTS.md', 'docs\PROFILE_MIGRATION.md', 'docs\THIRD-PARTY-LICENSES.txt')
+$docFiles = @($docSources | ForEach-Object { Split-Path -Leaf $_ }) + @('Inter-LICENSE.txt')
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 foreach ($f in $docSources) { Copy-Item -LiteralPath (Join-Path $root $f) -Destination $dist -Force }
 Copy-Item -LiteralPath (Join-Path $root 'data\fonts\inter\LICENSE.txt') -Destination (Join-Path $dist 'Inter-LICENSE.txt') -Force

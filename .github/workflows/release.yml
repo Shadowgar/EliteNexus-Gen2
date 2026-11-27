@@ -11,4 +11,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Report release status
-        run: echo 'EliteNexus-Gen2 release publication is disabled pending owner approval.'
+        run: echo 'Praetorium release publication is disabled pending owner approval.'

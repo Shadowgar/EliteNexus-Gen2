@@ -390,7 +390,7 @@ fn near_you(ui: &mut Ui, gs: &GameState, st: &mut WhereUi, spansh: &nexus_spansh
         controls_row(ui, |ui| arrival_option(ui, st));
     }
     if origin.is_none() {
-        footnote(ui, "Your position isn't known yet: jump or relog and Elite Nexus reads it from the journal.");
+        footnote(ui, "Your position isn't known yet: jump or relog and Praetorium reads it from the journal.");
     }
     ui.add_space(6.0);
     let Some(result) = &st.near.last else { return };

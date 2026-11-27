@@ -31,7 +31,7 @@ impl Blocked {
             Blocked::InsideZip => "Elite Nexus is running from inside its zip file, so it can't replace itself: unzip it into a folder of its own first.".into(),
             Blocked::ReadOnly(dir) => format!("Elite Nexus can't write to its own folder ({}), so it can't replace itself: update it the way you installed it.", dir.display()),
             Blocked::Mac => "On a Mac, Elite Nexus doesn't replace its app yet: download the new one and drag it to Applications, over the old one. Your data stays where it is.".into(),
-            Blocked::Identity => "Self-updates require the original EliteNexus-Gen2 executable name.".into(),
+            Blocked::Identity => "Self-updates require the original Praetorium executable name.".into(),
             Blocked::Platform(p) => format!("Releases have no archive for this computer ({p}), so it can't update itself."),
         }
     }
@@ -78,7 +78,7 @@ fn inside_zip(dir: &Path) -> bool {
 }
 
 fn writable(dir: &Path) -> bool {
-    let probe = dir.join(format!(".elite-nexus-gen2-update-{}", std::process::id()));
+    let probe = dir.join(format!(".praetorium-update-{}", std::process::id()));
     match std::fs::File::create_new(&probe) {
         Ok(file) => {
             drop(file);
@@ -89,13 +89,13 @@ fn writable(dir: &Path) -> bool {
     }
 }
 
-/// Where the new program waits while the old one runs: `EliteNexus-Gen2.new.exe` beside `EliteNexus-Gen2.exe`.
+/// Where the new program waits while the old one runs: `Praetorium.new.exe` beside `Praetorium.exe`.
 pub fn staged_path(exe: &Path) -> PathBuf {
     with_suffix(exe, ".new")
 }
 
 /// Where the old program goes when the new one takes its place (Windows, where a running program can be renamed but
-/// not deleted): `EliteNexus-Gen2.old.exe`, deleted at the next approved update startup.
+/// not deleted): `Praetorium.old.exe`, deleted at the next approved update startup.
 pub fn old_path(exe: &Path) -> PathBuf {
     with_suffix(exe, ".old")
 }
@@ -292,15 +292,15 @@ mod tests {
 
     #[test]
     fn names_beside_the_program() {
-        assert_eq!(staged_path(Path::new("C:/Games/EliteNexus-Gen2/EliteNexus-Gen2.exe")), Path::new("C:/Games/EliteNexus-Gen2/EliteNexus-Gen2.new.exe"));
-        assert_eq!(old_path(Path::new("C:/Games/EliteNexus-Gen2/EliteNexus-Gen2.exe")), Path::new("C:/Games/EliteNexus-Gen2/EliteNexus-Gen2.old.exe"));
-        assert_eq!(staged_path(Path::new("/home/cmdr/EliteNexus-Gen2/EliteNexus-Gen2")), Path::new("/home/cmdr/EliteNexus-Gen2/EliteNexus-Gen2.new"));
+        assert_eq!(staged_path(Path::new("C:/Games/Praetorium/Praetorium.exe")), Path::new("C:/Games/Praetorium/Praetorium.new.exe"));
+        assert_eq!(old_path(Path::new("C:/Games/Praetorium/Praetorium.exe")), Path::new("C:/Games/Praetorium/Praetorium.old.exe"));
+        assert_eq!(staged_path(Path::new("/home/cmdr/Praetorium/Praetorium")), Path::new("/home/cmdr/Praetorium/Praetorium.new"));
     }
 
     /// A test key signs the exact bytes and metadata used by the production manifest check.
     fn signed_asset(bytes: &[u8]) -> Asset {
         let tag = "v0.8.4";
-        let name = "EliteNexus-Gen2-v0.8.4-windows-x64.zip";
+        let name = "Praetorium-v0.8.4-windows-x64.zip";
         let asset = Asset { name: name.into(), url: crate::release_file(tag, name), size: bytes.len() as u64, sha256: crate::sha256_hex(bytes) };
         let manifest = crate::Manifest {
             schema: crate::manifest::SCHEMA,

@@ -1,6 +1,6 @@
 [package]
 name = "nexus-update"
-description = "EliteNexus-Gen2 signed release metadata, version eligibility, archive validation and installation"
+description = "Praetorium signed release metadata, version eligibility, archive validation and installation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

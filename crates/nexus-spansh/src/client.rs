@@ -233,7 +233,7 @@ impl Spansh {
     pub fn gen2(offline: bool, max_concurrent: usize) -> Self {
         let builder = SpanshBuilder {
             access: if offline { Access::Offline } else { Access::PublicRecords },
-            user_agent: concat!("EliteNexus-Gen2/", env!("CARGO_PKG_VERSION")).into(),
+            user_agent: concat!("Praetorium/", env!("CARGO_PKG_VERSION")).into(),
             max_concurrent: max_concurrent.max(1),
             ..Default::default()
         };

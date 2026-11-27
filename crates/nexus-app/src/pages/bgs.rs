@@ -171,7 +171,7 @@ fn merits_here(ui: &mut Ui, merits: i64) {
         return;
     }
     ui.label(RichText::new(format!("{} {} merits", icon::CROWN, group_digits(merits))).font(display(14.0)).color(pal::PURPLE))
-        .on_hover_text("Powerplay merits the game awarded while you were in this system. The journal doesn't say which system an award counts for, so Elite Nexus places it where you were.");
+        .on_hover_text("Powerplay merits the game awarded while you were in this system. The journal doesn't say which system an award counts for, so Praetorium places it where you were.");
 }
 
 fn powerplay(ui: &mut Ui, gs: &GameState, since: Timestamp) {

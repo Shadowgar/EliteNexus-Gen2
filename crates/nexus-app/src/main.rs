@@ -1,4 +1,4 @@
-//! EliteNexus-Gen2 — the native Elite Dangerous companion.
+//! Praetorium — the native Elite Dangerous companion.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -43,7 +43,7 @@ mod widgets;
 
 
 fn app_icon() -> egui::IconData {
-    // macOS: an app bundle's own icon (Contents/Resources/EliteNexus.icns) is the one in the Dock. An empty icon
+    // macOS: an app bundle's own icon (Contents/Resources/Praetorium.icns) is the one in the Dock. An empty icon
     // keeps eframe from replacing it with this small square one at start.
     if cfg!(target_os = "macos") && settings::runs_from_app_bundle() {
         return egui::IconData::default();
@@ -89,18 +89,18 @@ fn already_running_message() {
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
-        let text: Vec<u16> = "EliteNexus-Gen2 is already running.\0".encode_utf16().collect();
-        let title: Vec<u16> = "EliteNexus-Gen2\0".encode_utf16().collect();
+        let text: Vec<u16> = "Praetorium is already running.\0".encode_utf16().collect();
+        let title: Vec<u16> = "Praetorium\0".encode_utf16().collect();
         // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call.
         unsafe {
             MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION);
         }
     }
     #[cfg(not(windows))]
-    eprintln!("EliteNexus-Gen2 is already running.");
+    eprintln!("Praetorium is already running.");
 }
 
-/// Linux: `--install-desktop` / `--uninstall-desktop` put EliteNexus-Gen2 in the app menu, or take it out, from a
+/// Linux: `--install-desktop` / `--uninstall-desktop` put Praetorium in the app menu, or take it out, from a
 /// terminal. Returns the exit code when one of them was given.
 #[cfg(target_os = "linux")]
 fn desktop_entry_cli() -> Option<i32> {
@@ -113,9 +113,9 @@ fn desktop_entry_cli() -> Option<i32> {
         return Some(1);
     };
     let done = if install {
-        std::env::current_exe().and_then(|exe| desktop_entry::install(&home, &exe)).map(|()| format!("Added EliteNexus-Gen2 to the app menu: {}", desktop_entry::entry_path(&home).display()))
+        std::env::current_exe().and_then(|exe| desktop_entry::install(&home, &exe)).map(|()| format!("Added Praetorium to the app menu: {}", desktop_entry::entry_path(&home).display()))
     } else {
-        desktop_entry::uninstall(&home).map(|()| "Removed EliteNexus-Gen2 from the app menu.".to_string())
+        desktop_entry::uninstall(&home).map(|()| "Removed Praetorium from the app menu.".to_string())
     };
     match done {
         Ok(msg) => {
@@ -149,7 +149,7 @@ fn main() -> eframe::Result {
     let data_dir = match settings::initialize_data_dir(isolated) {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!("EliteNexus-Gen2 could not open its data directory: {e}");
+            eprintln!("Praetorium could not open its data directory: {e}");
             std::process::exit(2);
         }
     };
@@ -165,14 +165,14 @@ fn main() -> eframe::Result {
             return Ok(());
         }
     };
-    let log_file = std::fs::OpenOptions::new().create(true).append(true).open(data_dir.join("nexus.log")).ok();
+    let log_file = std::fs::OpenOptions::new().create(true).append(true).open(data_dir.join("praetorium.log")).ok();
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,wgpu=warn,naga=warn,eframe=warn".into());
     match log_file {
         Some(f) => tracing_subscriber::fmt().with_env_filter(filter).with_ansi(false).with_writer(std::sync::Mutex::new(f)).init(),
         None => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), data = %data_dir.display(), "EliteNexus-Gen2 starting");
-    // A panic is written straight to crash.log (nexus.log may not be open, and a release build has no console), with
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), data = %data_dir.display(), "Praetorium starting");
+    // A panic is written straight to crash.log (praetorium.log may not be open, and a release build has no console), with
     // where it happened: the next start says so, and the commander can send the file. Nothing is uploaded.
     let crash_log = data_dir.join("crash.log");
     let journal_dir = match launch::journal_argument(&launch_args).and_then(|picked| {
@@ -192,7 +192,7 @@ fn main() -> eframe::Result {
     }) {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!("EliteNexus-Gen2 could not open the selected journal directory: {e}");
+            eprintln!("Praetorium could not open the selected journal directory: {e}");
             std::process::exit(2);
         }
     };
@@ -204,14 +204,14 @@ fn main() -> eframe::Result {
         tracing::error!("panic in {name}: {info}");
         // The first ones matter: a panic the core survives can repeat with every update of a file, and the backtraces
         // would bury the first report (and slow the thread down). The window's own thread always gets in: its panic
-        // is the one that closes EliteNexus-Gen2.
+        // is the one that closes Praetorium.
         let n = REPORTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if n >= 10 && name != "main" {
             return;
         }
-        let more = if n == 9 { "Further panics this run are only in nexus.log.\n\n" } else { "" };
+        let more = if n == 9 { "Further panics this run are only in praetorium.log.\n\n" } else { "" };
         let when = nexus_journal::Timestamp::now().to_local_string("%Y-%m-%d %H:%M:%S");
-        let text = format!("{when} EliteNexus-Gen2 {} panicked in thread '{name}': {info}\n{}\n\n{more}", env!("CARGO_PKG_VERSION"), std::backtrace::Backtrace::force_capture());
+        let text = format!("{when} Praetorium {} panicked in thread '{name}': {info}\n{}\n\n{more}", env!("CARGO_PKG_VERSION"), std::backtrace::Backtrace::force_capture());
         // Kept to about a megabyte: the previous one moves aside.
         if std::fs::metadata(&crash_log).is_ok_and(|m| m.len() > 1_000_000) {
             let _ = std::fs::rename(&crash_log, crash_log.with_extension("old.log"));

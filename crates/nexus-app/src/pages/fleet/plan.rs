@@ -115,7 +115,7 @@ impl PlanUi {
             return;
         };
         if fitting::hull(&plan.hull).is_none() {
-            self.error = Some(format!("This version of Elite Nexus has no figures for the {} yet.", b.hull()));
+            self.error = Some(format!("This version of Praetorium has no figures for the {} yet.", b.hull()));
             return;
         }
         let ship = b.ship.and_then(|id| gs.fleet.ships.get(&id)).filter(|s| s.ship_type.eq_ignore_ascii_case(&plan.hull));
@@ -173,7 +173,7 @@ impl PlanUi {
         let value: serde_json::Value = serde_json::from_str(&build.loadout).map_err(|_| "That build can't be read.".to_string())?;
         let plan = Plan::from_loadout(&value).ok_or("That build can't be read.")?;
         if fitting::hull(&plan.hull).is_none() {
-            return Err(format!("This version of Elite Nexus has no figures for the {} yet.", nexus_data::ships::ship_name(&plan.hull)));
+            return Err(format!("This version of Praetorium has no figures for the {} yet.", nexus_data::ships::ship_name(&plan.hull)));
         }
         self.begin(plan, None, None, None);
         self.source = "a pasted build".into();
@@ -235,7 +235,7 @@ fn plan_of(s: &Ship) -> Result<Plan, String> {
     let value: serde_json::Value = serde_json::from_str(json).map_err(|_| "This ship's recorded build can't be read.".to_string())?;
     let plan = Plan::from_loadout(&value).ok_or("This ship's recorded build can't be read.")?;
     if fitting::hull(&plan.hull).is_none() {
-        return Err(format!("This version of Elite Nexus has no figures for the {} yet.", s.type_name));
+        return Err(format!("This version of Praetorium has no figures for the {} yet.", s.type_name));
     }
     Ok(plan)
 }
@@ -475,7 +475,7 @@ fn saved_card(ui: &mut Ui, gs: &GameState, st: &mut PlanUi) {
         if let Some(p) = &st.rename_problem {
             ui.add(Label::new(RichText::new(format!("{} {p}", icon::WARNING_CIRCLE)).color(pal::WARN)).wrap());
         }
-        footnote(ui, "Saved on this computer, in Elite Nexus's data folder (builds.json), with the engineering planned for each.");
+        footnote(ui, "Saved on this computer, in Praetorium's data folder (builds.json), with the engineering planned for each.");
         if let Some((i, name)) = rename {
             // A name taken already keeps the field open, saying so.
             match st.builds.rename(i, &name) {
@@ -715,7 +715,7 @@ fn compare_panel(ui: &mut Ui, hull: &Hull, figures: &Figures, with: &CompareWith
             footnote(ui, "Green where this plan does better, red where it does worse. Both at the same pips, cargo, fuel and discount.");
         }
         None => {
-            ui.label(RichText::new("This version of Elite Nexus has no figures for that hull.").color(pal::DIM));
+            ui.label(RichText::new("This version of Praetorium has no figures for that hull.").color(pal::DIM));
         }
     });
     picked_now
@@ -793,7 +793,7 @@ fn share_menu(ui: &mut Ui, loadout: &str) {
         if item(ui, icon::COPY, "Copy build", "The game's own Loadout format, which EDSY, Coriolis and Where to buy read").clicked() {
             ui.ctx().copy_text(loadout.to_string());
         }
-        if item(ui, icon::COPY, "Copy SLEF", "The format EDSY and Coriolis export builds in, with Elite Nexus as the app it came from").clicked()
+        if item(ui, icon::COPY, "Copy SLEF", "The format EDSY and Coriolis export builds in, with Praetorium as the app it came from").clicked()
             && let Some(text) = crate::export::slef(loadout)
         {
             ui.ctx().copy_text(text);
@@ -965,7 +965,7 @@ fn slot_row(ui: &mut Ui, s: &SlotDef, fitted: Option<&Fitted>, before: Option<&F
                                     (None, None) => {}
                                 }
                                 if data.is_none() {
-                                    badge(ui, "No figures", pal::WARN).on_hover_text("This module is newer than the figures in this version of Elite Nexus: its mass, power and the rest aren't counted.");
+                                    badge(ui, "No figures", pal::WARN).on_hover_text("This module is newer than the figures in this version of Praetorium: its mass, power and the rest aren't counted.");
                                 }
                             });
                             if let Some(m) = data {

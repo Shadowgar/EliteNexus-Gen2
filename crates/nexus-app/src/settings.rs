@@ -398,7 +398,7 @@ impl Settings {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Settings::default(), None),
             Err(e) => {
                 tracing::warn!("settings.json can't be read: {e}");
-                let what = format!("Elite Nexus couldn't read settings.json ({e}). It started with the default settings and won't save over that file this time; restart it to try again.");
+                let what = format!("Praetorium couldn't read settings.json ({e}). It started with the default settings and won't save over that file this time; restart it to try again.");
                 // Not a first start: no welcome.
                 return (Settings { welcomed: true, ..Settings::default() }, Some(LoadProblem { what, ..Default::default() }));
             }
@@ -417,7 +417,7 @@ impl Settings {
                         let (s, dropped) = salvage(v);
                         let names: Vec<&str> = dropped.iter().map(String::as_str).collect();
                         let what = match names.len() {
-                            0 => format!("settings.json couldn't be read ({location}), so Elite Nexus started with the default settings."),
+                            0 => format!("settings.json couldn't be read ({location}), so Praetorium started with the default settings."),
                             n => format!("Some settings in settings.json couldn't be read ({location}): {} {} back at the default. Every other setting was kept.", and_list(&names), if n == 1 { "is" } else { "are" }),
                         };
                         (s, what, "")
@@ -425,7 +425,7 @@ impl Settings {
                     // Not JSON at all, typically a folder typed in by hand with single backslashes.
                     Err(_) => {
                         let (s, recovered) = recover_keys(&text);
-                        let mut what = format!("settings.json isn't valid JSON ({location}), so Elite Nexus started with the default settings.");
+                        let mut what = format!("settings.json isn't valid JSON ({location}), so Praetorium started with the default settings.");
                         if !recovered.is_empty() {
                             let keys = if recovered.len() == 1 { "key was" } else { "keys were" };
                             what += &format!(" Your {} {keys} recovered from it; uploads stay off until you switch them on again under Accounts & sync.", and_list(&recovered));
@@ -446,7 +446,7 @@ impl Settings {
                 true
             }
             Err(e) => {
-                what += &format!(" Elite Nexus couldn't keep a copy of it ({e}), so it won't save over it this time: changes made now aren't kept.");
+                what += &format!(" Praetorium couldn't keep a copy of it ({e}), so it won't save over it this time: changes made now aren't kept.");
                 false
             }
         };
@@ -605,7 +605,7 @@ pub fn initialize_data_dir(isolated: bool) -> std::io::Result<PathBuf> {
     } else if isolated {
         let parent = std::env::temp_dir();
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-        checked_data_dir(parent.join(format!("elite-nexus-gen2-{}-{nonce}", std::process::id())), true)?
+        checked_data_dir(parent.join(format!("praetorium-{}-{nonce}", std::process::id())), true)?
     } else {
         let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
         let portable = exe_dir.filter(|dir| !(cfg!(target_os = "macos") && in_app_bundle(dir)))
@@ -620,13 +620,14 @@ pub fn initialize_data_dir(isolated: bool) -> std::io::Result<PathBuf> {
 }
 
 fn checked_data_dir(path: PathBuf, scratch: bool) -> std::io::Result<PathBuf> {
-    // Refuse the upstream names even under an explicit override or a Gen2 path redirected there.
+    // Preserve the earlier profiles, including overrides that redirect to a reserved directory.
     let validate = |dir: &Path| {
         if dir.components().any(|part| {
             let name = part.as_os_str().to_string_lossy();
-            name.eq_ignore_ascii_case("nexus-data") || name.eq_ignore_ascii_case("EliteNexus")
+            ["nexus-data", "EliteNexus", "Elite Nexus", "nexus-gen2-data", "EliteNexus-Gen2"]
+                .iter().any(|reserved| name.eq_ignore_ascii_case(reserved))
         }) {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "the upstream profile is reserved"))
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "the previous application profile is reserved"))
         } else {
             Ok(())
         }
@@ -698,16 +699,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_gen2_profile_resolver_refuses_reserved_upstream_folders() {
+    fn praetorium_profile_resolver_refuses_both_previous_profiles() {
         let scratch = std::env::temp_dir().join(format!("gen2-profile-test-{}", std::process::id()));
         let upstream = scratch.join("nexus-data");
         std::fs::create_dir_all(&upstream).unwrap();
         let marker = upstream.join("settings.json");
         std::fs::write(&marker, "upstream fixture").unwrap();
         assert!(checked_data_dir(upstream.clone(), false).is_err());
-        let gen2 = checked_data_dir(scratch.join(crate::identity::PORTABLE_DATA), false).unwrap();
-        assert_ne!(upstream.canonicalize().unwrap(), gen2);
-        assert!(!gen2.join("settings.json").exists());
+        for name in ["Elite Nexus", "EliteNexus", "EliteNexus-Gen2", "nexus-gen2-data"] {
+            assert!(checked_data_dir(scratch.join(name), false).is_err(), "accepted {name}");
+        }
+        let praetorium = checked_data_dir(scratch.join(crate::identity::PORTABLE_DATA), false).unwrap();
+        assert_ne!(upstream.canonicalize().unwrap(), praetorium);
+        assert!(!praetorium.join("settings.json").exists());
         assert_eq!(std::fs::read_to_string(marker).unwrap(), "upstream fixture");
         let _ = std::fs::remove_dir_all(scratch);
     }

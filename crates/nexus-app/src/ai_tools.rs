@@ -272,7 +272,7 @@ impl NexusTools {
                 return Ok((p, s.name));
             }
             if !spansh {
-                return Err(format!("\"{name}\" isn't in Elite Nexus' galaxy database, which this tool answers from: give a system near it that has markets, or leave near_system out to search around the commander."));
+                return Err(format!("\"{name}\" isn't in Praetorium's galaxy database, which this tool answers from: give a system near it that has markets, or leave near_system out to search around the commander."));
             }
             let found = match self.rt.block_on(async { tokio::time::timeout(SPANSH_TIMEOUT, self.spansh.system_by_name(&name)).await }) {
                 Ok(r) => r.map_err(|e| format!("Spansh: {e}"))?,
@@ -519,7 +519,7 @@ impl NexusTools {
             "left_out": trip.missing.iter().map(|m| json!({ "name": m.name, "why": m.why })).collect::<Vec<_>>(),
             "unknown_commodities": unknown,
             "how_to_read": format!(
-                "Stops in order from near; ly_from_previous is a straight line (the first from near). A stop has the tonnes in stock as asked (1: any amount; cargo aboard isn't counted), for the ship's landing pad, with prices up to 72 h old. Only markets in Elite Nexus' database count, and only each good's {} sellers nearest near were weighed; {} Market › Shopping trip plans the same from a list the commander builds there, counts the cargo aboard, and can send the trip to Navigation.",
+                "Stops in order from near; ly_from_previous is a straight line (the first from near). A stop has the tonnes in stock as asked (1: any amount; cargo aboard isn't counted), for the ship's landing pad, with prices up to 72 h old. Only markets in Praetorium's database count, and only each good's {} sellers nearest near were weighed; {} Market › Shopping trip plans the same from a list the commander builds there, counts the cargo aboard, and can send the trip to Navigation.",
                 finder::TRIP_SELLERS,
                 if trip.exact { "among them no trip is shorter." } else { "there were too many near enough to weigh them all, so a shorter trip may exist." }
             ),
@@ -573,7 +573,7 @@ impl NexusTools {
                 "system": s.system, "body": s.body, "mining_location": s.key.location,
                 "refined_t": s.refined, "visits": s.visits, "last_visit": s.last.to_iso(),
             })).collect::<Vec<_>>(),
-            "note": "mining_location is the number the game's navigation panel shows (Planetary Mining Location N): the location the game named nearest to where the ship landed or lifted off, or for a Rhino dropped from a hovering ship the one targeted then (recorded only while Elite Nexus ran); null when none is known. To go back: jump to the system, target the body, then pick that location in the navigation panel; the Mining page's radar shows the deposits. Rigs and deposit sizes aren't in the journal.",
+            "note": "mining_location is the number the game's navigation panel shows (Planetary Mining Location N): the location the game named nearest to where the ship landed or lifted off, or for a Rhino dropped from a hovering ship the one targeted then (recorded only while Praetorium ran); null when none is known. To go back: jump to the system, target the body, then pick that location in the navigation panel; the Mining page's radar shows the deposits. Rigs and deposit sizes aren't in the journal.",
         }))
     }
 
@@ -631,7 +631,7 @@ impl NexusTools {
                 "government": h.government, "security": h.security,
                 "report_age_hours": hours_ago(h.updated_unix),
             })).collect::<Vec<_>>(),
-            "note": "From EDDN reports Elite Nexus received while it ran and the commander's journal, so a war that began after a system's last report is missing. \
+            "note": "From EDDN reports Praetorium received while it ran and the commander's journal, so a war that began after a system's last report is missing. \
                      Wars and civil wars have conflict zones (fight there after picking a side); elections have none. Without days_won_known only the \
                      faction states were reported. The Combat page lists these with a route button and explains how to fight legally.",
         }))
@@ -1953,7 +1953,7 @@ pub struct Tool {
     pub working: &'static str,
     /// What Ask's "used" line under an answer calls it.
     pub noun: &'static str,
-    /// Only reads: it changes nothing in Elite Nexus or the game (caching what it looked up aside).
+    /// Only reads: it changes nothing in Praetorium or the game (caching what it looked up aside).
     pub read_only: bool,
     /// Offered to Ask's model. Every offered tool's description and schema go with every question, so only the tools
     /// that earn those tokens.
@@ -2323,7 +2323,7 @@ pub static TOOLS: &[Tool] = &[
     Tool {
         name: "knowledge",
         title: "Game mechanics and this guide",
-        description: "Searches the built-in knowledge base: game mechanics, money-making strategies, exobiology, mining, engineering, carriers, colonisation, useful websites, and how to use Elite Nexus.",
+        description: "Searches the built-in knowledge base: game mechanics, money-making strategies, exobiology, mining, engineering, carriers, colonisation, useful websites, and how to use Praetorium.",
         params: || schema(json!({ "query": { "type": "string" } }), &["query"]),
         working: "Reading up…",
         noun: "knowledge base",
@@ -4055,7 +4055,7 @@ mod tests {
     fn an_agents_local_tool_never_asks_spansh() {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let err = agent_tools(commander(), &rt).call("find_commodity", &json!({ "commodity": "Gold", "near_system": "Nowhere Special" })).unwrap_err();
-        assert!(err.contains("isn't in Elite Nexus' galaxy database"), "{err}");
+        assert!(err.contains("isn't in Praetorium's galaxy database"), "{err}");
     }
 
     /// An AI agent over MCP, end to end: `--mcp`'s session passes a call over a pipe (a socket off Windows) of the test's
@@ -4398,7 +4398,7 @@ mod tests {
 
     /// The whole chain with a built program, as an agent starts it: `EliteNexus --mcp` with piped stdin and stdout,
     /// talking to a listener on this user's real pipe that answers from a test commander. Set `ELITE_NEXUS_EXE` to the
-    /// program and run `cargo test -p nexus-app live_agent_chain -- --ignored`, with no Elite Nexus answering agents.
+    /// program and run `cargo test -p nexus-app live_agent_chain -- --ignored`, with no Praetorium answering agents.
     #[test]
     #[ignore]
     fn live_agent_chain() {

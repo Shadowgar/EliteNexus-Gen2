@@ -51,10 +51,10 @@ pub fn game_dir() -> Option<PathBuf> {
     GAME_DIR.lock().ok().and_then(|d| d.clone())
 }
 
-/// The game folders Elite Nexus works with: `ELITE_NEXUS_GEN2_GAME_DIR` (a test copy, used as it is), else the ones in the
+/// The game folders Elite Nexus works with: `PRAETORIUM_GAME_DIR` (a test copy, used as it is), else the ones in the
 /// folder chosen in Settings, else every one found ([`find_installs`]).
 pub fn installs() -> Vec<GameInstall> {
-    if let Some(dir) = std::env::var_os("ELITE_NEXUS_GEN2_GAME_DIR") {
+    if let Some(dir) = std::env::var_os("PRAETORIUM_GAME_DIR") {
         let folder = PathBuf::from(dir);
         return vec![GameInstall { shader_mod: shader_mod(&folder), folder, store: "custom" }];
     }

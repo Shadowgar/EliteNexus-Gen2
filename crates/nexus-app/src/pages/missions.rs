@@ -249,7 +249,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, st: &mut MissionsUi, prefs: &mut Missio
 /// The most missions the recent history lists, newest first.
 const HISTORY_ROWS: usize = 40;
 
-const CLEAR_TIP: &str = "Hide these missions from this list, so it starts fresh. Only from this list: the game, its journals and every other page of Elite Nexus still have them, and you can show them again.";
+const CLEAR_TIP: &str = "Hide these missions from this list, so it starts fresh. Only from this list: the game, its journals and every other page of Praetorium still have them, and you can show them again.";
 const SHOW_AGAIN_TIP: &str = "Bring back every mission you cleared from this list";
 
 /// The recent mission history, with Clear, Undo and Show them again. Returns true when `prefs` changed (to be saved).
@@ -347,7 +347,7 @@ fn history(ui: &mut Ui, gs: &GameState, st: &mut MissionsUi, prefs: &mut Mission
 fn hidden_note(hidden: usize) -> String {
     let (missions, are, them) = if hidden == 1 { ("mission", "is", "it") } else { ("missions", "are", "them") };
     format!(
-        "{} {missions} you cleared {are} hidden from this list only: the game, its journals and every other page of Elite Nexus still have {them}.",
+        "{} {missions} you cleared {are} hidden from this list only: the game, its journals and every other page of Praetorium still have {them}.",
         nexus_data::names::group_digits(hidden as i64),
     )
 }
@@ -571,8 +571,8 @@ mod tests {
 
     #[test]
     fn says_what_is_hidden() {
-        assert_eq!(hidden_note(1), "1 mission you cleared is hidden from this list only: the game, its journals and every other page of Elite Nexus still have it.");
-        assert_eq!(hidden_note(1_234), "1,234 missions you cleared are hidden from this list only: the game, its journals and every other page of Elite Nexus still have them.");
+        assert_eq!(hidden_note(1), "1 mission you cleared is hidden from this list only: the game, its journals and every other page of Praetorium still have it.");
+        assert_eq!(hidden_note(1_234), "1,234 missions you cleared are hidden from this list only: the game, its journals and every other page of Praetorium still have them.");
     }
 
     /// The history card drawn headless, as the app draws it, with its buttons found by label and clicked.
@@ -672,7 +672,7 @@ mod tests {
         card.gs.cmdr.fid = "F1".into();
         card.draw(Vec::new());
         assert_eq!(card.buttons(), ["Show them again"]);
-        // Elite Nexus starts again: settings.json kept how far.
+        // Praetorium starts again: settings.json kept how far.
         card.st = MissionsUi::default();
         card.draw(Vec::new());
         assert!(card.listed().is_empty());

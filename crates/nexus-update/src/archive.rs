@@ -8,7 +8,7 @@
 use std::io::Read;
 
 /// The documents every release archive carries beside the program (release.yml › Package).
-pub const DOCUMENTS: [&str; 5] = ["LICENSE", "README.md", "NOTICE.md", "USER_GUIDE.md", "Inter-LICENSE.txt"];
+pub const DOCUMENTS: [&str; 9] = ["LICENSE", "README.md", "NOTICE.md", "USER_GUIDE.md", "Inter-LICENSE.txt", "LICENSING.md", "UPSTREAM-ACKNOWLEDGMENTS.md", "PROFILE_MIGRATION.md", "THIRD-PARTY-LICENSES.txt"];
 
 /// The largest program accepted (today's is about 50 MB).
 const MAX_PROGRAM: u64 = 400 * 1024 * 1024;
@@ -149,9 +149,9 @@ pub(crate) mod tests {
     #[test]
     fn the_windows_zip_has_its_files_at_the_root() {
         // As release.yml packs it: Compress-Archive of the folder's contents.
-        let zip = zip_of(&[("EliteNexus.exe", b"MZ new program"), ("LICENSE", b"GPL"), ("README.md", b"readme"), ("NOTICE.md", b"notice"), ("USER_GUIDE.md", b"guide"), ("Inter-LICENSE.txt", b"OFL")]);
+        let zip = zip_of(&[("EliteNexus.exe", b"MZ new program"), ("LICENSE", b"GPL"), ("README.md", b"readme"), ("NOTICE.md", b"notice"), ("USER_GUIDE.md", b"guide"), ("Inter-LICENSE.txt", b"OFL"), ("LICENSING.md", b"licensing"), ("UPSTREAM-ACKNOWLEDGMENTS.md", b"credits"), ("PROFILE_MIGRATION.md", b"migration"), ("THIRD-PARTY-LICENSES.txt", b"third-party licenses")]);
         let files = extract(&zip, Kind::Zip, "EliteNexus.exe").expect("extract");
-        assert_eq!(names(&files), ["EliteNexus.exe", "LICENSE", "README.md", "NOTICE.md", "USER_GUIDE.md", "Inter-LICENSE.txt"]);
+        assert_eq!(names(&files), ["EliteNexus.exe", "LICENSE", "README.md", "NOTICE.md", "USER_GUIDE.md", "Inter-LICENSE.txt", "LICENSING.md", "UPSTREAM-ACKNOWLEDGMENTS.md", "PROFILE_MIGRATION.md", "THIRD-PARTY-LICENSES.txt"]);
         assert_eq!(files[0].bytes, b"MZ new program");
     }
 

@@ -8,7 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "EliteNexus-Gen2"
+name = "Praetorium"
 path = "src/main.rs"
 
 [dependencies]

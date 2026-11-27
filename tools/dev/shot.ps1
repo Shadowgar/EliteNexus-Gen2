@@ -56,7 +56,7 @@ param(
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ($Exe -eq "") {
     $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root 'target' }
-    $Exe = Join-Path $target 'debug\EliteNexus-Gen2.exe'
+    $Exe = Join-Path $target 'debug\Praetorium.exe'
 }
 [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = 'BelowNormal'
 $shots = Join-Path $root 'target\shots'

@@ -1,6 +1,6 @@
-//! `EliteNexus-Gen2 --mcp`: the Model Context Protocol on stdin and stdout, for an AI agent on this computer that starts it
+//! `Praetorium --mcp`: the Model Context Protocol on stdin and stdout, for an AI agent on this computer that starts it
 //! (Claude Code, Claude Desktop, any MCP client). It opens no window, takes no lock, writes no file and prints nothing
-//! but MCP messages, one a line: it lists the tools offered to agents and passes each call to the running Elite Nexus
+//! but MCP messages, one a line: it lists the tools offered to agents and passes each call to the running Praetorium
 //! over [`super::endpoint`].
 //!
 //! Both eras of the protocol: revision 2026-07-28, which is stateless (`server/discover`, and a `_meta` with the
@@ -22,19 +22,19 @@ const LEGACY: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05
 const VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 const CAPABILITIES_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
 const SERVER_INFO_KEY: &str = "io.modelcontextprotocol/serverInfo";
-/// How long an agent may keep the tool list: it changes only with Elite Nexus itself.
+/// How long an agent may keep the tool list: it changes only with Praetorium itself.
 const TTL_MS: u64 = 3_600_000;
-/// Calls waiting their turn at most (an agent may send several at once; Elite Nexus answers one at a time).
+/// Calls waiting their turn at most (an agent may send several at once; Praetorium answers one at a time).
 const WAITING: usize = 16;
 /// A call the app hasn't answered by then is given up: its own deadline, and a margin.
 const GIVE_UP: Duration = Duration::from_secs(super::DEADLINE.as_secs() + 30);
 
-const INSTRUCTIONS: &str = "Elite Nexus is a companion app for the game Elite Dangerous. These tools read the commander's game state from their journal (ships, cargo, materials, ranks, engineers, where they have been), Elite Nexus' local galaxy and market database, the game data it ships with, and Spansh. They only read: they change nothing in the game or in Elite Nexus. They answer while Elite Nexus runs with Settings › AI agents switched on, one call at a time, and each answer says where its data comes from and what it can't show.";
+const INSTRUCTIONS: &str = "Praetorium is a companion app for the game Elite Dangerous. These tools read the commander's game state from their journal (ships, cargo, materials, ranks, engineers, where they have been), Praetorium' local galaxy and market database, the game data it ships with, and Spansh. They only read: they change nothing in the game or in Praetorium. They answer while Praetorium runs with Settings › AI agents switched on, one call at a time, and each answer says where its data comes from and what it can't show.";
 
-const NOT_RUNNING: &str = "Elite Nexus isn't answering: it isn't running, or Settings › AI agents is off. Start Elite Nexus and switch AI agents on, then ask again.";
+const NOT_RUNNING: &str = "Praetorium isn't answering: it isn't running, or Settings › AI agents is off. Start Praetorium and switch AI agents on, then ask again.";
 
-/// Said when what answers under Elite Nexus' name belongs to another account: nothing is sent to it.
-const NOT_YOURS: &str = "Something that isn't this user's Elite Nexus answers under its name on this computer, so nothing was sent to it. Start Elite Nexus and switch Settings › AI agents on, then ask again.";
+/// Said when what answers under Praetorium' name belongs to another account: nothing is sent to it.
+const NOT_YOURS: &str = "Something that isn't this user's Praetorium answers under its name on this computer, so nothing was sent to it. Start Praetorium and switch Settings › AI agents on, then ask again.";
 
 /// What the main loop is told.
 pub enum Event {
@@ -63,7 +63,7 @@ pub fn run() -> i32 {
         return 1;
     }
     let mut out = std::io::stdout().lock();
-    // No endpoint (Windows wouldn't say whose this is): every call is told Elite Nexus isn't answering.
+    // No endpoint (Windows wouldn't say whose this is): every call is told Praetorium isn't answering.
     let mut s = Session::new(super::endpoint().unwrap_or_default(), tx);
     loop {
         let ev = match s.deadline() {
@@ -137,7 +137,7 @@ impl Session {
 
     fn give_up(&mut self, out: &mut impl Write) {
         if let Some(b) = self.busy.take() {
-            send(out, &response(b.id, call_result(Err(format!("Elite Nexus didn't answer within {} s.", GIVE_UP.as_secs())), b.modern)));
+            send(out, &response(b.id, call_result(Err(format!("Praetorium didn't answer within {} s.", GIVE_UP.as_secs())), b.modern)));
         }
         self.next();
     }
@@ -236,7 +236,7 @@ impl Session {
             Some(_) => return send(out, &error(id, -32602, "Invalid params: arguments is an object", None)),
         };
         if self.waiting.len() >= WAITING {
-            return send(out, &response(id, call_result(Err(format!("{WAITING} calls are already waiting: Elite Nexus answers one at a time.")), modern)));
+            return send(out, &response(id, call_result(Err(format!("{WAITING} calls are already waiting: Praetorium answers one at a time.")), modern)));
         }
         self.waiting.push_back(Call { id, name: tool.name, args, modern });
         self.next();
@@ -353,16 +353,16 @@ fn ask_app(endpoint: &str, name: &str, args: &Value) -> Result<Value, String> {
     let mut conn = connect(endpoint).map_err(|e| if e.kind() == std::io::ErrorKind::PermissionDenied { NOT_YOURS.to_string() } else { NOT_RUNNING.to_string() })?;
     let mut call = serde_json::to_string(&WireCall { tool: name.to_string(), arguments: args.clone() }).map_err(|e| e.to_string())?;
     call.push('\n');
-    conn.write_all(call.as_bytes()).and_then(|()| conn.flush()).map_err(|e| format!("Lost the connection to Elite Nexus: {e}"))?;
+    conn.write_all(call.as_bytes()).and_then(|()| conn.flush()).map_err(|e| format!("Lost the connection to Praetorium: {e}"))?;
     let mut reply = String::new();
-    std::io::BufReader::new(&mut conn).read_line(&mut reply).map_err(|e| format!("Lost the connection to Elite Nexus: {e}"))?;
+    std::io::BufReader::new(&mut conn).read_line(&mut reply).map_err(|e| format!("Lost the connection to Praetorium: {e}"))?;
     if reply.trim().is_empty() {
-        return Err("Elite Nexus closed the connection without an answer: was Settings › AI agents switched off?".into());
+        return Err("Praetorium closed the connection without an answer: was Settings › AI agents switched off?".into());
     }
     match serde_json::from_str::<WireReply>(&reply) {
         Ok(WireReply::Ok(v)) => Ok(v),
         Ok(WireReply::Error(e)) => Err(e),
-        Err(_) => Err("Elite Nexus sent an answer that couldn't be read.".into()),
+        Err(_) => Err("Praetorium sent an answer that couldn't be read.".into()),
     }
 }
 

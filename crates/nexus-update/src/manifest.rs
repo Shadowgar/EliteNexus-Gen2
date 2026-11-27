@@ -35,7 +35,7 @@ pub struct Manifest {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Asset {
-    /// The file's name on the release page (`EliteNexus-Gen2-v0.8.3-windows-x64.zip`).
+    /// The file's name on the release page (`Praetorium-v0.8.3-windows-x64.zip`).
     pub name: String,
     /// Where it downloads from.
     pub url: String,
@@ -61,7 +61,7 @@ pub enum ManifestError {
     NewerFormat(u32),
     #[error("format {0} is ineligible for Gen2 updates")]
     UnsupportedFormat(u32),
-    #[error("its product or repository does not match EliteNexus-Gen2")]
+    #[error("its product or repository does not match Praetorium")]
     WrongIdentity,
     #[error("it names no canonical release version and tag")]
     NoVersion,
@@ -215,7 +215,7 @@ pub(crate) mod tests {
         let mut assets = BTreeMap::new();
         assets.insert(
             "windows-x64".to_string(),
-            Asset { name: "EliteNexus-Gen2-v0.8.4-windows-x64.zip".into(), url: "https://github.com/Shadowgar/EliteNexus-Gen2/releases/download/v0.8.4/EliteNexus-Gen2-v0.8.4-windows-x64.zip".into(), size: 1234, sha256: "a".repeat(64) },
+            Asset { name: "Praetorium-v0.8.4-windows-x64.zip".into(), url: "https://github.com/Shadowgar/Praetorium/releases/download/v0.8.4/Praetorium-v0.8.4-windows-x64.zip".into(), size: 1234, sha256: "a".repeat(64) },
         );
         Manifest { schema: SCHEMA, product: PRODUCT.into(), repository: REPO.into(), version: "0.8.4".into(), tag: "v0.8.4".into(), date: "2026-12-01".into(), assets }
     }
@@ -229,20 +229,23 @@ pub(crate) mod tests {
 
     #[test]
     fn a_gen2_manifest_cannot_authorize_an_upstream_download() {
-        let json = br#"{"schema":2,"product":"EliteNexus-Gen2","repository":"Shadowgar/EliteNexus-Gen2","version":"0.8.4","tag":"v0.8.4","assets":{"windows-x64":{"name":"EliteNexus-Gen2-v0.8.4-windows-x64.zip","url":"https://github.com/uruskan/EliteNexus/releases/download/v0.8.4/EliteNexus-Gen2-v0.8.4-windows-x64.zip","size":3,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}"#;
+        let json = br#"{"schema":2,"product":"Praetorium","repository":"Shadowgar/Praetorium","version":"0.8.4","tag":"v0.8.4","assets":{"windows-x64":{"name":"Praetorium-v0.8.4-windows-x64.zip","url":"https://github.com/uruskan/EliteNexus/releases/download/v0.8.4/Praetorium-v0.8.4-windows-x64.zip","size":3,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}"#;
         let (public, sig) = signed(json);
         assert!(matches!(Manifest::verified(json, &sig, &public), Err(ManifestError::InvalidAsset(p)) if p == "windows-x64"));
     }
 
     #[test]
-    fn a_signed_gen2_manifest_needs_matching_identity_tag_and_archive() {
+    fn a_signed_praetorium_manifest_needs_matching_identity_tag_and_archive() {
         let json = sample().to_json();
         for (original, changed) in [
-            ("\"EliteNexus-Gen2\"", "\"EliteNexus\""),
-            ("\"Shadowgar/EliteNexus-Gen2\"", "\"uruskan/EliteNexus\""),
+            ("\"Praetorium\"", "\"EliteNexus\""),
+            ("\"Shadowgar/Praetorium\"", "\"uruskan/EliteNexus\""),
+            ("\"Praetorium\"", "\"EliteNexus-Gen2\""),
+            ("\"Shadowgar/Praetorium\"", "\"Shadowgar/EliteNexus-Gen2\""),
+            ("Praetorium-v0.8.4-windows-x64.zip", "EliteNexus-Gen2-v0.8.4-windows-x64.zip"),
             ("\"v0.8.4\"", "\"v0.8.5\""),
             ("\"0.8.4\"", "\"0.8.4+local\""),
-            ("EliteNexus-Gen2-v0.8.4-windows-x64.zip", "EliteNexus-v0.8.4-windows-x64.zip"),
+            ("Praetorium-v0.8.4-windows-x64.zip", "EliteNexus-v0.8.4-windows-x64.zip"),
             ("windows-x64.zip", "windows-x64.tar.gz"),
         ] {
             let invalid = json.replace(original, changed);
@@ -290,11 +293,11 @@ pub(crate) mod tests {
 
     #[test]
     fn release_file_names_give_their_platform() {
-        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.3-windows-x64.zip", "0.8.3"), Some("windows-x64"));
-        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.3-linux-x64.tar.gz", "0.8.3"), Some("linux-x64"));
-        assert_eq!(platform_of("EliteNexus-Gen2-v0.9.0-beta.1-macos-arm64.zip", "0.9.0-beta.1"), Some("macos-arm64"));
-        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.3-windows-x64.zip.sha256", "0.8.3"), None);
-        assert_eq!(platform_of("EliteNexus-Gen2-v0.8.2-windows-x64.zip", "0.8.3"), None, "another version");
+        assert_eq!(platform_of("Praetorium-v0.8.3-windows-x64.zip", "0.8.3"), Some("windows-x64"));
+        assert_eq!(platform_of("Praetorium-v0.8.3-linux-x64.tar.gz", "0.8.3"), Some("linux-x64"));
+        assert_eq!(platform_of("Praetorium-v0.9.0-beta.1-macos-arm64.zip", "0.9.0-beta.1"), Some("macos-arm64"));
+        assert_eq!(platform_of("Praetorium-v0.8.3-windows-x64.zip.sha256", "0.8.3"), None);
+        assert_eq!(platform_of("Praetorium-v0.8.2-windows-x64.zip", "0.8.3"), None, "another version");
         assert_eq!(platform_of("EliteNexus-v0.8.3-windows-x64.zip", "0.8.3"), None, "upstream artifact");
         assert_eq!(platform_of("update.json", "0.8.3"), None);
         let p = this_platform();
@@ -315,7 +318,7 @@ pub(crate) mod tests {
         let dir = std::env::temp_dir().join(format!("nexus-update-manifest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        for (name, body) in [("EliteNexus-Gen2-v0.8.4-windows-x64.zip", "zip"), ("EliteNexus-Gen2-v0.8.4-windows-x64.zip.sha256", "sum"), ("EliteNexus-Gen2-v0.8.4-linux-x64.tar.gz", "tar"), ("EliteNexus-v0.8.4-macos-arm64.zip", "upstream"), ("notes.md", "notes")] {
+        for (name, body) in [("Praetorium-v0.8.4-windows-x64.zip", "zip"), ("Praetorium-v0.8.4-windows-x64.zip.sha256", "sum"), ("Praetorium-v0.8.4-linux-x64.tar.gz", "tar"), ("EliteNexus-v0.8.4-macos-arm64.zip", "upstream"), ("notes.md", "notes")] {
             std::fs::write(dir.join(name), body).expect("file");
         }
         let m = Manifest::from_release_files(&dir, "v0.8.4", "2026-12-01").expect("manifest");
@@ -324,7 +327,7 @@ pub(crate) mod tests {
         let w = &m.assets["windows-x64"];
         assert_eq!(w.size, 3);
         assert_eq!(w.sha256, crate::sha256_hex(b"zip"));
-        assert_eq!(w.url, "https://github.com/Shadowgar/EliteNexus-Gen2/releases/download/v0.8.4/EliteNexus-Gen2-v0.8.4-windows-x64.zip");
+        assert_eq!(w.url, "https://github.com/Shadowgar/Praetorium/releases/download/v0.8.4/Praetorium-v0.8.4-windows-x64.zip");
         // What it writes, it reads.
         assert_eq!(Manifest::read(m.to_json().as_bytes()).expect("reads"), m);
         let _ = std::fs::remove_dir_all(&dir);

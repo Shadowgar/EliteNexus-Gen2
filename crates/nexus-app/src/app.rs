@@ -65,6 +65,7 @@ fn save_png(path: &std::path::Path, img: &egui::ColorImage) {
 }
 
 pub struct NexusApp {
+    brand_icon: egui::TextureHandle,
     core: Core,
     settings: Settings,
     /// What the commander should know from the start (settings file, last run, …), above every page until closed.
@@ -124,7 +125,7 @@ pub struct NexusApp {
     game_process: crate::game_process::GameProcess,
     /// The game's process has been seen on this computer since the journals were read: when it goes, so has the game.
     game_seen_here: bool,
-    /// The journal folder in use is the one Elite Nexus found by itself, this computer's own (not one set in Settings or
+    /// The journal folder in use is the one Praetorium found by itself, this computer's own (not one set in Settings or
     /// on the command line): on Windows, the game's process missing then means the game isn't running.
     own_journals: bool,
     clipboard: Option<arboard::Clipboard>,
@@ -209,7 +210,7 @@ impl NexusApp {
         let shot_tab = ov.tab.clone().filter(|_| shot.is_some());
         let mut alert_history = crate::alert_history::AlertHistory::default();
         if demo {
-            // As if Elite Nexus had been running for an hour.
+            // As if Praetorium had been running for an hour.
             alert_history = crate::alert_history::AlertHistory::since(nexus_journal::Timestamp(nexus_journal::Timestamp::now().0 - 3600));
             for a in demo_alerts() {
                 alert_history.push(&a);
@@ -221,7 +222,13 @@ impl NexusApp {
         // Test runs never check for updates; `--tab update` and its siblings show the update's states.
         let update = crate::update::Updater::new(live_run, &mut settings.updates, ov.updated_from.clone(), &data_dir, rt.handle().clone(), shot_tab.as_deref());
         let restarted = ov.updated_from.is_some();
+        let brand_icon = cc.egui_ctx.load_texture(
+            "praetorium-emblem",
+            egui::ColorImage::from_rgba_unmultiplied([64, 64], &crate::icon::rgba(64)),
+            egui::TextureOptions::LINEAR,
+        );
         NexusApp {
+            brand_icon,
             core,
             settings,
             notices,
@@ -358,7 +365,7 @@ impl NexusApp {
     }
 
     /// A crash writes no `Shutdown`, so the journal alone would have the game running forever: whether it still runs
-    /// comes from its process on this computer, or from a journal quiet since Elite Nexus started (`game_process::gone`).
+    /// comes from its process on this computer, or from a journal quiet since Praetorium started (`game_process::gone`).
     /// The verdict goes into the model, where pages, the overlay and Ask's tools read it. Never in a test run.
     fn watch_game(&mut self) {
         let watch = if self.live_run() {
@@ -468,13 +475,15 @@ impl NexusApp {
             if !wide {
                 ui.add_space(((inner.width() - 32.0) / 2.0).max(0.0));
             }
-            app_tile(ui, 32.0);
+            let (icon, _) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::hover());
+            paint_app_tile(ui.painter(), self.brand_icon.id(), icon, 1.0);
             if wide {
                 ui.add_space(2.0);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.label(RichText::new("Elite Nexus").font(display(size::HEADLINE)).color(pal::TEXT));
+                    ui.label(RichText::new(crate::identity::NAME).font(display(size::HEADLINE)).color(pal::TEXT));
                     ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(size::CAPTION).color(pal::DIM));
+                    ui.label(RichText::new("Based on Elite Nexus").size(size::FOOTNOTE).color(pal::DIM));
                     self.update.sidebar_line(ui, &self.settings.updates);
                 });
             }
@@ -587,7 +596,7 @@ impl NexusApp {
                 // The alert history, at the far right as macOS keeps its notifications.
                 let unseen = self.alert_history.unseen();
                 let tip = match unseen {
-                    0 => "Alerts: every banner shown since Elite Nexus started, newest first, with its time".to_string(),
+                    0 => "Alerts: every banner shown since Praetorium started, newest first, with its time".to_string(),
                     1 => "1 new alert since you last looked. Click for the alert history.".to_string(),
                     n => format!("{n} new alerts since you last looked. Click for the alert history."),
                 };
@@ -606,7 +615,7 @@ impl NexusApp {
                 let tip = match (ov.enabled, wayland) {
                     (true, _) => "Overlay on: the island at the top of the game's screen. Click to switch it off.",
                     (false, true) => {
-                        "Overlay: a small island at the top of the game's screen that says what's going on. Wayland doesn't let apps stay on top: to keep it above the game, start Elite Nexus as WAYLAND_DISPLAY= ./EliteNexus-Gen2 (it then runs through XWayland)."
+                        "Overlay: a small island at the top of the game's screen that says what's going on. Wayland doesn't let apps stay on top: to keep it above the game, start Praetorium as WAYLAND_DISPLAY= ./Praetorium (it then runs through XWayland)."
                     }
                     (false, false) => "Overlay: a small island at the top of the game's screen that says what's going on",
                 };
@@ -704,7 +713,7 @@ impl NexusApp {
                 pages::logbook::show_without_commander(ui, &mut self.log, &self.core.index);
                 return;
             }
-            let hint = "Start Elite Dangerous: Elite Nexus picks everything up live. If the game runs on another computer, share its journal folder and pick it here.";
+            let hint = "Start Elite Dangerous: Praetorium picks everything up live. If the game runs on another computer, share its journal folder and pick it here.";
             self.before_commander(ui, &status, icon::USER, "No commander found", hint);
             return;
         };
@@ -992,7 +1001,7 @@ impl NexusApp {
             self.mcp.apply(on, || agent_tools(&self.core, self.market.db.clone(), self.rt.handle(), &self.agents_spansh), self.rt.handle());
         }
         if test_voice && !self.overrides.mute {
-            self.speaker.say("Elite Nexus voice check. All systems nominal, commander.");
+            self.speaker.say("Praetorium voice check. All systems nominal, commander.");
         }
         if restart {
             self.assistant.replace_source();
@@ -1049,7 +1058,7 @@ impl NexusApp {
                     p.rect_stroke(rect, CornerRadius::same(18), Stroke::new(1.0, Color32::from_white_alpha((20.0 * fade) as u8)), egui::StrokeKind::Inside);
                     // App icon, kind and time, then the message.
                     let icon_rect = Rect::from_min_size(rect.min + Vec2::new(14.0, 14.0), Vec2::splat(34.0));
-                    paint_app_tile(p, icon_rect, fade);
+                    paint_app_tile(p, self.brand_icon.id(), icon_rect, fade);
                     let x = icon_rect.right() + 12.0;
                     p.text(egui::pos2(x, rect.top() + 14.0), Align2::LEFT_TOP, t.alert.kind.label().to_uppercase(), display(size::CAPTION), tint.gamma_multiply(fade));
                     p.text(egui::pos2(rect.right() - 14.0, rect.top() + 14.0), Align2::RIGHT_TOP, "now", egui::FontId::proportional(size::CAPTION), pal::DIM.gamma_multiply(fade));
@@ -1228,19 +1237,9 @@ fn demo_alerts() -> Vec<Alert> {
     ]
 }
 
-/// The app icon: Elite orange tile with the diamond, as in the Dock.
-fn paint_app_tile(p: &egui::Painter, rect: Rect, fade: f32) {
-    let r = CornerRadius::same((rect.width() * 0.26) as u8);
-    p.rect_filled(rect, r, pal::ACCENT.gamma_multiply(fade));
-    // A lighter top half gives the tile some depth.
-    let top = Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.center().y));
-    p.with_clip_rect(top).rect_filled(rect, r, Color32::from_white_alpha((28.0 * fade) as u8));
-    p.text(rect.center(), Align2::CENTER_CENTER, icon::DIAMOND, egui::FontId::proportional(rect.width() * 0.58), pal::ON_ACCENT.gamma_multiply(fade));
-}
-
-fn app_tile(ui: &mut Ui, side: f32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
-    paint_app_tile(ui.painter(), rect, 1.0);
+fn paint_app_tile(painter: &egui::Painter, texture: egui::TextureId, rect: Rect, fade: f32) {
+    let uv = Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+    painter.image(texture, rect, uv, Color32::WHITE.gamma_multiply(fade));
 }
 
 /// The commander at the foot of the sidebar: avatar, name, ship, where, fuel. Returns true if clicked.
@@ -1347,7 +1346,7 @@ impl eframe::App for NexusApp {
         }
         self.sync.tick(&self.core);
         self.watch_game();
-        // While the game runs, a downloaded update waits for Elite Nexus to close (the banner says so).
+        // While the game runs, a downloaded update waits for Praetorium to close (the banner says so).
         let playing = self.game_process.running() == Some(true);
         if self.update.tick(ctx, &mut self.settings.updates, playing) {
             self.settings_dirty = Some(Instant::now());
@@ -1389,7 +1388,7 @@ impl eframe::App for NexusApp {
         if crate::launch::isolated() {
             ui.ctx().output_mut(|output| output.commands.clear());
         }
-        // A frame that took long goes to nexus.log with its page, so a report of the window freezing can be traced.
+        // A frame that took long goes to praetorium.log with its page, so a report of the window freezing can be traced.
         if let Some(took) = self.frame_started.take().map(|t| t.elapsed())
             && took > Duration::from_millis(250)
             && self.slow_frame_logged.is_none_or(|t| t.elapsed() > Duration::from_secs(10))

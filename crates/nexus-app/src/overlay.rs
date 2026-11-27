@@ -1219,7 +1219,7 @@ fn sampling_card(s: &Sampling) -> Card {
         _ => {
             let range = s.range_m.map(|r| format!("Colony range {r} m")).unwrap_or_default();
             rows.push(Row::Header { lead: None, top: span(range, Style::Caption, Tint::Dim), bottom: span(count, Style::Title, Tint::White), right: Vec::new() });
-            rows.push(Row::Spread(vec![vec![text("Positions are recorded while Elite Nexus runs", Style::Caption, Tint::Dim)]]));
+            rows.push(Row::Spread(vec![vec![text("Positions are recorded while Praetorium runs", Style::Caption, Tint::Dim)]]));
         }
     }
     Card { moment: Moment::Sampling, compact, expanded: Some(Expanded { rows }) }

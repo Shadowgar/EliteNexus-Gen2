@@ -35,7 +35,7 @@ case "${1:-}" in
     mkdir -p target/shots
     # Software OpenGL (Mesa's llvmpipe) on a virtual X display: Mesa's software Vulkan crashes under WSL1.
     export WGPU_BACKEND=gl
-    exec xvfb-run -a -s "-screen 0 1920x1080x24" nice -n 19 "$CARGO_TARGET_DIR/debug/EliteNexus" --page "$page" "${extra[@]}" \
+    exec xvfb-run -a -s "-screen 0 1920x1080x24" nice -n 19 "$CARGO_TARGET_DIR/debug/Praetorium" --page "$page" "${extra[@]}" \
       --screenshot "target/shots/$out.png" --size "$size" --shot-delay "$delay" --mute
     ;;
   *)

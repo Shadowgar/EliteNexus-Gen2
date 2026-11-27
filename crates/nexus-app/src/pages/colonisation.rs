@@ -114,7 +114,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, market: &MarketService, st: &mut Coloni
     footnote(
         ui,
         "The game records a depot's progress only while you're docked there, so every figure is from your last visit. The journal \
-         doesn't say whose project a depot is: Elite Nexus counts it as yours when your journals show you claimed its system or \
+         doesn't say whose project a depot is: Praetorium counts it as yours when your journals show you claimed its system or \
          delivered to it.",
     );
     *prefs != before

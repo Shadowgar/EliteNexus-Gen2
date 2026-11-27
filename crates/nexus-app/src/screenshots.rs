@@ -1,6 +1,6 @@
 //! Screenshots as PNG (Settings › Screenshots; off until the commander switches it on). The game saves every screenshot
 //! (F10, and Alt+F10 at high resolution) as an uncompressed BMP in `Pictures\Frontier Developments\Elite Dangerous`
-//! and logs a `Screenshot` event with the file, the system and the nearest body. Each one logged while Elite Nexus
+//! and logs a `Screenshot` event with the file, the system and the nearest body. Each one logged while Praetorium
 //! runs is saved again as a PNG named after where it was taken; its BMP is deleted only when the commander asked.
 //!
 //! Only live events reach this, so the screenshots already in the folder stay as they are, and test runs
@@ -111,7 +111,7 @@ fn follow(rx: Receiver<LiveMsg>, status: Arc<RwLock<CoreStatus>>, shared: Arc<Sh
                     set(&shared, Outcome::Working(shot.file_name().to_string()));
                     convert(&shot, e.raw.ts, &dir, &prefs, WAIT)
                 }
-                None => Outcome::Failed("Elite Nexus can't tell where the game saves screenshots: the journal folder in use isn't inside a Windows user folder.".into()),
+                None => Outcome::Failed("Praetorium can't tell where the game saves screenshots: the journal folder in use isn't inside a Windows user folder.".into()),
             };
             match &outcome {
                 Outcome::Saved(png, _) => tracing::info!(png = %png.display(), "screenshot saved as PNG"),

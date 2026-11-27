@@ -54,7 +54,7 @@ pub fn show(ui: &mut Ui, notices: &mut Vec<Notice>, data_dir: &Path) -> Option<A
     followed
 }
 
-/// A cockpit-light dimmer from Elite Nexus 0.3.0 with its hook in place: the game runs its patterns on every shader it
+/// A cockpit-light dimmer from Praetorium 0.3.0 with its hook in place: the game runs its patterns on every shader it
 /// loads, which crashes it near the newer fleet carriers. Only reads the game folders.
 pub fn old_dimmer_installed() -> bool {
     nexus_hud::install::installs().iter().any(|i| nexus_hud::dimmer::uses_patterns(&i.folder) && !nexus_hud::dimmer::hook_missing(&i.folder))
@@ -63,7 +63,7 @@ pub fn old_dimmer_installed() -> bool {
 pub fn old_dimmer() -> Notice {
     Notice {
         title: "Your cockpit-light dimmer can crash the game",
-        text: "It's still the install from Elite Nexus 0.3.0, which runs a pattern on every shader the game loads and crashes it near the newer fleet carriers. Update on the Cockpit lights tab replaces it; Remove takes it out.".into(),
+        text: "It's still the install from Praetorium 0.3.0, which runs a pattern on every shader the game loads and crashes it near the newer fleet carriers. Update on the Cockpit lights tab replaces it; Remove takes it out.".into(),
         closable: true,
         action: Some(Action::CockpitLights),
     }
@@ -80,8 +80,8 @@ pub fn last_run(data_dir: &Path, gpu_reset: bool) -> Option<Notice> {
     let _ = std::fs::write(&marker, b"");
     if gpu_reset {
         return Some(Notice {
-            title: "Elite Nexus restarted after the graphics card reset",
-            text: "Windows or the graphics driver reset the graphics card (after sleep, a driver update, or the card stopping under load), and the window couldn't draw on it any more, so Elite Nexus started again by itself. If it happens often, a newer graphics driver usually helps; crash.log in the data folder has the details.".into(),
+            title: "Praetorium restarted after the graphics card reset",
+            text: "Windows or the graphics driver reset the graphics card (after sleep, a driver update, or the card stopping under load), and the window couldn't draw on it any more, so Praetorium started again by itself. If it happens often, a newer graphics driver usually helps; crash.log in the data folder has the details.".into(),
             closable: true,
             action: Some(Action::DataFolder),
         });
@@ -89,11 +89,11 @@ pub fn last_run(data_dir: &Path, gpu_reset: bool) -> Option<Notice> {
     let started = started?;
     let crashed = std::fs::metadata(data_dir.join("crash.log")).and_then(|m| m.modified()).is_ok_and(|t| t >= started);
     let text = if crashed {
-        "It probably crashed: crash.log in the data folder has what went wrong during that run. Sending that file (a GitHub issue or the Frontier Forums thread) helps fix it; Elite Nexus sends nothing by itself."
+        "It probably crashed: crash.log in the data folder has what went wrong during that run. Sending that file (a GitHub issue or the Frontier Forums thread) helps fix it; Praetorium sends nothing by itself."
     } else {
-        "It may have crashed, or it was ended without closing (the computer shut down, or it was force-quit). nexus.log in the data folder shows what it was doing; Elite Nexus sends nothing by itself."
+        "It may have crashed, or it was ended without closing (the computer shut down, or it was force-quit). praetorium.log in the data folder shows what it was doing; Praetorium sends nothing by itself."
     };
-    Some(Notice { title: "Elite Nexus didn't close normally last time", text: text.into(), closable: true, action: Some(Action::DataFolder) })
+    Some(Notice { title: "Praetorium didn't close normally last time", text: text.into(), closable: true, action: Some(Action::DataFolder) })
 }
 
 /// A normal exit: the next start has nothing to report.
@@ -105,7 +105,7 @@ pub fn clean_exit(data_dir: &Path) {
 pub fn running_from_zip() -> Option<Notice> {
     let exe = std::env::current_exe().ok()?;
     crate::settings::inside_zip(&exe).then(|| Notice {
-        title: "Elite Nexus is running from inside its zip file",
+        title: "Praetorium is running from inside its zip file",
         text: "Windows unpacks it to a temporary folder each time it starts, so your settings and the market database don't last, and a second copy can start alongside this one. Unzip it into a folder of its own (Extract All…) and start it from there.".into(),
         closable: true,
         action: None,

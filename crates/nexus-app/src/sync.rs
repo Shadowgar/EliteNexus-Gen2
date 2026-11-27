@@ -12,7 +12,7 @@ use nexus_journal::{LineSource, RawEvent};
 use std::path::Path;
 use std::sync::Arc;
 
-/// Gen2 needs separate application authorization before a real outbound transport starts.
+/// Praetorium needs separate application authorization before a real outbound transport starts.
 pub const OUTBOUND_AUTHORIZED: bool = false;
 
 pub struct SyncService {
@@ -228,8 +228,8 @@ mod tests {
         let s = crate::settings::Settings::default();
         let cfg = config(&s.accounts);
         assert!(!cfg.any_enabled());
-        assert_eq!(cfg.software(), "EliteNexus-Gen2");
-        assert!(cfg.user_agent().starts_with("EliteNexus-Gen2/"));
+        assert_eq!(cfg.software(), "Praetorium");
+        assert!(cfg.user_agent().starts_with("Praetorium/"));
     }
 
     #[test]

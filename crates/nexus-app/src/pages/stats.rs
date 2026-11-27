@@ -1,6 +1,6 @@
 //! Statistics, in four tabs. **Career**: the game's own lifetime figures (its statistics, written at each login) in
 //! plain words: where the credits came from and went, each activity with its rank, records and the round numbers coming
-//! up. **Activity**: what the commander did over a period they pick, from the journals Elite Nexus has read, against
+//! up. **Activity**: what the commander did over a period they pick, from the journals Praetorium has read, against
 //! the period before. **Ships**: the same period ship by ship. **All statistics**: every figure the game keeps,
 //! searchable, with the zeros put away. Every chart fits the period shown, and amounts read as "19.1 B".
 
@@ -652,7 +652,7 @@ fn records_grid(ui: &mut Ui, c: &Career, r: &Records, since: Option<Timestamp>) 
         }
     });
     let since = since.map(|t| format!(" ({})", t.to_local_string("%d %b %Y"))).unwrap_or_default();
-    footnote(ui, &format!("Career bests are the game's own. The others come from your journals, so they count only what you did since the oldest one Elite Nexus has read{since}."));
+    footnote(ui, &format!("Career bests are the game's own. The others come from your journals, so they count only what you did since the oldest one Praetorium has read{since}."));
 }
 
 fn milestones(ui: &mut Ui, c: &Career) {
@@ -707,7 +707,7 @@ fn why_empty(gs: &GameState, w: Window) -> Option<String> {
     let h = &gs.history;
     let played = h.play.iter().any(|p| w.overlap(p.start, p.end) > 0 || w.contains(p.start));
     match h.first() {
-        None => Some("Elite Nexus hasn't read a journal of yours yet.".into()),
+        None => Some("Praetorium hasn't read a journal of yours yet.".into()),
         Some(f) if f >= w.end => Some("Your journals start after it.".into()),
         _ if played => None,
         Some(f) if f > w.start => Some(format!("Your journals start on {}: earlier days aren't covered.", f.to_local_string("%d %b %Y"))),
@@ -753,8 +753,8 @@ fn activity_tab(ui: &mut Ui, gs: &GameState) {
     let s = &p.now;
     let span = if days == 0 { "all time".to_string() } else { format!("the last {days} days") };
     let coverage = match first {
-        Some(f) => format!("From your journals: Elite Nexus has read them back to {}.", f.to_local_string("%d %b %Y")),
-        None => "From your journals, as Elite Nexus reads them.".into(),
+        Some(f) => format!("From your journals: Praetorium has read them back to {}.", f.to_local_string("%d %b %Y")),
+        None => "From your journals, as Praetorium reads them.".into(),
     };
     let compare = if p.before.is_some() { " Arrows compare with the period before: as long a stretch of time, just before it." } else { "" };
     footnote(ui, &format!("{coverage}{compare}"));
@@ -1232,7 +1232,7 @@ fn ships_tab(ui: &mut Ui, gs: &GameState) {
     let span = if days == 0 { "all time".to_string() } else { format!("the last {days} days") };
     let coverage = match gs.history.first() {
         Some(f) => format!("From your journals, back to {}.", f.to_local_string("%d %b %Y")),
-        None => "From your journals, as Elite Nexus reads them.".into(),
+        None => "From your journals, as Praetorium reads them.".into(),
     };
     footnote(ui, &format!("{coverage} Time counts for the ship you were in, and what you did on foot beside it (sampling on its planet, selling where it's docked) counts for it too. Taxis, dropships, crewing for others, kills on foot and walks elsewhere have a row of their own."));
     ui.add_space(6.0);

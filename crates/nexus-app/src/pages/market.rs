@@ -1219,7 +1219,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                         "The cargo space each route fills. {} has no cargo racks, so the routes fill 100 t until you set your trade ship's (and its landing pad). Up to 5,000 t, more than any ship holds.",
                         ship_type.map_or_else(|| "Your ship".to_string(), |n| format!("Your {n}"))
                     ),
-                    (None, None) => "The cargo space each route fills. Elite Nexus doesn't know your ship yet, so the routes fill 100 t until you set your trade ship's (and its landing pad). Up to 5,000 t, more than any ship holds.".to_string(),
+                    (None, None) => "The cargo space each route fills. Praetorium doesn't know your ship yet, so the routes fill 100 t until you set your trade ship's (and its landing pad). Up to 5,000 t, more than any ship holds.".to_string(),
                 };
                 bar.field("Cargo space", &cargo_tip, |ui| {
                     ui.horizontal(|ui| {
@@ -1264,7 +1264,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
             }
             // The game writes a station's prices (Market.json) when its commodity market is opened.
             if from.is_some_and(|s| gs.market.as_ref().is_none_or(|m| m.market_id != s.market_id)) {
-                crate::widgets::footnote(ui, "Open the commodity market in the game for this station's latest prices. Until then Elite Nexus uses what its database holds for it, if anything.");
+                crate::widgets::footnote(ui, "Open the commodity market in the game for this station's latest prices. Until then Praetorium uses what its database holds for it, if anything.");
             }
             if st.routes.last.is_none() && !st.routes.busy() {
                 let what = if from.is_some() { "how far to sell" } else { "the area" };
@@ -1302,7 +1302,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
             ui.add_space(6.0);
             // Searches by itself: when the tab opens, when a service or filter is picked, and after every jump.
             match origin {
-                None => empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Elite Nexus knows where you are."),
+                None => empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are."),
                 Some(o) => {
                     let p = &st.prefs;
                     let key = (st.service, gs.location.system_address, p.min_pad, p.services_carriers, p.services_planetary, st.services_limit);
@@ -1326,7 +1326,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                         }
                         let left_out = if out.is_empty() { String::new() } else { format!(" ({} left out)", out.join(" and ")) };
                         let hint = format!(
-                            "No station Elite Nexus knows has {}{pad}, at any distance{left_out}. It learns stations from the live feed, your journal and the Spansh import (Database & feed).",
+                            "No station Praetorium knows has {}{pad}, at any distance{left_out}. It learns stations from the live feed, your journal and the Spansh import (Database & feed).",
                             with_article(name)
                         );
                         empty(ui, icon::MAGNIFYING_GLASS, "None found", &hint);
@@ -1355,7 +1355,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                         p.hotspot_min = i64::from(n);
                     }
                 });
-                bar.field("Within", "Every ring Elite Nexus knows, up to the whole galaxy.", |ui| {
+                bar.field("Within", "Every ring Praetorium knows, up to the whole galaxy.", |ui| {
                     crate::widgets::number(ui, &mut p.max_dist, 1.0..=MAX_SEARCH_LY, Steps::Through(LY), 0, " ly");
                 });
                 bar.field("", "", |ui| find |= crate::widgets::primary_button(ui, "Find hotspots").clicked());
@@ -2288,11 +2288,11 @@ fn stood_words(s: Stood, selling: bool, last: i64) -> String {
             format!("{head}, {}. The report before, {}, {}.", when(last), when(before), had(previous))
         }
         Stood::AtLeast { since } if since < last => format!(
-            "Price unchanged {}. Elite Nexus can't see further back: it keeps 30 days of price changes, from the first report of this market it received.",
+            "Price unchanged {}. Praetorium can't see further back: it keeps 30 days of price changes, from the first report of this market it received.",
             reports(since)
         ),
         Stood::AtLeast { .. } => format!("Only the latest report, {}, is on record for this price: how long it stood before that isn't known.", when(last)),
-        Stood::Unknown => "How long this price has stood isn't known: Elite Nexus follows this market's prices from its next report.".to_string(),
+        Stood::Unknown => "How long this price has stood isn't known: Praetorium follows this market's prices from its next report.".to_string(),
     }
 }
 
@@ -2742,7 +2742,7 @@ fn plan_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
         return None;
     }
     let Some(origin) = gs.location.star_pos else {
-        empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Elite Nexus knows where you are.");
+        empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
         return None;
     };
     let pad = finder::ship_pad(gs);
@@ -3040,7 +3040,7 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
         return None;
     }
     let Some(origin) = gs.location.star_pos else {
-        empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Elite Nexus knows where you are.");
+        empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
         return None;
     };
     let p = &st.prefs;
@@ -3185,8 +3185,8 @@ fn stop_facts(i: usize, s: &finder::TripStop) -> String {
 /// What a shopping trip can and can't know, under its stops. `exact`: no shorter trip among the sellers weighed.
 fn trip_coverage(ui: &mut Ui, markets: Option<u64>, exact: bool) {
     let known = match markets {
-        Some(n) => format!("the {} markets Elite Nexus knows", nexus_data::names::group_digits(n as i64)),
-        None => "the markets Elite Nexus knows".to_string(),
+        Some(n) => format!("the {} markets Praetorium knows", nexus_data::names::group_digits(n as i64)),
+        None => "the markets Praetorium knows".to_string(),
     };
     let shortest = if exact {
         "Among those, no trip is shorter."
@@ -3233,7 +3233,7 @@ const STATUS_BAR_H: f32 = 30.0;
 fn status_bar(ui: &mut Ui, rect: egui::Rect, svc: &mut MarketService) -> bool {
     let latest = svc.latest_headline();
     // The bar's tooltip is the one that shows over it, so it carries the newest message whole.
-    let mut tip = "The live market feed (EDDN): what commanders all over the galaxy report as they dock, and what Elite Nexus's database holds from it, your journal and the Spansh import. Click for Database & feed.".to_string();
+    let mut tip = "The live market feed (EDDN): what commanders all over the galaxy report as they dock, and what Praetorium's database holds from it, your journal and the Spansh import. Click for Database & feed.".to_string();
     if let Some(h) = &latest {
         tip.push_str(&format!("\n\nNewest message: {h}"));
     }
@@ -3343,7 +3343,7 @@ fn results_routes(ui: &mut Ui, slot: &Slot<Res<TradeRoute>>, from: Option<&str>,
     let Some(Ok(routes)) = &slot.last else { return None };
     if routes.is_empty() {
         let text = match from {
-            Some(station) => format!("Nothing you can buy at {station} sells for more within reach, with the prices Elite Nexus knows."),
+            Some(station) => format!("Nothing you can buy at {station} sells for more within reach, with the prices Praetorium knows."),
             None => "No profitable routes in range with the current data.".into(),
         };
         ui.label(RichText::new(text).color(pal::DIM));
@@ -3481,7 +3481,7 @@ const SERVICES_STEP: usize = 25;
 fn services_reach(ui: &mut Ui, service: &str, known: Option<u64>, limit: usize) {
     let count = known.map(|n| format!(" ({} now)", nexus_data::names::group_digits(n as i64))).unwrap_or_default();
     let mut text = format!(
-        "The {limit} nearest stations with {}, out of every station Elite Nexus knows{count}: those commanders report over the live feed, the ones you visit, and the Spansh import if you ran it. There's no distance limit: one 3,000 ly away is listed once the nearer ones are, so press Show more to reach further.",
+        "The {limit} nearest stations with {}, out of every station Praetorium knows{count}: those commanders report over the live feed, the ones you visit, and the Spansh import if you ran it. There's no distance limit: one 3,000 ly away is listed once the nearer ones are, so press Show more to reach further.",
         with_article(service)
     );
     // The galaxy has some 90,000 stations and carriers: far fewer means the import hasn't been run.
@@ -3990,7 +3990,7 @@ fn here_list(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, dock
     if unknown > 0 {
         ui.add_space(4.0);
         let what = if all { "Hide those without a known market".to_string() } else { format!("{} {unknown} more without a known market", icon::CARET_DOWN) };
-        let tip = "Elite Nexus knows a market once a commander who shares data, or you, opened it (or the Spansh import had it). Without one there's nothing to open yet.";
+        let tip = "Praetorium knows a market once a commander who shares data, or you, opened it (or the Spansh import had it). Without one there's nothing to open yet.";
         if ui.add(egui::Button::new(RichText::new(what).size(size::FOOTNOTE).color(pal::ACCENT_SOFT)).frame(false).wrap_mode(egui::TextWrapMode::Truncate)).on_hover_text(tip).clicked() {
             st.prefs.tiles_unknown = !all;
         }
@@ -4521,7 +4521,7 @@ fn database_tab(ui: &mut Ui, svc: &mut MarketService, st: &mut MarketUi, rt: &to
                         .small().color(pal::DIM),
                 );
                 if s.write_errors > 0 {
-                    ui.label(RichText::new(format!("{} write errors this session. See nexus.log for details.", digits(s.write_errors))).small().color(pal::WARN));
+                    ui.label(RichText::new(format!("{} write errors this session. See praetorium.log for details.", digits(s.write_errors))).small().color(pal::WARN));
                 }
             }
             None => {
@@ -4579,7 +4579,7 @@ fn database_tab(ui: &mut Ui, svc: &mut MarketService, st: &mut MarketUi, rt: &to
         card(ui, "Baseline import (Spansh)", |ui| {
             ui.label(
                 RichText::new(
-                    "The live feed only sees markets that commanders visit while Elite Nexus runs. For a complete picture from day one, \
+                    "The live feed only sees markets that commanders visit while Praetorium runs. For a complete picture from day one, \
                      import Spansh's daily dump of every station: services, landing pads and the last known market of each.",
                 )
                 .color(pal::DIM),
@@ -4627,7 +4627,7 @@ fn database_tab(ui: &mut Ui, svc: &mut MarketService, st: &mut MarketUi, rt: &to
         ui.add_space(8.0);
         card(ui, "Where the data comes from", |ui| {
             for line in [
-                "EDDN: every commander running EDMC, EDDiscovery, EDDI or Elite Nexus publishes station data the moment they dock. It arrives here in real time, usually before Inara or Spansh have processed it.",
+                "EDDN: every commander running EDMC, EDDiscovery, EDDI or Praetorium publishes station data the moment they dock. It arrives here in real time, usually before Inara or Spansh have processed it.",
                 "Your own journal: every station you dock at and every market you open.",
                 "Spansh dump: the daily baseline above.",
             ] {
@@ -4698,7 +4698,7 @@ fn sell_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
         return None;
     }
     let Some(origin) = gs.location.star_pos else {
-        empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Elite Nexus knows where you are.");
+        empty(ui, icon::MAP_PIN, "Position unknown", "Jump or relog once so Praetorium knows where you are.");
         return None;
     };
     let tons: i64 = hold.iter().map(|l| l.2).sum();
@@ -4711,7 +4711,7 @@ fn sell_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
             let goods = if hold.len() == 1 { "commodity" } else { "commodities" };
             ui.label(RichText::new(format!("{} {} t · {} {goods}", icon::PACKAGE, nexus_data::names::group_digits(tons), hold.len())).font(display(size::CALLOUT)).color(pal::TEXT));
         });
-        bar.field("Buyers within", "Every market Elite Nexus knows within this distance, up to the whole galaxy.", |ui| {
+        bar.field("Buyers within", "Every market Praetorium knows within this distance, up to the whole galaxy.", |ui| {
             search |= crate::widgets::number(ui, &mut p.sell_radius, 5.0..=MAX_SEARCH_LY, Steps::Through(LY), 0, " ly").changed();
         });
         bar.field("Prices no older than", "The same setting as Find commodity's: prices reported longer ago are left out.", |ui| {

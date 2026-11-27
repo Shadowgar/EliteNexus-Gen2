@@ -48,7 +48,7 @@ pub struct CockpitUi {
     /// The last calibration, and pixel shaders recorded so far while one runs.
     calibration: Option<Calibration>,
     recorded: u32,
-    /// The config still has Elite Nexus 0.3.0's in-game patterns (they crashed the game near the newer
+    /// The config still has Praetorium 0.3.0's in-game patterns (they crashed the game near the newer
     /// fleet carriers).
     old_patterns: bool,
     /// 3Dmigoto's d3d11.dll isn't there (renamed or deleted): the hook is off.
@@ -202,7 +202,7 @@ pub fn show(ui: &mut Ui, st: &mut CockpitUi, installs: &[GameInstall], playing: 
                 let config = HookConfig { dimmer: st.edit, recording: true, ..HookConfig::default() };
                 // A fresh install starts with a calibration: the fixes are made from this game.
                 st.message = Some(match target.install(&folder, &files, &config) {
-                    Ok(()) => (true, "Installed. One step left: calibrate (below), so Elite Nexus can find your game's light shader.".into()),
+                    Ok(()) => (true, "Installed. One step left: calibrate (below), so Praetorium can find your game's light shader.".into()),
                     Err(e) => (false, e.to_string()),
                 });
                 st.confirm_install = false;
@@ -268,7 +268,7 @@ fn controls(ui: &mut Ui, st: &mut CockpitUi, installs: &[GameInstall], playing: 
             Some(Status::Foreign { edhm }) => {
                 let what = if edhm { "EDHM is installed in the game folder." } else { "Another 3Dmigoto mod is installed in the game folder." };
                 ui.label(RichText::new(what).font(display(size::BODY)).color(pal::TEXT));
-                ui.add(egui::Label::new(RichText::new("Elite Nexus leaves it alone: two mods can't share the game's d3d11.dll. To use Elite Nexus's dimmer instead, remove that mod first.").color(pal::DIM)).wrap());
+                ui.add(egui::Label::new(RichText::new("Praetorium leaves it alone: two mods can't share the game's d3d11.dll. To use Praetorium's dimmer instead, remove that mod first.").color(pal::DIM)).wrap());
             }
             Some(Status::None) | None => not_installed(ui, st, playing, rt),
         }
@@ -282,7 +282,7 @@ fn controls(ui: &mut Ui, st: &mut CockpitUi, installs: &[GameInstall], playing: 
     });
 }
 
-/// Linux and macOS: what the game may need to load the hook under Proton or CrossOver. Elite Nexus hasn't been
+/// Linux and macOS: what the game may need to load the hook under Proton or CrossOver. Praetorium hasn't been
 /// tried there.
 const PROTON_NOTE: &str = if cfg!(target_os = "macos") {
     "On macOS this is untested. CrossOver (which NotProton and Whisky build on) runs Direct3D 11 through D3DMetal or DXVK and may skip the d3d11.dll in the game folder: if calibrating finds no shaders, add WINEDLLOVERRIDES=\"d3d11,d3dcompiler_47=n,b\" %command% to Elite Dangerous's launch options in Steam (Properties › General). If it still finds none, the hook can't run there: Remove takes it out again."
@@ -302,9 +302,9 @@ fn not_installed(ui: &mut Ui, st: &mut CockpitUi, playing: bool, rt: &tokio::run
     }
     section(ui, "Before you install");
     let mut points = vec![
-        format!("Elite Nexus downloads 3Dmigoto {} (4.7 MB) from its official GitHub release and checks it against a pinned checksum. 3Dmigoto is an open-source (GPL-3.0) graphics modding tool; Elite Nexus uses it to load its own fixes, nothing else.", dimmer::MIGOTO_VERSION),
+        format!("Praetorium downloads 3Dmigoto {} (4.7 MB) from its official GitHub release and checks it against a pinned checksum. 3Dmigoto is an open-source (GPL-3.0) graphics modding tool; Praetorium uses it to load its own fixes, nothing else.", dimmer::MIGOTO_VERSION),
         format!("It puts d3d11.dll, d3dcompiler_47.dll, {}, {} and a ShaderFixes folder next to EliteDangerous64.exe, in the folder below. Remove takes them out again.", dimmer::CONFIG, dimmer::MANIFEST),
-        "Then you calibrate once: start the game, get into your cockpit, quit. Elite Nexus finds the light shader among the ones your game loaded and keeps a fix for exactly that one.".to_string(),
+        "Then you calibrate once: start the game, get into your cockpit, quit. Praetorium finds the light shader among the ones your game loaded and keeps a fix for exactly that one.".to_string(),
         format!(
             "While you play, {} (pressed without Shift, Ctrl or Alt) switch and set the dimmer. None of the game's built-in control presets uses them, and the game's screenshot key (F10) is left alone. The game gets those presses too, so a key your own controls use on its own does both; the tab names any it finds.",
             key_names()
@@ -344,7 +344,7 @@ fn not_installed(ui: &mut Ui, st: &mut CockpitUi, playing: bool, rt: &tokio::run
     });
 }
 
-/// The install of Elite Nexus 0.3.0 (in-game patterns), or a hook switched off by renaming its DLL:
+/// The install of Praetorium 0.3.0 (in-game patterns), or a hook switched off by renaming its DLL:
 /// what's wrong and the one click that fixes it. Returns true when something was shown.
 fn repairs(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameInstall]) -> bool {
     if !st.old_patterns && !st.hook_missing {
@@ -354,7 +354,7 @@ fn repairs(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameInsta
         ui.add(
             egui::Label::new(
                 RichText::new(format!(
-                    "{} This install still uses the patterns of Elite Nexus 0.3.0, which the game runs on every shader it loads. They crash the game when it loads the newer fleet carriers. The update replaces them with fixes for exactly the shaders the dimmer needs, found in one calibration.",
+                    "{} This install still uses the patterns of Praetorium 0.3.0, which the game runs on every shader it loads. They crash the game when it loads the newer fleet carriers. The update replaces them with fixes for exactly the shaders the dimmer needs, found in one calibration.",
                     icon::WARNING
                 ))
                 .color(pal::BAD),
@@ -398,7 +398,7 @@ fn calibration(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameI
         let steps = [
             "Start the game (if it's running, quit it first: it reads the setting when it starts).",
             "Get into your cockpit somewhere quiet: docked, or in open space. Stay away from the newer fleet carriers while calibrating.",
-            "Quit to the desktop. Elite Nexus finishes the calibration when the game closes (or click Finish).",
+            "Quit to the desktop. Praetorium finishes the calibration when the game closes (or click Finish).",
         ];
         for (i, s) in steps.iter().enumerate() {
             ui.add(egui::Label::new(RichText::new(format!("{}.  {s}", i + 1)).color(pal::TEXT)).wrap());
@@ -439,12 +439,12 @@ fn calibration(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameI
             }
         }
         None => {
-            ui.add(egui::Label::new(RichText::new("Not calibrated yet: the dimmer (and the HUD colour protection) stay off until Elite Nexus has found your game's shaders.").color(pal::WARN)).wrap());
+            ui.add(egui::Label::new(RichText::new("Not calibrated yet: the dimmer (and the HUD colour protection) stay off until Praetorium has found your game's shaders.").color(pal::WARN)).wrap());
         }
     }
     let label = if st.calibration.is_some() { "Calibrate again" } else { "Calibrate" };
     let clicked = if outdated || st.calibration.is_none() { widgets::primary_button(ui, &format!("{} {label}", icon::CROSSHAIR)) } else { widgets::button(ui, &format!("{} {label}", icon::CROSSHAIR)) }
-        .on_hover_text("For one game session the game records the shaders it loads; Elite Nexus then finds the ones it needs")
+        .on_hover_text("For one game session the game records the shaders it loads; Praetorium then finds the ones it needs")
         .clicked();
     if clicked {
         st.message = Some(match dimmer::start_recording(folder) {
@@ -460,18 +460,18 @@ fn installed(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameIns
         ui.label(RichText::new("The test version you put in by hand is installed.").font(display(size::BODY)).color(pal::TEXT));
         ui.add(
             egui::Label::new(
-                RichText::new("Let Elite Nexus manage the recognized hook with your settings. Existing unmanaged shader files stay in place. An overlapping shader must be moved aside before calibration can write its fix.")
+                RichText::new("Let Praetorium manage the recognized hook with your settings. Existing unmanaged shader files stay in place. An overlapping shader must be moved aside before calibration can write its fix.")
                     .color(pal::DIM),
             )
             .wrap(),
         );
-        if widgets::primary_button(ui, &format!("{} Let Elite Nexus manage it", icon::CHECK)).clicked() {
+        if widgets::primary_button(ui, &format!("{} Let Praetorium manage it", icon::CHECK)).clicked() {
             let protect = match &st.status {
                 Some(Status::Unmanaged { config }) => config.protect,
                 _ => Default::default(),
             };
             st.message = Some(match dimmer::install(folder, &[], &HookConfig { dimmer: st.edit, protect, recording: true }) {
-                Ok(()) => (true, "Done: Elite Nexus manages the dimmer now. One step left: calibrate (below).".into()),
+                Ok(()) => (true, "Done: Praetorium manages the dimmer now. One step left: calibrate (below).".into()),
                 Err(e) => (false, e.to_string()),
             });
             st.refresh(ui.ctx(), installs);
@@ -540,7 +540,7 @@ fn installed(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameIns
                 st.message = Some(match dimmer::uninstall(folder) {
                     Ok(done) if done.kept.is_empty() && protecting => (true, "Removed. From the next game start the cockpit lights are back to normal and your HUD theme colours every HUD colour again.".into()),
                     Ok(done) if done.kept.is_empty() => (true, "Removed. The cockpit lights are back to normal the next time the game starts.".into()),
-                    Ok(done) => (false, format!("Removed, except {}: changed since Elite Nexus installed it, so it was left in place.", done.kept.join(", "))),
+                    Ok(done) => (false, format!("Removed, except {}: changed since Praetorium installed it, so it was left in place.", done.kept.join(", "))),
                     Err(e) if playing => (false, format!("{e}. Quit the game first: it keeps these files open.")),
                     Err(e) => (false, e.to_string()),
                 });
@@ -610,16 +610,16 @@ fn installed(ui: &mut Ui, st: &mut CockpitUi, folder: &Path, installs: &[GameIns
     if let Some(e) = &st.clash_error {
         ui.add(egui::Label::new(RichText::new(format!("{}  Couldn't check these keys against the control presets the game uses ({e}).", icon::WARNING)).size(size::FOOTNOTE).color(pal::WARN)).wrap());
     }
-    footnote(ui, "The keys work while the game window is in front, without Shift, Ctrl or Alt held; what they set lasts until the game closes. Elite Nexus can't keep a key from the game: the game gets every press too. It never changes your controls.");
+    footnote(ui, "The keys work while the game window is in front, without Shift, Ctrl or Alt held; what they set lasts until the game closes. Praetorium can't keep a key from the game: the game gets every press too. It never changes your controls.");
 }
 
 fn explain(ui: &mut Ui) {
     card(ui, "What the dimmer does, and what it can't", |ui| {
         let mut lines = vec![
-            "The game has no setting for its cockpit lights. 3Dmigoto, a Direct3D 11 hook that sits next to the game, lets Elite Nexus change one step of how the game lights the cockpit: lights within the reach of your eyes keep only part of their light.",
+            "The game has no setting for its cockpit lights. 3Dmigoto, a Direct3D 11 hook that sits next to the game, lets Praetorium change one step of how the game lights the cockpit: lights within the reach of your eyes keep only part of their light.",
             "Only the cockpit's own lights change. Stations, carriers, planets, the HUD and everything else stay exactly as the game draws them.",
-            "Calibration: for one session the game records the shaders it loads; Elite Nexus finds the light shader among them by what its code looks like and keeps a fix for exactly that shader, by its fingerprint. In the game, 3Dmigoto only swaps that one shader: every other shader, including ones the game adds later (new ships, new carriers), is left alone.",
-            "After a game update that changes the light shader, the fingerprint no longer matches: the dimmer simply stays off until you calibrate again, and Elite Nexus tells you when the game has been updated. The game is never affected.",
+            "Calibration: for one session the game records the shaders it loads; Praetorium finds the light shader among them by what its code looks like and keeps a fix for exactly that shader, by its fingerprint. In the game, 3Dmigoto only swaps that one shader: every other shader, including ones the game adds later (new ships, new carriers), is left alone.",
+            "After a game update that changes the light shader, the fingerprint no longer matches: the dimmer simply stays off until you calibrate again, and Praetorium tells you when the game has been updated. The game is never affected.",
             "The fixes are made on your PC from your game and never leave it.",
             "Settings saved here apply the next time the game starts; F9, F7 and F8 change them while you play, and the game gets those presses too.",
             "The same install is the graphics hook HUD colours needs to keep hostile red, friendly green and shield blue out of a theme. If you only want that, switch the dimmer off here.",

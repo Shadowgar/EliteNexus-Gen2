@@ -173,7 +173,7 @@ pub struct ProviderHttp {
 impl Default for ProviderHttp {
     fn default() -> Self {
         let client = |direct| {
-            let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).user_agent(concat!("EliteNexus-Gen2/", env!("CARGO_PKG_VERSION")));
+            let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).user_agent(concat!("Praetorium/", env!("CARGO_PKG_VERSION")));
             let builder = if direct { builder.no_proxy() } else { builder };
             builder.build().map_err(|_| AiError::Http("could not initialize the model connection".into()))
         };

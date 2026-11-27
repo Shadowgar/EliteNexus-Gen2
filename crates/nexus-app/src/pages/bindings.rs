@@ -10,7 +10,7 @@ use nexus_binds::{analyze, find_presets, render_html, Bindings, BindsError, Cont
 use std::path::PathBuf;
 
 /// Said wherever the page could look like it changed something.
-const READ_ONLY: &str = "Elite Nexus only reads your bindings: it never changes them. Change them in the game (Options › Controls).";
+const READ_ONLY: &str = "Praetorium only reads your bindings: it never changes them. Change them in the game (Options › Controls).";
 
 pub struct Loaded {
     pub dir: PresetDirectory,
@@ -54,10 +54,10 @@ impl BindsUi {
                     let why = match &e {
                         BindsError::PresetNotFound(name) if builtin.is_empty() => {
                             needs_game_folder = true;
-                            format!("{name} isn't in your Bindings folder. If it's one of the game's built-in presets (such as KeyboardMouseOnly), it's in the game's folder, which Elite Nexus didn't find.")
+                            format!("{name} isn't in your Bindings folder. If it's one of the game's built-in presets (such as KeyboardMouseOnly), it's in the game's folder, which Praetorium didn't find.")
                         }
                         BindsError::PresetNotFound(name) => format!("{name} is neither in your Bindings folder nor among the game's built-in presets."),
-                        e => format!("Elite Nexus couldn't read them: {e}."),
+                        e => format!("Praetorium couldn't read them: {e}."),
                     };
                     // Another preset rather than nothing; the page says plainly that it isn't what the game uses.
                     let Some(shown) = dir.primary() else { return Err(why) };

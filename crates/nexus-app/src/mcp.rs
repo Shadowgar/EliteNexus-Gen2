@@ -1,5 +1,5 @@
 //! AI agents over MCP (the Model Context Protocol). An agent on this computer (Claude Code, Claude Desktop, any MCP
-//! client) starts `EliteNexus-Gen2 --mcp`, which speaks MCP on its stdin and stdout ([`stdio`]) and passes each tool call to
+//! client) starts `Praetorium --mcp`, which speaks MCP on its stdin and stdout ([`stdio`]) and passes each tool call to
 //! the running app over a named pipe (Windows) or a Unix socket: no network port, nothing another computer can reach.
 //!
 //! The app answers ([`McpService`]) only while Settings › AI agents is on, which it is not until the commander switches
@@ -39,23 +39,23 @@ const QUEUE: usize = 4;
 #[cfg(windows)]
 pub fn endpoint() -> Result<String, String> {
     let user = win::user_sid().ok_or("Windows didn't say which account this is.")?;
-    Ok(format!(r"\\.\pipe\elite-nexus-gen2-mcp-{}", user.text))
+    Ok(format!(r"\\.\pipe\praetorium-mcp-{}", user.text))
 }
 
 /// Where the app listens and `--mcp` connects: a socket in a folder only this user can enter ([`unix`]), where both
 /// ends check that the other runs as the same user.
 #[cfg(not(windows))]
 pub fn endpoint() -> Result<String, String> {
-    // /run/user/<uid> holds other programs' sockets too: a name that's plainly Elite Nexus'.
-    Ok(unix::socket_dir()?.join("elite-nexus-gen2-mcp.sock").to_string_lossy().into_owned())
+    // /run/user/<uid> holds other programs' sockets too: a name that's plainly Praetorium'.
+    Ok(unix::socket_dir()?.join("praetorium-mcp.sock").to_string_lossy().into_owned())
 }
 
-/// A pipe or socket of a test's own, which no Elite Nexus answers on.
+/// A pipe or socket of a test's own, which no Praetorium answers on.
 #[cfg(test)]
 pub(crate) fn test_endpoint(tag: &str) -> String {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() % 1_000_000_000);
     if cfg!(windows) {
-        format!(r"\\.\pipe\elite-nexus-gen2-mcp-test-{tag}-{}-{n}", std::process::id())
+        format!(r"\\.\pipe\praetorium-mcp-test-{tag}-{}-{n}", std::process::id())
     } else {
         std::env::temp_dir().join(format!("enx-{tag}-{}-{n}.sock", std::process::id())).to_string_lossy().into_owned()
     }
@@ -109,11 +109,11 @@ impl Limiter {
         }
         let wait = |q: &VecDeque<Instant>| q.front().map_or(1, |t| minute.saturating_sub(now.duration_since(*t)).as_secs().max(1));
         if self.calls.len() >= CALLS_PER_MINUTE {
-            return Err(format!("Elite Nexus answers AI agents at most {CALLS_PER_MINUTE} calls a minute: try again in {} s.", wait(&self.calls)));
+            return Err(format!("Praetorium answers AI agents at most {CALLS_PER_MINUTE} calls a minute: try again in {} s.", wait(&self.calls)));
         }
         if online && self.online.len() >= ONLINE_CALLS_PER_MINUTE {
             return Err(format!(
-                "Elite Nexus answers AI agents at most {ONLINE_CALLS_PER_MINUTE} calls a minute from online services (Spansh, EDGalaxyData), to keep the load on them light: try again in {} s.",
+                "Praetorium answers AI agents at most {ONLINE_CALLS_PER_MINUTE} calls a minute from online services (Spansh, EDGalaxyData), to keep the load on them light: try again in {} s.",
                 wait(&self.online)
             ));
         }
@@ -222,7 +222,7 @@ impl McpService {
                 let mut s = status.lock();
                 s.listening = false;
                 s.error = Some(if e.kind() == std::io::ErrorKind::AddrInUse || e.kind() == std::io::ErrorKind::PermissionDenied {
-                    "Another program already answers AI agents under Elite Nexus' name: is a second Elite Nexus running?".into()
+                    "Another program already answers AI agents under Praetorium' name: is a second Praetorium running?".into()
                 } else {
                     format!("Couldn't listen for AI agents: {e}")
                 });
@@ -271,7 +271,7 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
                 tools = t;
             }
             if selected.epoch != received_epoch {
-                let _ = reply.send(WireReply::Error("Elite Nexus changed journal sources.".into()));
+                let _ = reply.send(WireReply::Error("Praetorium changed journal sources.".into()));
                 continue;
             }
         }
@@ -280,11 +280,11 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
             continue;
         }
         if off.load(Ordering::Relaxed) {
-            let _ = reply.send(WireReply::Error("Elite Nexus stopped answering AI agents (Settings › AI agents was switched off).".into()));
+            let _ = reply.send(WireReply::Error("Praetorium stopped answering AI agents (Settings › AI agents was switched off).".into()));
             continue;
         }
         if !scope.matches(&tools.model.read()) {
-            let _ = reply.send(WireReply::Error("Elite Nexus changed data scope before answering.".into()));
+            let _ = reply.send(WireReply::Error("Praetorium changed data scope before answering.".into()));
             continue;
         }
         let answer = match crate::ai_tools::tool(&name).filter(|t| t.available_to(Caller::Mcp)) {
@@ -301,7 +301,7 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
                     let selected = source.lock();
                     let model = tools.model.read();
                     if !scope.matches(&model) || selected.epoch != received_epoch || off.load(Ordering::Acquire) {
-                        let _ = reply.send(WireReply::Error("Elite Nexus changed data scope while answering.".into()));
+                        let _ = reply.send(WireReply::Error("Praetorium changed data scope while answering.".into()));
                         continue;
                     }
                     let mut s = status.lock();
@@ -310,7 +310,7 @@ fn work(mut tools: NexusTools, inbox: crossbeam_channel::Receiver<Call>, swaps: 
                     let answer = match result {
                         Ok(Ok(v)) => WireReply::Ok(v),
                         Ok(Err(e)) => WireReply::Error(e),
-                        Err(_) => WireReply::Error(format!("{} failed inside Elite Nexus (written to nexus.log).", t.name)),
+                        Err(_) => WireReply::Error(format!("{} failed inside Praetorium (written to praetorium.log).", t.name)),
                     };
                     let _ = reply.send(answer);
                     continue;
@@ -333,7 +333,7 @@ async fn listen(name: &str, jobs: crossbeam_channel::Sender<Call>, status: Arc<M
         // SAFETY: `attributes` is a valid SECURITY_ATTRIBUTES whose descriptor lives as long as `owner_only`.
         unsafe { ServerOptions::new().first_pipe_instance(first).reject_remote_clients(true).create_with_security_attributes_raw(name, (&raw mut attributes).cast()) }
     };
-    // The first instance must be ours: another program holding the name can't stand in for Elite Nexus. Switched off
+    // The first instance must be ours: another program holding the name can't stand in for Praetorium. Switched off
     // and on again quickly, the last run's instances may still be closing: a few tries.
     let until = Instant::now() + Duration::from_secs(3);
     let mut server = loop {
@@ -425,12 +425,12 @@ async fn answer(call: WireCall, jobs: &crossbeam_channel::Sender<Call>, epoch: u
     let (reply, answered) = tokio::sync::oneshot::channel();
     let args = if call.arguments.is_null() { Value::Object(Default::default()) } else { call.arguments };
     if jobs.try_send(Call { source_epoch: epoch, scope, name: call.tool, args, reply }).is_err() {
-        return WireReply::Error("Elite Nexus is busy with other agents' calls: try again in a moment.".into());
+        return WireReply::Error("Praetorium is busy with other agents' calls: try again in a moment.".into());
     }
     match tokio::time::timeout(DEADLINE, answered).await {
         Ok(Ok(r)) => r,
-        Ok(Err(_)) => WireReply::Error("Elite Nexus stopped answering AI agents (Settings › AI agents was switched off).".into()),
-        Err(_) => WireReply::Error(format!("Elite Nexus didn't finish within {} s.", DEADLINE.as_secs())),
+        Ok(Err(_)) => WireReply::Error("Praetorium stopped answering AI agents (Settings › AI agents was switched off).".into()),
+        Err(_) => WireReply::Error(format!("Praetorium didn't finish within {} s.", DEADLINE.as_secs())),
     }
 }
 
@@ -514,9 +514,9 @@ mod tests {
     #[test]
     fn the_endpoint_is_this_users_and_local() {
         let e = endpoint().unwrap();
-        assert!(e.contains("elite-nexus-gen2-mcp"), "{e}");
+        assert!(e.contains("praetorium-mcp"), "{e}");
         if cfg!(windows) {
-            assert!(e.starts_with(r"\\.\pipe\elite-nexus-gen2-mcp-S-1-"), "a local named pipe named by the user's SID: {e}");
+            assert!(e.starts_with(r"\\.\pipe\praetorium-mcp-S-1-"), "a local named pipe named by the user's SID: {e}");
         }
     }
 }

@@ -1,6 +1,6 @@
 //! HUD & cockpit. HUD colours: the game's own colour matrix (`GraphicsConfigurationOverride.xml`)
 //! with presets, simple controls, a live preview and the honest limits of what the matrix can
-//! change, plus "Keep hostile red, friendly green and shield blue" through Elite Nexus's graphics
+//! change, plus "Keep hostile red, friendly green and shield blue" through Praetorium's graphics
 //! hook (`nexus_hud::dimmer`). Glare and exposure (glare.rs): the tone-mapping values in the same
 //! file. Cockpit lights (cockpit.rs): the dimmer, which installs the hook.
 
@@ -58,7 +58,7 @@ pub struct HudUi {
     start_preset: Option<String>,
     /// `--tab hue:<degrees>` (screenshots): the Colour slider, set on top of the theme started from.
     start_hue: Option<f32>,
-    /// The game folder and Elite Nexus's graphics hook in it (the Cockpit lights tab installs it),
+    /// The game folder and Praetorium's graphics hook in it (the Cockpit lights tab installs it),
     /// which "Keep hostile red, friendly green and shield blue" needs.
     hook_folder: Option<PathBuf>,
     hook: Option<Status>,
@@ -344,7 +344,7 @@ fn controls(ui: &mut Ui, st: &mut HudUi, themes: &mut Vec<HudTheme>, playing: bo
             Err(e) => {
                 ui.add(egui::Label::new(RichText::new(format!("{}  {e}", icon::WARNING)).color(pal::BAD)).wrap());
                 if matches!(st.file, Some(Ok(_))) {
-                    ui.add(egui::Label::new(RichText::new("The game most likely ignores a file it can't read, too. Elite Nexus won't change it: fix or delete it, then reload.").size(size::FOOTNOTE).color(pal::DIM)).wrap());
+                    ui.add(egui::Label::new(RichText::new("The game most likely ignores a file it can't read, too. Praetorium won't change it: fix or delete it, then reload.").size(size::FOOTNOTE).color(pal::DIM)).wrap());
                 }
             }
         }
@@ -398,7 +398,7 @@ fn controls(ui: &mut Ui, st: &mut HudUi, themes: &mut Vec<HudTheme>, playing: bo
         if let Some(Ok(f)) = &st.file
             && f.backup_path().exists() {
                 let b = f.backup_path().display().to_string();
-                ui.add(egui::Label::new(RichText::new("Your file as it was before Elite Nexus first changed it is kept next to it.").size(size::FOOTNOTE).color(pal::DIM)).wrap()).on_hover_text(b);
+                ui.add(egui::Label::new(RichText::new("Your file as it was before Praetorium first changed it is kept next to it.").size(size::FOOTNOTE).color(pal::DIM)).wrap()).on_hover_text(b);
             }
         ui.add_space(8.0);
         protect_controls(ui, st);
@@ -530,7 +530,7 @@ fn simple(ui: &mut Ui, st: &mut HudUi) {
     }
 }
 
-/// "Keep hostile red, friendly green and shield blue": needs Elite Nexus's graphics hook; saved to
+/// "Keep hostile red, friendly green and shield blue": needs Praetorium's graphics hook; saved to
 /// the game's 3Dmigoto config as soon as a change settles, and read by the game when it starts.
 fn protect_controls(ui: &mut Ui, st: &mut HudUi) {
     const TITLE: &str = "Keep hostile red, friendly green and shield blue";
@@ -539,10 +539,10 @@ fn protect_controls(ui: &mut Ui, st: &mut HudUi) {
             g.switch(&mut st.protect.on, TITLE, "Your theme then colours only the HUD's orange.");
             false
         }
-        Some(Status::None) => why_not(g, TITLE, "Needs Elite Nexus's graphics hook, which the Cockpit lights tab installs. Its dimmer can be switched off there if you only want this.", true),
-        Some(Status::Unmanaged { .. }) => why_not(g, TITLE, "Needs Elite Nexus to manage the graphics hook in the game folder: Cockpit lights › Let Elite Nexus manage it.", true),
-        Some(Status::Foreign { edhm: true }) => why_not(g, TITLE, "Can't be used with EDHM: it needs Elite Nexus's graphics hook, and EDHM already holds the game's d3d11.dll.", false),
-        Some(Status::Foreign { edhm: false }) => why_not(g, TITLE, "Can't be used with the other 3Dmigoto mod in the game folder: it needs Elite Nexus's graphics hook, and the two can't share the game's d3d11.dll.", false),
+        Some(Status::None) => why_not(g, TITLE, "Needs Praetorium's graphics hook, which the Cockpit lights tab installs. Its dimmer can be switched off there if you only want this.", true),
+        Some(Status::Unmanaged { .. }) => why_not(g, TITLE, "Needs Praetorium to manage the graphics hook in the game folder: Cockpit lights › Let Praetorium manage it.", true),
+        Some(Status::Foreign { edhm: true }) => why_not(g, TITLE, "Can't be used with EDHM: it needs Praetorium's graphics hook, and EDHM already holds the game's d3d11.dll.", false),
+        Some(Status::Foreign { edhm: false }) => why_not(g, TITLE, "Can't be used with the other 3Dmigoto mod in the game folder: it needs Praetorium's graphics hook, and the two can't share the game's d3d11.dll.", false),
         None if nexus_hud::install::game_dir().is_some() => why_not(g, TITLE, "Needs Elite Dangerous's folder.", false),
         None => why_not(g, TITLE, &format!("Needs Elite Dangerous's folder. {}", crate::folders::game_not_found()), false),
     });
@@ -674,7 +674,7 @@ fn limits_card(ui: &mut Ui) {
     card(ui, "What this setting changes, and what it can't", |ui| {
         let lines = [
             "One colour matrix for the whole interface: cockpit HUD, panels, scanner contacts, shields, station menus, the on-foot HUD and the portraits on mission boards (strong themes give them colour bands). It can't give one element, say the scanner, a colour of its own.",
-            "Friend and foe colours move with everything else, which is why the preview warns when hostile and friendly contacts end up alike. \"Keep hostile red, friendly green and shield blue\" changes that, with Elite Nexus's graphics hook.",
+            "Friend and foe colours move with everything else, which is why the preview warns when hostile and friendly contacts end up alike. \"Keep hostile red, friendly green and shield blue\" changes that, with Praetorium's graphics hook.",
             "The main menu and the store's ship previews stay in the standard colours.",
             "It doesn't touch the cockpit's own lighting: dashboard lights and cabin glow keep their colour and brightness.",
             "The game reads it only at launch; there is no way to reload it while playing.",
@@ -684,9 +684,9 @@ fn limits_card(ui: &mut Ui) {
         }
         section(ui, "Elsewhere on this page");
         let more = [
-            "Cockpit lights: the game has no setting for them, so the Cockpit lights tab dims them with Elite Nexus's own dimmer.",
+            "Cockpit lights: the game has no setting for them, so the Cockpit lights tab dims them with Praetorium's own dimmer.",
             "Glare and exposure: how bright lights glare and how the picture is exposed, in the same file as these colours.",
-            "Colours for single HUD elements: the game's setting can't do them. Elite Nexus's graphics hook can keep hostile red, friendly green and shield blue out of a theme (the switch under In the game), but can't yet give one element, such as the scanner, a colour of its own.",
+            "Colours for single HUD elements: the game's setting can't do them. Praetorium's graphics hook can keep hostile red, friendly green and shield blue out of a theme (the switch under In the game), but can't yet give one element, such as the scanner, a colour of its own.",
         ];
         for l in more {
             ui.add(egui::Label::new(RichText::new(format!("•  {l}")).color(pal::DIM)).wrap());

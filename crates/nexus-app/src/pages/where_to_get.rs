@@ -36,7 +36,7 @@ pub struct Sources<'a> {
     pub rt: &'a tokio::runtime::Handle,
 }
 
-/// What's wanted, as Elite Nexus knows it.
+/// What's wanted, as Praetorium knows it.
 enum Wanted {
     Material(&'static Material),
     Commodity(&'static nexus_data::commodities::Commodity),
@@ -116,7 +116,7 @@ impl WhereToGet {
         self.planets.tick();
         let wanted = Wanted::of(symbol);
         let Some(origin) = gs.location.star_pos else {
-            crate::widgets::footnote(ui, "Elite Nexus doesn't know where you are yet: jump or relog once.");
+            crate::widgets::footnote(ui, "Praetorium doesn't know where you are yet: jump or relog once.");
             return None;
         };
         let key = (symbol.to_string(), gs.location.system_address);
@@ -128,7 +128,7 @@ impl WhereToGet {
             Wanted::Material(m) => self.material(ui, m),
             Wanted::Commodity(c) => self.commodity(ui, c),
             Wanted::Other(name) => {
-                crate::widgets::footnote(ui, &format!("Elite Nexus has no record of where {name} comes from."));
+                crate::widgets::footnote(ui, &format!("Praetorium has no record of where {name} comes from."));
                 None
             }
         }
@@ -218,7 +218,7 @@ impl WhereToGet {
                         place(ui, &s.name, &s.system, &format!("{:.0} ly{pad}", t.distance_ly), None);
                     }
                 }
-                Some(Ok(_)) => quiet(ui, &format!("No {} material trader Elite Nexus knows of has a pad your ship fits.", kind.to_lowercase())),
+                Some(Ok(_)) => quiet(ui, &format!("No {} material trader Praetorium knows of has a pad your ship fits.", kind.to_lowercase())),
                 Some(Err(e)) => quiet(ui, e),
                 None => quiet(ui, "The market database isn't open."),
             }
@@ -230,7 +230,7 @@ impl WhereToGet {
             crate::widgets::footnote(
                 ui,
                 &format!(
-                    "{} The nearest Elite Nexus's market database knows (from the live feed, your journal and the Spansh import): a trader it hasn't heard of isn't here.",
+                    "{} The nearest Praetorium's market database knows (from the live feed, your journal and the Spansh import): a trader it hasn't heard of isn't here.",
                     trade_words(m)
                 ),
             );
@@ -260,7 +260,7 @@ impl WhereToGet {
                 "From Spansh, among the planets commanders scanned and shared. The share is the planet's own mix, as its scan shows it: what you find on the ground varies from spot to spot.",
             );
         }
-        crate::widgets::footnote(ui, &format!("{} Elite Nexus has no list of where each material drops.", other_sources(m)));
+        crate::widgets::footnote(ui, &format!("{} Praetorium has no list of where each material drops.", other_sources(m)));
         goto
     }
 
@@ -285,7 +285,7 @@ impl WhereToGet {
         };
         if let Some(l) = local {
             if l.markets.is_empty() {
-                quiet(ui, &format!("No market Elite Nexus knows sold {} in the last {MARKET_AGE_H:.0} hours (with a pad your ship fits).", c.name));
+                quiet(ui, &format!("No market Praetorium knows sold {} in the last {MARKET_AGE_H:.0} hours (with a pad your ship fits).", c.name));
             }
             for h in &l.markets {
                 let (age, _) = crate::pages::market::age(h.updated_unix);
@@ -314,7 +314,7 @@ impl WhereToGet {
         crate::widgets::footnote(
             ui,
             &format!(
-                "The nearest Elite Nexus's market database knows: markets as someone last reported them, and rings someone scanned. A market or ring nobody reported isn't here. A fleet carrier ({}) says who may dock, as last reported.",
+                "The nearest Praetorium's market database knows: markets as someone last reported them, and rings someone scanned. A market or ring nobody reported isn't here. A fleet carrier ({}) says who may dock, as last reported.",
                 icon::ANCHOR
             ),
         );

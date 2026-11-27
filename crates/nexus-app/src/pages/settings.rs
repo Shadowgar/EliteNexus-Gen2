@@ -24,12 +24,12 @@ pub struct SettingsCtx<'a> {
     pub changed: bool,
     pub test_voice: bool,
     pub restart_core: bool,
-    /// What happened the last time Elite Nexus spoke (shown under Test voice).
+    /// What happened the last time Praetorium spoke (shown under Test voice).
     pub voice: crate::tts::VoiceStatus,
     /// Windows: the voices of the speech engine in use.
     pub voices: Vec<crate::tts::VoiceInfo>,
     /// Out: list the engine's voices again (the page has just opened, or its voice list), for a voice installed
-    /// while Elite Nexus runs.
+    /// while Praetorium runs.
     pub refresh_voices: bool,
     /// The overlay is see-through this run (its switch applies after a restart).
     pub overlay_see_through: bool,
@@ -214,11 +214,15 @@ pub fn show(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
             section(ui, "About");
             group(ui, |g| {
                 g.value("Version", format!("{} {}", crate::identity::NAME, env!("CARGO_PKG_VERSION")));
+                g.content(|ui| footnote(ui, crate::identity::ATTRIBUTION));
                 cx.changed |= cx.update.about_rows(g, &mut cx.settings.updates, cx.live);
-                g.row("Support Elite Nexus", "It's free, with no ads. If it helps you, GitHub Sponsors keeps it going.", |ui| {
+                g.row("Praetorium project", "Source, development history and issue reporting.", |ui| {
+                    ui.hyperlink_to("Project repository", crate::identity::REPOSITORY);
+                });
+                g.row("Support the original Elite Nexus", "GitHub Sponsors for CMDR Alka Uruskan.", |ui| {
                     ui.hyperlink_to(format!("{} Sponsor {}", icon::HEART, icon::ARROW_SQUARE_OUT), SPONSOR_URL).on_hover_text(SPONSOR_URL);
                 });
-                g.row("Data folder", "Settings, the market database, nexus.log and, after a crash, crash.log.", |ui| {
+                g.row("Data folder", "Settings, the market database, praetorium.log and, after a crash, crash.log.", |ui| {
                     if widgets::button(ui, "Open").clicked() {
                         folders::reveal(cx.data_dir);
                     }
@@ -228,7 +232,7 @@ pub fn show(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
                 #[cfg(target_os = "linux")]
                 if !crate::launch::isolated() { app_menu(g); }
             });
-            footnote(ui, "Elite Nexus is free software under the GNU GPL, version 3 or later, and comes with no warranty. Gen2 source: github.com/Shadowgar/EliteNexus-Gen2. Based on Elite Nexus by CMDR Alka Uruskan and contributors. Elite Dangerous is a trademark of Frontier Developments plc; Elite Nexus is an unofficial community tool.");
+            footnote(ui, "Praetorium is free software under the GNU GPL, version 3 or later, and comes with no warranty. See LICENSE and NOTICE.md in the project repository. Elite Dangerous is a trademark of Frontier Developments plc. Praetorium is an unofficial community project.");
         });
     });
 }
@@ -241,7 +245,7 @@ fn agents(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
     let state = agents_state(&cx.agents);
     let ai = &mut cx.settings.ai;
     group(ui, |g| {
-        cx.changed |= g.switch(&mut ai.agents, "Let AI agents read Elite Nexus", "Claude Code, Claude Desktop and other MCP clients on this computer can use the tools Ask uses, to read only.");
+        cx.changed |= g.switch(&mut ai.agents, "Let AI agents read Praetorium", "Claude Code, Claude Desktop and other MCP clients on this computer can use the tools Ask uses, to read only.");
         if ai.agents {
             g.row("State", "", |ui| {
                 ui.add(egui::Label::new(RichText::new(&state.1).color(state.0)).wrap());
@@ -252,7 +256,7 @@ fn agents(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
     });
     footnote(
         ui,
-        "The agent starts Elite Nexus' own program with --mcp, which hands each call to this window over a pipe on this computer, never the network. An agent reads what Ask reads: your commander, ships, cargo, materials, ranks, engineers, journal, the market database and Spansh. It changes nothing in the game or in Elite Nexus and plans no routes. One call at a time, at most 30 a minute (10 of them from Spansh or EDGalaxyData).",
+        "The agent starts Praetorium's own program with --mcp, which hands each call to this window over a pipe on this computer, never the network. An agent reads what Ask reads: your commander, ships, cargo, materials, ranks, engineers, journal, the market database and Spansh. It changes nothing in the game or in Praetorium and plans no routes. One call at a time, at most 30 a minute (10 of them from Spansh or EDGalaxyData).",
     );
 }
 
@@ -262,7 +266,7 @@ fn agents_state(s: &crate::mcp::Status) -> (Color32, String) {
         return (pal::BAD, e.clone());
     }
     if !s.started {
-        return (pal::DIM, "Not in a screenshot run: agents are answered only when Elite Nexus runs normally.".into());
+        return (pal::DIM, "Not in a screenshot run: agents are answered only when Praetorium runs normally.".into());
     }
     if !s.listening {
         return (pal::DIM, "Starting…".into());
@@ -279,15 +283,15 @@ fn agents_state(s: &crate::mcp::Status) -> (Color32, String) {
     (pal::GOOD, format!("Waiting for agents · {calls}{refused}"))
 }
 
-/// Claude Code's command that adds Elite Nexus for every project of this user.
+/// Claude Code's command that adds Praetorium for every project of this user.
 fn claude_code_command(exe: &str) -> String {
-    format!("claude mcp add --scope user elite-nexus-gen2 -- \"{exe}\" --mcp")
+    format!("claude mcp add --scope user praetorium -- \"{exe}\" --mcp")
 }
 
 /// Claude Desktop's `mcpServers` entry: only the entry, so it goes beside the commander's other servers.
 fn claude_desktop_entry(exe: &str) -> String {
     let entry = serde_json::json!({ "command": exe, "args": ["--mcp"] });
-    format!("\"elite-nexus-gen2\": {}", serde_json::to_string_pretty(&entry).unwrap_or_default())
+    format!("\"praetorium\": {}", serde_json::to_string_pretty(&entry).unwrap_or_default())
 }
 
 /// A button that puts `text` on the clipboard and says so for a moment; the text shows on hover.
@@ -336,7 +340,7 @@ fn overlay(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
             }
         });
         changed |= g.switch(&mut o.keep_minimal, "Keep it when idle", "A small empty island stays at the top instead of fading away when there's nothing to say.");
-        changed |= g.switch(&mut o.always_visible, "Visible over every window", "Off, it shows only while Elite Dangerous or Elite Nexus is the window in front. Wayland and macOS don't say which window that is, so there it always shows.");
+        changed |= g.switch(&mut o.always_visible, "Visible over every window", "Off, it shows only while Elite Dangerous or Praetorium is the window in front. Wayland and macOS don't say which window that is, so there it always shows.");
         let opaque = if cfg!(windows) {
             "Off, the island is a small opaque window in its rounded shape that switches size instead of changing shape smoothly."
         } else {
@@ -350,7 +354,7 @@ fn overlay(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
             });
         } else if o.see_through != running {
             g.content(|ui| {
-                ui.add(egui::Label::new(RichText::new("Restart Elite Nexus for this to take effect.").size(size::FOOTNOTE).color(pal::WARN)).wrap());
+                ui.add(egui::Label::new(RichText::new("Restart Praetorium for this to take effect.").size(size::FOOTNOTE).color(pal::WARN)).wrap());
             });
         }
         changed |= g.switch(&mut o.vr, "VR mode", "An opaque panel of fixed size that never hides, with larger text, to mirror into a headset (the user guide says how).");
@@ -369,7 +373,7 @@ fn voice_line(status: &crate::tts::VoiceStatus) -> Option<(Color32, String)> {
         VoiceStatus::Missing if cfg!(target_os = "macos") => Some((pal::WARN, "Voice uses macOS's own say (/usr/bin/say), which isn't there.".into())),
         VoiceStatus::Missing => Some((
             pal::WARN,
-            "Voice needs speech-dispatcher (spd-say) or espeak-ng, and neither is installed: install the speech-dispatcher package with its espeak-ng module, then restart Elite Nexus.".into(),
+            "Voice needs speech-dispatcher (spd-say) or espeak-ng, and neither is installed: install the speech-dispatcher package with its espeak-ng module, then restart Praetorium.".into(),
         )),
         VoiceStatus::Failed(engine, why) => Some((
             pal::BAD,
@@ -399,7 +403,7 @@ fn program_name(engine: &str) -> &str {
     std::path::Path::new(engine).file_name().and_then(|n| n.to_str()).unwrap_or(engine)
 }
 
-/// The journal folder setting with, on Linux and macOS, where Elite Nexus looks by itself. Also shown under a journal
+/// The journal folder setting with, on Linux and macOS, where Praetorium looks by itself. Also shown under a journal
 /// problem on every page, so the folder can be set before any commander is loaded.
 pub fn journal_setup(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
     if crate::launch::isolated() {
@@ -411,9 +415,9 @@ pub fn journal_setup(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
     journal_folder(ui, cx);
     if cfg!(not(windows)) {
         let hint = if cfg!(target_os = "macos") {
-            "macOS: Elite Nexus looks in the game's prefix in every Steam library, where NotProton (Steam Play for macOS) keeps it (~/Library/Application Support/Steam/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous), then in CrossOver's bottles, ~/.wine and Whisky's bottles. For any other Wine prefix, enter its folder here: Bindings and HUD colours then use the Options folder in that same prefix."
+            "macOS: Praetorium looks in the game's prefix in every Steam library, where NotProton (Steam Play for macOS) keeps it (~/Library/Application Support/Steam/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous), then in CrossOver's bottles, ~/.wine and Whisky's bottles. For any other Wine prefix, enter its folder here: Bindings and HUD colours then use the Options folder in that same prefix."
         } else {
-            "Linux: Elite Nexus looks in the game's Proton prefix in every Steam library (steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous), then in Lutris's and Heroic's usual folders. For any other Wine prefix, enter its folder here: Bindings and HUD colours then use the Options folder in that same prefix."
+            "Linux: Praetorium looks in the game's Proton prefix in every Steam library (steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous), then in Lutris's and Heroic's usual folders. For any other Wine prefix, enter its folder here: Bindings and HUD colours then use the Options folder in that same prefix."
         };
         ui.add(egui::Label::new(RichText::new(hint).size(size::FOOTNOTE).color(pal::DIM)).wrap());
     }
@@ -445,7 +449,7 @@ fn journal_folder(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
             None => {
                 cx.restart_core = true;
                 st.journal_check = None;
-                st.journal_msg = Some((pal::GOOD, "Back to the folder Elite Nexus finds by itself.".into()));
+                st.journal_msg = Some((pal::GOOD, "Back to the folder Praetorium finds by itself.".into()));
             }
             Some(dir) => st.journal_check = Some(Job::spawn(ui.ctx(), move || (dir.clone(), nexus_journal::paths::check_journal_folder(&dir)))),
         }
@@ -467,10 +471,10 @@ fn journal_folder(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
                         (pal::GOOD, msg)
                     }
                 }
-                JournalFolderCheck::Empty => (pal::WARN, format!("No journal files (Journal.….log) in this folder, so Elite Nexus keeps reading {reading} for now. The folder is saved: Reload journals, or the next start, switches to it.")),
+                JournalFolderCheck::Empty => (pal::WARN, format!("No journal files (Journal.….log) in this folder, so Praetorium keeps reading {reading} for now. The folder is saved: Reload journals, or the next start, switches to it.")),
                 JournalFolderCheck::Unreadable(e) => (
                     pal::BAD,
-                    format!("Elite Nexus can't open this folder ({e}), so it keeps reading {reading} for now. The folder is saved: Reload journals, or the next start, tries it again. A folder on another computer needs that computer on and the folder shared."),
+                    format!("Praetorium can't open this folder ({e}), so it keeps reading {reading} for now. The folder is saved: Reload journals, or the next start, tries it again. A folder on another computer needs that computer on and the folder shared."),
                 ),
             });
         }
@@ -527,7 +531,7 @@ fn game_folder(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
             (Some(f), Some(_)) => (pal::GOOD, format!("Found the game: {f}.")),
             (Some(f), None) => (pal::GOOD, format!("Back to the folder found automatically: {f}.")),
             (None, Some(_)) => (pal::WARN, "No EliteDangerous64.exe in that folder or under it, so HUD & cockpit and Bindings have no game folder.".into()),
-            (None, None) => (pal::WARN, "Elite Nexus doesn't find the game by itself on this computer: choose its folder here.".into()),
+            (None, None) => (pal::WARN, "Praetorium doesn't find the game by itself on this computer: choose its folder here.".into()),
         });
         st.game_found = Some((cx.settings.game_dir.clone(), found));
     }
@@ -548,7 +552,7 @@ fn screenshots(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
         changed |= g.switch(
             &mut p.convert,
             "Save screenshots as PNG",
-            "The game saves each screenshot (F10, or Alt+F10 at high resolution) as an uncompressed BMP of several megabytes. Elite Nexus saves each new one again as a PNG, every pixel kept, named after the system, the nearest body and the time.",
+            "The game saves each screenshot (F10, or Alt+F10 at high resolution) as an uncompressed BMP of several megabytes. Praetorium saves each new one again as a PNG, every pixel kept, named after the system, the nearest body and the time.",
         );
         if p.convert {
             let bin = if cfg!(windows) { "the Recycle Bin" } else { "the Trash" };
@@ -605,10 +609,10 @@ fn screenshots(ui: &mut Ui, cx: &mut SettingsCtx<'_>) {
         }
     });
     cx.changed |= changed;
-    footnote(ui, "Only screenshots taken while Elite Nexus is running are saved as PNG; the ones already in the folder stay as they are. A PNG is named like Sol (Earth) 2026-11-04 14-32-05.png.");
+    footnote(ui, "Only screenshots taken while Praetorium is running are saved as PNG; the ones already in the folder stay as they are. A PNG is named like Sol (Earth) 2026-11-04 14-32-05.png.");
 }
 
-/// Linux: Elite Nexus in the desktop's app menu (desktop_entry.rs), written only on a click here.
+/// Linux: Praetorium in the desktop's app menu (desktop_entry.rs), written only on a click here.
 #[cfg(target_os = "linux")]
 fn app_menu(g: &mut widgets::Group) {
     use crate::desktop_entry::{self, State};
@@ -624,8 +628,8 @@ fn app_menu(g: &mut widgets::Group) {
         }
     };
     let (detail, action) = match &state {
-        State::Missing => (format!("Adds Elite Nexus and its icon to your desktop's app menu ({}).", desktop_entry::entry_path(&home).display()), Some("Add")),
-        State::Current => ("Elite Nexus is in your desktop's app menu, with its icon.".to_string(), None),
+        State::Missing => (format!("Adds Praetorium and its icon to your desktop's app menu ({}).", desktop_entry::entry_path(&home).display()), Some("Add")),
+        State::Current => ("Praetorium is in your desktop's app menu, with its icon.".to_string(), None),
         State::Elsewhere(p) => (format!("Your app menu starts {p}, not this copy."), Some("Point it here")),
     };
     // Some(true): add or update; Some(false): remove.

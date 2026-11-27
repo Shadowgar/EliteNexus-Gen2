@@ -269,7 +269,7 @@ impl Overlay {
     pub fn new(see_through: bool, allowed: bool, demo: Option<(IslandView, IslandView)>) -> Self {
         let see_through = see_through && NoSeeThrough::found().is_none();
         Overlay {
-            id: ViewportId::from_hash_of("elite-nexus-gen2-overlay"),
+            id: ViewportId::from_hash_of("praetorium-overlay"),
             shared: Default::default(),
             rhythm: Rhythm::default(),
             inputs: Inputs::default(),

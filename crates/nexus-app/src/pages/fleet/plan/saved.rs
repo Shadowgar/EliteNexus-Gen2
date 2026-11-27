@@ -1,4 +1,4 @@
-//! Saved builds: plans kept on this computer (`builds.json` in Elite Nexus's data folder) to open again, rename,
+//! Saved builds: plans kept on this computer (`builds.json` in Praetorium's data folder) to open again, rename,
 //! delete or compare with. Each is the build in the game's own Loadout format, with the engineering planned for it.
 
 use nexus_data::fitting::{Goal, Plan};

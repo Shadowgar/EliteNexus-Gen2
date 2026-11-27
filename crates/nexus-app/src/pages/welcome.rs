@@ -1,4 +1,4 @@
-//! First-run welcome: what Elite Nexus found, and the few choices that matter. A centred sheet, as
+//! First-run welcome: what Praetorium found, and the few choices that matter. A centred sheet, as
 //! a Mac app shows on first launch.
 
 use crate::settings::Settings;
@@ -24,7 +24,7 @@ pub fn show(ctx: &egui::Context, settings: &mut Settings, gs: Option<&GameState>
             ui.painter().rect_filled(rect, CornerRadius::same(18), pal::ACCENT);
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon::DIAMOND, egui::FontId::proportional(42.0), pal::ON_ACCENT);
             ui.add_space(12.0);
-            ui.label(RichText::new("Welcome to Elite Nexus").font(bold(size::TITLE)).color(pal::TEXT));
+            ui.label(RichText::new("Welcome to Praetorium").font(bold(size::TITLE)).color(pal::TEXT));
             ui.add_space(4.0);
             let line = match gs {
                 Some(gs) => format!(
@@ -36,7 +36,7 @@ pub fn show(ctx: &egui::Context, settings: &mut Settings, gs: Option<&GameState>
                     gs.fleet.ships.len(),
                     if gs.carrier.owned() { format!(" and your carrier {}", gs.carrier.name) } else { String::new() }
                 ),
-                None => "No commander found in the journal folder yet. Start the game and Elite Nexus picks everything up live.".to_string(),
+                None => "No commander found in the journal folder yet. Start the game and Praetorium picks everything up live.".to_string(),
             };
             ui.add(egui::Label::new(RichText::new(line).size(size::CALLOUT).color(pal::DIM)).wrap().halign(egui::Align::Center));
         });

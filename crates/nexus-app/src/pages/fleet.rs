@@ -200,7 +200,7 @@ impl BuyUi {
                 self.mode = Mode::Build;
             }
             None => {
-                self.error = Some("No loadout recorded for this ship yet: fly it once and Elite Nexus captures the build.".into());
+                self.error = Some("No loadout recorded for this ship yet: fly it once and Praetorium captures the build.".into());
                 self.mode = Mode::Build;
             }
         }
@@ -541,7 +541,7 @@ fn ship_detail(ui: &mut Ui, _gs: &GameState, s: &Ship) -> bool {
     ui.add_space(8.0);
     if s.modules.is_empty() {
         card(ui, "Modules", |ui| {
-            ui.label(RichText::new("No loadout recorded for this ship yet — fly it once and Elite Nexus captures the full build.").color(pal::DIM));
+            ui.label(RichText::new("No loadout recorded for this ship yet — fly it once and Praetorium captures the full build.").color(pal::DIM));
         });
         return plan;
     }
@@ -863,7 +863,7 @@ fn ship_label(s: &Ship) -> String {
 }
 
 /// Why a ship has no build to start from.
-const WHEN_BUILDS_ARE_RECORDED: &str = "The game writes a ship's modules to its journal only while you fly it (when you board it, log in in it or change its outfitting), and the journals Elite Nexus has read have none for ships you haven't flown since they begin. Fly a ship once and its build appears.";
+const WHEN_BUILDS_ARE_RECORDED: &str = "The game writes a ship's modules to its journal only while you fly it (when you board it, log in in it or change its outfitting), and the journals Praetorium has read have none for ships you haven't flown since they begin. Fly a ship once and its build appears.";
 
 /// Where to search, the search button and what it found.
 fn search_card(ui: &mut Ui, gs: &GameState, st: &mut BuyUi, spansh: &Spansh, rt: &tokio::runtime::Handle, search_now: bool) -> Option<FleetAction> {
@@ -912,7 +912,7 @@ fn search_card(ui: &mut Ui, gs: &GameState, st: &mut BuyUi, spansh: &Spansh, rt:
 fn one_card(ui: &mut Ui, gs: &GameState, st: &mut BuyUi, spansh: &Spansh, rt: &tokio::runtime::Handle, search_now: bool) -> Option<FleetAction> {
     let mut action = None;
     card(ui, "Find a ship or module", |ui| {
-        ui.add(Label::new(RichText::new("Type what you want to buy and pick it from the list: Elite Nexus finds the nearest stations that sell it, starports, outposts, settlements and fleet carriers.").color(pal::DIM)).wrap());
+        ui.add(Label::new(RichText::new("Type what you want to buy and pick it from the list: Praetorium finds the nearest stations that sell it, starports, outposts, settlements and fleet carriers.").color(pal::DIM)).wrap());
         ui.add_space(8.0);
         let width = ui.available_width().min(560.0);
         let done = widgets::autocomplete(ui, "buy-one", &mut st.item_text, "A ship or module: Anaconda, 6A FSD, gimballed multi-cannon…", width, |typed| {
@@ -1010,8 +1010,8 @@ fn search_settings(ui: &mut Ui, gs: &GameState, st: &mut BuyUi, hull: &str, who:
         // A hull newer than this build's ship list is searched with any pad (Search::new), and says so.
         match nexus_data::ships::known_pad_size(hull) {
             Some(pad) => badge(ui, &format!("{pad} pad"), pal::GRAY).on_hover_text(format!("{who} lands on {} pads: stations without one are left out.", pad_word(pad))),
-            None if hull.is_empty() => badge(ui, "Any pad", pal::GRAY).on_hover_text("Elite Nexus doesn't know which ship you fly yet, so stations with any pad are listed: check a station's pads before you fly there."),
-            None => badge(ui, "Pad unknown", pal::WARN).on_hover_text(format!("This version of Elite Nexus doesn't know which landing pad the {} needs (a ship newer than it), so stations with any pad are listed: check a station's pads before you fly there.", nexus_data::ships::ship_name(hull))),
+            None if hull.is_empty() => badge(ui, "Any pad", pal::GRAY).on_hover_text("Praetorium doesn't know which ship you fly yet, so stations with any pad are listed: check a station's pads before you fly there."),
+            None => badge(ui, "Pad unknown", pal::WARN).on_hover_text(format!("This version of Praetorium doesn't know which landing pad the {} needs (a ship newer than it), so stations with any pad are listed: check a station's pads before you fly there.", nexus_data::ships::ship_name(hull))),
         };
         changed |= widgets::toggle(ui, &mut st.carriers, "Fleet carriers").on_hover_text("Carriers sell what their owner stocks, and they move. Those that let only the owner's friends or squadron dock are left out.").changed();
         ui.label(RichText::new("Outfitting data no older than").color(pal::DIM));

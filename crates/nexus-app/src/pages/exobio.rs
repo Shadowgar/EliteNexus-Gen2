@@ -544,7 +544,7 @@ fn show_page(ui: &mut Ui, gs: &GameState, confirm_clear: &mut bool) -> Option<Ti
 }
 
 /// What Clear list does, and doesn't (its tooltip, and the text under its question).
-const CLEAR_TIP: &str = "This changes only this list in Elite Nexus, nothing in the game or its journals, and it stays cleared when Elite Nexus starts again. Clear it when Vista Genomics has nothing left to sell. \"Sold so far\" can't include sales the game didn't list.";
+const CLEAR_TIP: &str = "This changes only this list in Praetorium, nothing in the game or its journals, and it stays cleared when Praetorium starts again. Clear it when Vista Genomics has nothing left to sell. \"Sold so far\" can't include sales the game didn't list.";
 
 /// What the unsold list says when the game logged sales without their samples (`sales`, oldest first, at least one),
 /// after the oldest sample listed was analysed.
@@ -556,7 +556,7 @@ fn unlisted_note(sales: &[Timestamp]) -> String {
         1 => format!("a sale {when} without listing its samples"),
         n => format!("{n} sales {when} without listing their samples"),
     };
-    format!("The game logged {logged}, so Elite Nexus can't tell which of these were sold, or for how much. If Vista Genomics has nothing left to sell, use Clear list.")
+    format!("The game logged {logged}, so Praetorium can't tell which of these were sold, or for how much. If Vista Genomics has nothing left to sell, use Clear list.")
 }
 
 /// How tall the unsold list grows before it scrolls: about eight samples, newest first.
@@ -664,7 +664,7 @@ pub fn sampling(ui: &mut Ui, cur: &SampleInProgress, pos: Option<(f64, f64)>, ra
         return;
     };
     if cur.points.is_empty() {
-        ui.add(egui::Label::new(RichText::new("Sample positions are only recorded while Elite Nexus is running.").size(size::FOOTNOTE).color(pal::DIM)).wrap());
+        ui.add(egui::Label::new(RichText::new("Sample positions are only recorded while Praetorium is running.").size(size::FOOTNOTE).color(pal::DIM)).wrap());
         return;
     }
     let nearest = cur.nearest_sample_m(p, rad).unwrap_or(0.0);
@@ -861,7 +861,7 @@ mod tests {
         let (a, b) = (Timestamp(1_794_484_800), Timestamp(1_794_657_600));
         assert_eq!(
             unlisted_note(&[a]),
-            format!("The game logged a sale on {} without listing its samples, so Elite Nexus can't tell which of these were sold, or for how much. If Vista Genomics has nothing left to sell, use Clear list.", day(a))
+            format!("The game logged a sale on {} without listing its samples, so Praetorium can't tell which of these were sold, or for how much. If Vista Genomics has nothing left to sell, use Clear list.", day(a))
         );
         assert!(unlisted_note(&[a, Timestamp(a.0 + 6), Timestamp(a.0 + 12)]).starts_with(&format!("The game logged 3 sales on {} without listing their samples,", day(a))));
         assert!(unlisted_note(&[a, b]).starts_with(&format!("The game logged 2 sales between {} and {} without", day(a), day(b))));

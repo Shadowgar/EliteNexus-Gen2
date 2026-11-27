@@ -96,7 +96,7 @@ fn setup(ui: &mut Ui, st: &mut AskUi, ai: &mut AiSettings) -> AskAction {
     ScrollArea::vertical().id_salt("ask-setup").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(36.0);
         centered(ui, 520.0, |ui| {
-            hero(ui, "Ask Elite Nexus", "Ask about your current commander and available galaxy data. Questions go to the model service you choose.");
+            hero(ui, "Ask Praetorium", "Ask about your current commander and available galaxy data. Questions go to the model service you choose.");
             ui.add_space(22.0);
             widgets::card_frame().show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -391,7 +391,7 @@ fn lower_first(s: &str) -> String {
 fn capabilities(ui: &mut Ui, caller: crate::ai_tools::Caller) -> bool {
     use crate::ai_tools::{Caller, TOOLS, Tool};
     let groups: [(&str, Pick, &str); 2] = [
-        ("Reads your game and Elite Nexus' own database", |t| t.read_only && !t.online, "Searches cover available local observations."),
+        ("Reads your game and Praetorium's own database", |t| t.read_only && !t.online, "Searches cover available local observations."),
         ("Asks Spansh and EDGalaxyData", |t| t.read_only && t.online, ""),
     ];
     let mut closed = false;

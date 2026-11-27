@@ -118,11 +118,11 @@ impl Card {
                     ui.painter().rect_filled(rect, CornerRadius::same(16), SPONSOR_PINK);
                     ui.painter().text(rect.center(), Align2::CENTER_CENTER, egui_phosphor::fill::HEART, icon_fill(32.0), Color32::WHITE);
                     ui.add_space(14.0);
-                    ui.label(RichText::new("Elite Nexus is free, and stays free").font(bold(size::TITLE3)).color(pal::TEXT));
+                    ui.label(RichText::new("Support the original Elite Nexus").font(bold(size::TITLE3)).color(pal::TEXT));
                     ui.add_space(8.0);
                     for line in [
-                        "I never started it to earn money, and nothing in it depends on this: no ads, no subscription. But it takes more of my time every week, much of it on things I don't need myself, and your support is what keeps me motivated.",
-                        "It also buys what I can't test yet: I don't own a Nomad, an Anaconda Mk II or a Rhino, so working on those parts is really miserable for me right now.",
+                        "Praetorium builds on the work of CMDR Alka Uruskan and the Elite Nexus contributors.",
+                        "These links support the original developer and the continued development of Elite Nexus.",
                     ] {
                         ui.add(egui::Label::new(RichText::new(line).size(size::CALLOUT).color(pal::DIM)).wrap().halign(Align::Center));
                         ui.add_space(6.0);
@@ -141,7 +141,7 @@ impl Card {
                     let note = (ui.available_width() - 190.0).max(120.0);
                     ui.allocate_ui(Vec2::new(note, 30.0), |ui| {
                         ui.add(
-                            egui::Label::new(RichText::new("Shown at every start. A later version will skip it for supporters and everyone who bought a coffee.").size(size::FOOTNOTE).color(pal::FAINT))
+                            egui::Label::new(RichText::new("Acknowledging the project that made Praetorium possible.").size(size::FOOTNOTE).color(pal::FAINT))
                                 .wrap(),
                         );
                     });
@@ -160,7 +160,7 @@ impl Card {
 }
 
 /// The README, whose Thanks section names the supporters (the release notes thank the same people).
-const README: &str = include_str!("../../../README.md");
+const README: &str = include_str!("../../../docs/UPSTREAM-ACKNOWLEDGMENTS.md");
 
 static THANKS: std::sync::LazyLock<Thanks> = std::sync::LazyLock::new(|| thanks(README));
 

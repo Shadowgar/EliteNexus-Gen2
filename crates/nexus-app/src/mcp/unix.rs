@@ -10,7 +10,7 @@ pub fn euid() -> u32 {
     unsafe { libc::geteuid() }
 }
 
-/// The folder for the socket: /run/user/<uid>, which the system makes for each logged-in user, or else ~/.elite-nexus-gen2,
+/// The folder for the socket: /run/user/<uid>, which the system makes for each logged-in user, or else ~/.praetorium,
 /// readable by the user only. Not $XDG_RUNTIME_DIR or $TMPDIR: an MCP client may start `--mcp` with only HOME, LOGNAME,
 /// PATH, SHELL, TERM and USER, and the two ends would look in different places.
 pub fn socket_dir() -> Result<PathBuf, String> {
@@ -21,7 +21,7 @@ pub fn socket_dir() -> Result<PathBuf, String> {
         return Ok(run);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.is_absolute()).ok_or("HOME isn't set: there's no folder of the user's for the socket.")?;
-    let dir = home.join(".elite-nexus-gen2");
+    let dir = home.join(".praetorium");
     let fail = |e: std::io::Error| format!("{}: {e}", dir.display());
     std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).map_err(fail)?;
     let m = std::fs::metadata(&dir).map_err(fail)?;
