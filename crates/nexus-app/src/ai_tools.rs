@@ -2830,7 +2830,7 @@ mod tests {
         assert_eq!(routes["landing_pad"], "L", "the flown Anaconda's pad, whatever cargo_t says");
         assert_eq!((&routes["routes"][0]["buy_at"]["stock"], &routes["routes"][0]["sell_at"]["demand"]), (&json!(500), &json!(1_000)));
 
-        tools.model.write().unwrap().active_mut().unwrap().cmdr.credits = 0;
+        tools.model.write().active_mut().unwrap().cmdr.credits = 0;
         let routes = tools.call("trade_routes", &json!({ "cargo_t": 50 })).unwrap();
         assert_eq!(routes["capital_cr"], 0);
         assert_eq!(routes["routes"], json!([]));
