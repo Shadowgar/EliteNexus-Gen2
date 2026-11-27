@@ -401,6 +401,7 @@ impl WatchRequest {
         let station = &market.station;
         if station.system_id64 != update.system_id64 || station.pos != update.pos
             || station.system != update.system || station.name != update.station || station.is_carrier != update.is_carrier
+            || station.carrier_docking_access.as_deref().filter(|_| station.is_carrier) != update.carrier_access.as_deref()
         {
             return None;
         }
@@ -413,7 +414,9 @@ impl WatchRequest {
 
 /// Cheap checks that need no database lookup.
 fn rule_applies(w: &PriceWatch, u: &MarketUpdate, dist: Option<f64>) -> bool {
-    (w.carriers || !u.is_carrier) && (w.max_ly <= 0.0 || dist.is_some_and(|d| d <= w.max_ly))
+    (w.carriers || !u.is_carrier)
+        && nexus_galaxy::CarrierAccess::allows_public_docking(u.is_carrier, u.carrier_access.as_deref())
+        && (w.max_ly <= 0.0 || dist.is_some_and(|d| d <= w.max_ly))
 }
 
 fn pad_rank(p: char) -> u8 {
@@ -446,12 +449,13 @@ fn check_rule(w: &PriceWatch, u: &MarketUpdate, m: &StationMarket, dist: Option<
         None => format!("{} · {}", u.station, u.system),
     };
     let (verb, qty_word) = if w.sell { ("sells for", "demand") } else { ("can be bought for", "stock") };
-    let carrier = if u.is_carrier { " · fleet carrier" } else { "" };
+    let carrier = if u.is_carrier { " · fleet carrier, reported open" } else { "" };
+    let spoken_access = if u.is_carrier { ", carrier reported open" } else { "" };
     let spoken_dist = dist.map(|d| format!(", {d:.0} light years away")).unwrap_or_default();
     Some(
         Alert::new(Timestamp::now(), AlertKind::Trade, Priority::High, format!("{} {verb} {} Cr", row.name, digits(price)))
             .detail(format!("{where_} · {qty_word} {}{carrier}", digits(qty)))
-            .speak(format!("{} {verb} {} at {}{spoken_dist}.", row.name, spoken_credits(price), u.station)),
+            .speak(format!("{} {verb} {} at {}{spoken_access}{spoken_dist}.", row.name, spoken_credits(price), u.station)),
     )
 }
 

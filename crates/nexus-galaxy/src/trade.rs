@@ -71,6 +71,7 @@ pub(crate) fn trade_routes(
             _ => 0,
         },
         carriers: q.include_carriers,
+        open_carriers_only: true,
         planetary: q.include_planetary,
         max_dist_ls: q.max_dist_ls.filter(|d| d.is_finite()).unwrap_or(-1.0),
     };
@@ -272,6 +273,10 @@ pub(crate) fn trade_routes(
         let (Some(from), Some(to)) = (details.get(&c.from), details.get(&c.to)) else {
             continue;
         };
+        let public = |end: &TradeStation| crate::CarrierAccess::allows_public_docking(end.is_carrier, end.carrier_access.as_deref());
+        if (Some(from.market_id) != q.from_market && !public(from)) || !public(to) {
+            continue;
+        }
         let (sym, name) = match names.meta(c.cid) {
             Some(m) => (m.symbol.clone(), m.name.clone()),
             None => (format!("#{}", c.cid), format!("#{}", c.cid)),
@@ -306,6 +311,7 @@ fn trade_station(st: StationInfo, pos: [f64; 3], origin: [f64; 3]) -> TradeStati
         dist_ls: st.dist_ls,
         max_pad: st.max_pad,
         is_carrier: st.is_carrier,
+        carrier_access: crate::query::carrier_access(st.is_carrier, st.carrier_docking_access),
         is_planetary: st.is_planetary,
         market_updated_unix: st.market_updated_unix,
     }

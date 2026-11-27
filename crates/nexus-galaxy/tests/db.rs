@@ -381,8 +381,7 @@ fn commodity_search_filters_and_sorts() {
     assert!(db.search_commodity(&q).expect("q").is_empty());
 }
 
-/// A carrier's docking access, as its market reported it, reaches the list rows (in the journal's spelling, whatever
-/// the source wrote); stations, and carriers whose access was never reported, have none.
+/// List rows preserve the reported spelling of carrier access.
 #[test]
 fn carrier_access_reaches_the_lists() {
     let t = TempDb::new("access");
@@ -400,11 +399,69 @@ fn carrier_access_reaches_the_lists() {
     let q = CommodityQuery { commodity: "gold".into(), ..Default::default() };
     let hits = db.search_commodity(&q).expect("q");
     let access = |id: u64| hits.iter().find(|h| h.market_id == id).and_then(|h| h.carrier_access.clone());
-    assert_eq!(access(4).as_deref(), Some("squadronfriends"));
+    assert_eq!(access(4).as_deref(), Some("Squadron Friends"));
     assert_eq!(access(1), None, "a station has none");
     let latest = db.latest_prices(&q).expect("latest");
-    assert_eq!(latest.iter().find(|l| l.market_id == 4).and_then(|l| l.carrier_access.as_deref()), Some("squadronfriends"));
+    assert_eq!(latest.iter().find(|l| l.market_id == 4).and_then(|l| l.carrier_access.as_deref()), Some("Squadron Friends"));
     assert!(latest.iter().filter(|l| l.market_id != 4).all(|l| l.carrier_access.is_none()));
+}
+
+#[test]
+fn carrier_access_qualifies_quotes_routes_and_updates() {
+    use nexus_galaxy::CarrierAccess;
+    let t = TempDb::new("carrier-access-qualification");
+    let db = t.db();
+    let updates = db.subscribe_updates();
+    let ts = now() - 30;
+    db.ingest_many(vec![
+        system(SYS_A, "Alpha", [0.0; 3]),
+        system(SYS_B, "Beta", [10.0, 0.0, 0.0]),
+        market(1, "Beta", "Port", ts, &[("gold", 0, 20_000, 0, 100)]),
+    ]);
+    let cases = [
+        (10, "AAA-010", Some(" All "), "open"),
+        (11, "AAA-011", Some("Squadron Friends"), "restricted"),
+        (12, "AAA-012", None, "unknown"),
+        (13, "AAA-013", Some("Future Rule"), "unknown"),
+    ];
+    for (id, name, raw, _) in cases {
+        let Ingest::Market(mut m) = carrier_report(id, "Alpha", name, ts, &[("gold", 1_000, 0, 100, 0)]) else { unreachable!() };
+        m.carrier_docking_access = raw.map(str::to_owned);
+        m.source = Source::Journal;
+        db.ingest(Ingest::Market(m));
+    }
+    db.flush().unwrap();
+
+    let quotes = CommodityQuery { commodity: "gold".into(), ..Default::default() };
+    let hits = db.search_commodity(&quotes).unwrap();
+    let latest = db.latest_prices(&quotes).unwrap();
+    let updates: Vec<_> = updates.try_iter().collect();
+    for (id, _, raw, status) in cases {
+        let expected = raw.map(str::trim);
+        let hit = hits.iter().find(|h| h.market_id == id).unwrap();
+        let quote = latest.iter().find(|h| h.market_id == id).unwrap();
+        let update = updates.iter().find(|u| u.market_id == id).unwrap();
+        for access in [&hit.carrier_access, &quote.carrier_access, &update.carrier_access] {
+            assert_eq!(access.as_deref(), expected);
+            assert_eq!(CarrierAccess::classify(access.as_deref()).status(), status);
+        }
+    }
+    assert_eq!(CarrierAccess::classify(Some(" ")), CarrierAccess::Unknown);
+    assert_eq!(CarrierAccess::classify(Some("owner")).status(), "restricted");
+
+    let public = CommodityQuery { open_carriers_only: true, limit: 1, ..quotes };
+    let hits = db.search_commodity(&public).unwrap();
+    assert_eq!(hits.iter().map(|h| h.market_id).collect::<Vec<_>>(), [10]);
+
+    let routes = TradeQuery { include_carriers: true, ..Default::default() };
+    let found = db.trade_routes(&routes).unwrap();
+    assert_eq!(found.iter().map(|r| (r.from.market_id, r.to.market_id)).collect::<Vec<_>>(), [(10, 1)]);
+    assert_eq!(found[0].from.carrier_access.as_deref(), Some("All"));
+
+    // Actual docking qualifies the origin, while the reported restriction stays visible.
+    let docked = db.trade_routes(&TradeQuery { from_market: Some(11), ..routes }).unwrap();
+    assert_eq!(docked.len(), 1);
+    assert_eq!(docked[0].from.carrier_access.as_deref(), Some("Squadron Friends"));
 }
 
 #[test]

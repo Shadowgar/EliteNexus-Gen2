@@ -1230,6 +1230,7 @@ impl Ctx {
             commodities: n as usize,
             updated_unix: m.timestamp,
             is_carrier: row.is_carrier,
+            carrier_access: crate::query::carrier_access(row.is_carrier, row.carrier_access.clone()),
             source: m.source,
             revision: Arc::default(),
         }))

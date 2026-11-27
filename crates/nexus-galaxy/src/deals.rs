@@ -69,6 +69,7 @@ pub(crate) fn price_deals(pool: &ReadPool, shared: &Shared, q: &DealQuery) -> Re
             _ => 0,
         },
         carriers: q.include_carriers,
+        open_carriers_only: false,
         planetary: true,
         max_dist_ls: -1.0,
     };
@@ -215,6 +216,7 @@ fn abnormal_prices(pool: &ReadPool, shared: &Shared, q: &DealQuery) -> Result<Ve
             _ => 0,
         },
         carriers: q.include_carriers,
+        open_carriers_only: false,
         planetary: true,
         max_dist_ls: -1.0,
     };

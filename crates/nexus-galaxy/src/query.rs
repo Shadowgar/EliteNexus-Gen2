@@ -144,12 +144,9 @@ fn system_info(r: &Row) -> rusqlite::Result<SystemInfo> {
     })
 }
 
-/// A fleet carrier's docking access in the journal's spelling (`all`, `none`, `friends`, `squadron`,
-/// `squadronfriends`), however its source wrote it (Spansh: `Squadron Friends`); `None` for a station, or a carrier
-/// whose access was never reported.
+/// Keep the source's reported access value. Classification is separate from the original value.
 pub(crate) fn carrier_access(is_carrier: bool, raw: Option<String>) -> Option<String> {
-    let a = raw?.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
-    (is_carrier && !a.is_empty()).then_some(a)
+    raw.filter(|a| is_carrier && !a.trim().is_empty())
 }
 
 /// SQL bounding box parameters for a sphere.
@@ -245,6 +242,7 @@ pub(crate) fn search_commodity(
     let filter = StationFilter {
         min_pad: pad_code(q.min_pad) as u8,
         carriers: q.include_carriers,
+        open_carriers_only: q.open_carriers_only,
         planetary: q.include_planetary,
         max_dist_ls: -1.0,
     };
@@ -348,7 +346,9 @@ pub(crate) fn search_commodity(
                 })
             })
             .optional()?;
-        out.extend(hit);
+        out.extend(hit.filter(|h| {
+            !q.open_carriers_only || crate::CarrierAccess::allows_public_docking(h.is_carrier, h.carrier_access.as_deref())
+        }));
     }
     Ok(out)
 }
@@ -501,6 +501,7 @@ pub(crate) fn latest_prices(
     let filter = StationFilter {
         min_pad: pad_code(q.min_pad) as u8,
         carriers: q.include_carriers,
+        open_carriers_only: q.open_carriers_only,
         planetary: q.include_planetary,
         max_dist_ls: -1.0,
     };
@@ -746,6 +747,7 @@ pub(crate) fn stations_near(
     let filter = StationFilter {
         min_pad: pad_code(q.min_pad) as u8,
         carriers: q.include_carriers,
+        open_carriers_only: false,
         planetary: q.include_planetary,
         max_dist_ls: q.max_dist_ls.filter(|d| d.is_finite()).unwrap_or(-1.0),
     };

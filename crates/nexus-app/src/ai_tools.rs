@@ -195,6 +195,14 @@ fn trip_good(text: &str) -> (String, i64) {
     (words.join(" "), tonnes)
 }
 
+/// Carrier access as reported, with a separate qualification for Ask and MCP clients.
+fn docking_access(is_carrier: bool, raw: Option<&str>) -> Option<Value> {
+    is_carrier.then(|| json!({
+        "status": nexus_galaxy::CarrierAccess::classify(raw).status(),
+        "reported_value": raw,
+    }))
+}
+
 fn quote_age_hours(unix: i64) -> Option<f64> {
     (unix > 0).then(|| hours_ago(unix))
 }
@@ -346,6 +354,7 @@ impl NexusTools {
             max_age_hours: Some(arg_f64(a, "max_age_hours").unwrap_or(72.0)),
             min_quantity: arg_f64(a, "min_quantity").map(|v| v as i64).unwrap_or(1),
             include_carriers: arg_bool(a, "include_carriers").unwrap_or(true),
+            open_carriers_only: false,
             include_planetary: true,
             limit: arg_f64(a, "limit").map(|v| v as usize).unwrap_or(8).clamp(1, 25),
             sort: if arg_str(a, "sort").is_some_and(|s| s.eq_ignore_ascii_case("distance")) { Sort::Nearest } else { Sort::BestPrice },
@@ -355,7 +364,7 @@ impl NexusTools {
             "commodity": commodity, "near": near, "mode": if sell { "stations buying (you sell)" } else { "stations selling (you buy)" },
             "results": hits.iter().map(|h| json!({
                 "station": h.station, "system": h.system, "distance_ly": h.distance_ly.map(r1), "price": h.price,
-                "quantity": h.quantity, "pad": h.max_pad.map(String::from), "fleet_carrier": h.is_carrier,
+                "quantity": h.quantity, "pad": h.max_pad.map(String::from), "fleet_carrier": h.is_carrier, "docking_access": docking_access(h.is_carrier, h.carrier_access.as_deref()),
                 "arrival_distance_ls": h.dist_ls.map(|d| d.round()), "age_hours": quote_age_hours(h.updated_unix),
             })).collect::<Vec<_>>(),
         }))
@@ -424,7 +433,7 @@ impl NexusTools {
                 "commodity": d.commodity_name, "station": d.station, "system": d.system, "distance_ly": d.distance_ly.map(r1),
                 "price": d.price, "galactic_average": d.average, "percent_better": ((d.ratio - 1.0) * 100.0).round(),
                 "quantity": d.quantity, "credits_better_than_average_per_hold": d.extra_value, "credits_for_one_hold": d.trade_value,
-                "pad": d.max_pad.map(String::from), "fleet_carrier": d.is_carrier, "age_hours": quote_age_hours(d.updated_unix),
+                "pad": d.max_pad.map(String::from), "fleet_carrier": d.is_carrier, "docking_access": docking_access(d.is_carrier, d.carrier_access.as_deref()), "age_hours": quote_age_hours(d.updated_unix),
             })).collect::<Vec<_>>(),
         }))
     }
@@ -446,11 +455,11 @@ impl NexusTools {
             "best_single_stops": plan.stops.iter().take(5).map(|s| json!({
                 "station": s.hit.station, "system": s.hit.system, "distance_ly": s.hit.distance_ly.map(r1), "total_credits": s.total,
                 "buys": s.lines.iter().map(|(n, t, p)| json!({ "name": n, "tonnes": t, "price": p })).collect::<Vec<_>>(),
-                "fleet_carrier": s.hit.is_carrier, "age_hours": quote_age_hours(s.hit.updated_unix),
+                "fleet_carrier": s.hit.is_carrier, "docking_access": docking_access(s.hit.is_carrier, s.hit.carrier_access.as_deref()), "age_hours": quote_age_hours(s.hit.updated_unix),
             })).collect::<Vec<_>>(),
             "best_buyer_per_item": plan.per_item.iter().map(|(n, t, hits)| json!({
                 "name": n, "tonnes": t,
-                "best": hits.first().map(|h| json!({ "station": h.station, "system": h.system, "price": h.price, "demand": h.quantity, "distance_ly": h.distance_ly.map(r1) })),
+                "best": hits.first().map(|h| json!({ "station": h.station, "system": h.system, "price": h.price, "demand": h.quantity, "distance_ly": h.distance_ly.map(r1), "fleet_carrier": h.is_carrier, "docking_access": docking_access(h.is_carrier, h.carrier_access.as_deref()) })),
             })).collect::<Vec<_>>(),
         }))
     }
@@ -483,8 +492,8 @@ impl NexusTools {
             "near": near, "cargo_capacity_t": q.cargo_capacity, "capital_cr": q.capital, "landing_pad": me.pad.map(String::from),
             "routes": routes.iter().map(|r| json!({
                 "commodity": r.commodity_name, "profit_per_ton": r.profit_per_ton, "tonnes": r.units, "profit_per_trip": r.total_profit,
-                "buy_at": { "station": r.from.station, "system": r.from.system, "price": r.buy_price, "stock": r.supply, "distance_ly": r1(r.from.distance_from_origin_ly), "age_hours": quote_age_hours(r.from.market_updated_unix) },
-                "sell_at": { "station": r.to.station, "system": r.to.system, "price": r.sell_price, "demand": r.demand, "distance_ly": r1(r.to.distance_from_origin_ly), "age_hours": quote_age_hours(r.to.market_updated_unix) },
+                "buy_at": { "station": r.from.station, "system": r.from.system, "fleet_carrier": r.from.is_carrier, "docking_access": docking_access(r.from.is_carrier, r.from.carrier_access.as_deref()), "price": r.buy_price, "stock": r.supply, "distance_ly": r1(r.from.distance_from_origin_ly), "age_hours": quote_age_hours(r.from.market_updated_unix) },
+                "sell_at": { "station": r.to.station, "system": r.to.system, "fleet_carrier": r.to.is_carrier, "docking_access": docking_access(r.to.is_carrier, r.to.carrier_access.as_deref()), "price": r.sell_price, "demand": r.demand, "distance_ly": r1(r.to.distance_from_origin_ly), "age_hours": quote_age_hours(r.to.market_updated_unix) },
                 "hop_ly": r1(r.hop_ly),
             })).collect::<Vec<_>>(),
         }))
@@ -521,7 +530,7 @@ impl NexusTools {
             "near": near, "total_ly": r1(trip.total_ly),
             "stops": trip.stops.iter().map(|s| json!({
                 "station": s.hit.station, "system": s.hit.system, "ly_from_previous": r1(s.leg_ly), "pad": s.hit.max_pad.map(String::from),
-                "fleet_carrier": s.hit.is_carrier, "arrival_distance_ls": s.hit.dist_ls.map(f64::round), "age_hours": quote_age_hours(s.hit.updated_unix),
+                "fleet_carrier": s.hit.is_carrier, "docking_access": docking_access(s.hit.is_carrier, s.hit.carrier_access.as_deref()), "arrival_distance_ls": s.hit.dist_ls.map(f64::round), "age_hours": quote_age_hours(s.hit.updated_unix),
                 "buy": s.buys.iter().map(|b| json!({ "name": b.name, "tonnes": b.tonnes, "price": b.price, "stock": b.stock })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "left_out": trip.missing.iter().map(|m| json!({ "name": m.name, "why": m.why })).collect::<Vec<_>>(),
@@ -609,7 +618,7 @@ impl NexusTools {
         Ok(json!({
             "commodity": commodity, "near": near,
             "hotspots": spots.iter().map(|h| json!({ "ring": h.body_name, "system": h.system, "hotspots": h.count, "distance_ly": r1(h.distance_ly), "ring_type": h.ring_type })).collect::<Vec<_>>(),
-            "best_sell_prices": sells.iter().map(|h| json!({ "station": h.station, "system": h.system, "price": h.price, "demand": h.quantity, "distance_ly": h.distance_ly.map(r1), "age_hours": quote_age_hours(h.updated_unix) })).collect::<Vec<_>>(),
+            "best_sell_prices": sells.iter().map(|h| json!({ "station": h.station, "system": h.system, "price": h.price, "demand": h.quantity, "distance_ly": h.distance_ly.map(r1), "fleet_carrier": h.is_carrier, "docking_access": docking_access(h.is_carrier, h.carrier_access.as_deref()), "age_hours": quote_age_hours(h.updated_unix) })).collect::<Vec<_>>(),
             "note": if spots.is_empty() { "No hotspots known nearby yet: they come from ring scans shared over EDDN and the Spansh import." } else { "" },
         }))
     }
@@ -662,7 +671,7 @@ impl NexusTools {
             "power": s.controlling_power, "powerplay_state": s.powerplay_state,
             "stations": stations.iter().take(25).map(|st| json!({
                 "name": st.name, "type": st.station_type, "pad": st.max_pad.map(String::from), "arrival_distance_ls": st.dist_ls.map(|d| d.round()),
-                "economy": st.economy, "faction": st.faction, "fleet_carrier": st.is_carrier,
+                "economy": st.economy, "faction": st.faction, "fleet_carrier": st.is_carrier, "docking_access": docking_access(st.is_carrier, st.carrier_docking_access.as_deref()),
             })).collect::<Vec<_>>(),
             "factions": factions.iter().map(|f| json!({ "name": f.name, "influence": f.influence.map(|i| (i * 1000.0).round() / 10.0), "state": f.state })).collect::<Vec<_>>(),
         }))
@@ -2033,7 +2042,7 @@ pub static TOOLS: &[Tool] = &[
     Tool {
         name: "find_commodity",
         title: "Where to buy or sell a commodity",
-        description: "Where to buy or sell one commodity near a system, from the live market database (EDDN, refreshed in real time). Results respect the ship's landing pad size.",
+        description: "Where to buy or sell one commodity near a system, from the live market database (EDDN, refreshed in real time). Results respect the ship's landing pad size. Only reported open carrier access is public.",
         params: || {
             schema(
                 json!({
@@ -2060,7 +2069,7 @@ pub static TOOLS: &[Tool] = &[
     Tool {
         name: "price_deals",
         title: "Price deals near you",
-        description: "Best deals and abnormal prices right now: stations and fleet carriers paying far above the galactic average for any commodity (mode sell) or selling far below it (mode buy), ranked by what one full hold of the commander's ship earns. The fastest way to find unusually profitable trades. For abnormal prices anywhere (most are fleet-carrier orders, e.g. a carrier paying 100× the normal price), use max_distance_ly 0 and min_ratio 2 or more.",
+        description: "Best deals and abnormal prices right now: stations and fleet carriers paying far above the galactic average for any commodity (mode sell) or selling far below it (mode buy), ranked by what one full hold of the commander's ship earns. Only reported open carrier access is public. For abnormal prices anywhere (most are fleet-carrier orders, e.g. a carrier paying 100× the normal price), use max_distance_ly 0 and min_ratio 2 or more.",
         params: || {
             schema(
                 json!({

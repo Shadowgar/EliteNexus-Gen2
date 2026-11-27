@@ -1284,7 +1284,7 @@ pub fn show(ui: &mut Ui, gs: &GameState, svc: &mut MarketService, st: &mut Marke
                         p.pad_auto = false;
                     }
                 });
-                bar.field("Include", "Fleet carriers' markets: their owners set the prices and who may dock, and they move.", |ui| {
+                bar.field("Include", "Routes include only carriers last reported open, except the market where you are already docked.", |ui| {
                     crate::widgets::chip_toggle(ui, &mut p.carriers, "Fleet carriers");
                 });
                 let cargo_tip = match (ship_cargo, flown) {
@@ -1563,6 +1563,7 @@ fn commodity_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) 
         max_age_hours: Some(p.max_age_h),
         min_quantity: p.min_qty,
         include_carriers: p.carriers,
+        open_carriers_only: false,
         include_planetary: p.planetary,
         limit: PAGE_LIMIT,
         sort: p.sort,
@@ -1898,7 +1899,12 @@ fn empty_side(ui: &mut Ui, page: &CommodityPage, side: Side, p: &MarketPrefs, ha
             let r = Relax::for_hit(h, p, have_origin);
             let qty = if h.quantity > 0 { format!(", {} {}", nexus_data::names::group_digits(h.quantity), if side == Side::Sell { "wanted" } else { "in stock" }) } else { String::new() };
             let dist = h.distance_ly.map(|d| format!(", {d:.0} ly away")).unwrap_or_default();
-            let kind = if h.is_carrier { " (fleet carrier)" } else { "" };
+            let kind = if h.is_carrier {
+                let status = nexus_galaxy::CarrierAccess::classify(h.carrier_access.as_deref()).status();
+                format!(" (carrier access {status})")
+            } else {
+                String::new()
+            };
             ui.add(
                 egui::Label::new(
                     RichText::new(format!("The nearest market that {verb} it: {}{kind} in {}{dist}, {}{qty}, {}.", h.station, h.system, cr(h.price), reported_age(h.updated_unix).0))
@@ -2196,43 +2202,36 @@ enum PickAction {
     Pin(Pin),
 }
 
-/// "all" / "squadronfriends" / ... as words (Spansh writes "Squadron Friends").
-fn carrier_access(a: &str) -> &str {
-    match access_key(a).as_str() {
-        "all" => "everyone",
-        "none" => "nobody but the owner",
-        "friends" => "friends only",
-        "squadron" => "squadron only",
-        "squadronfriends" => "squadron and friends",
-        _ => a,
-    }
+fn docking_description(access: Option<&str>) -> String {
+    use nexus_galaxy::CarrierAccess;
+    let description = match CarrierAccess::classify(access) {
+        CarrierAccess::Open => "open to everyone",
+        CarrierAccess::OwnerOnly => "restricted to the owner",
+        CarrierAccess::Friends => "restricted to friends",
+        CarrierAccess::Squadron => "restricted to the squadron",
+        CarrierAccess::SquadronFriends => "restricted to squadron and friends",
+        CarrierAccess::Unknown => return match access.filter(|a| !a.trim().is_empty()) {
+            Some(raw) => format!("Docking access unknown (unrecognized report: {raw})."),
+            None => "Docking access unknown (no report).".into(),
+        },
+    };
+    format!("Docking {description}, as last reported. Access can change.")
 }
 
-/// A docking access value in the journal's spelling: lower case, no spaces.
-fn access_key(a: &str) -> String {
-    a.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase()
-}
-
-/// A fleet carrier's docking access as a small badge: open, friends, squadron, owner only, or "?" when it was never
-/// reported. The tooltip has it in words, and says it's as last reported.
 pub(crate) fn access_badge(ui: &mut Ui, access: Option<&str>) -> egui::Response {
     let (text, col) = access_badge_text(access);
-    let tip = match access {
-        Some(a) => format!("Docking: {}, as last reported with its market. Its owner can change that at any time, so it may differ when you get there.", carrier_access(a)),
-        None => "Who may dock was never reported for this carrier: older reports of its market don't include it.".to_string(),
-    };
-    badge(ui, text, col).on_hover_text(tip)
+    badge(ui, text, col).on_hover_text(docking_description(access))
 }
 
-/// The badge's word and colour for a docking access (see [`access_badge`]).
 fn access_badge_text(access: Option<&str>) -> (&'static str, Color32) {
-    match access.map(access_key).as_deref() {
-        Some("all") => ("open", pal::GOOD),
-        Some("none") => ("owner only", pal::BAD),
-        Some("friends") => ("friends", pal::WARN),
-        Some("squadron") => ("squadron", pal::WARN),
-        Some("squadronfriends") => ("squadron, friends", pal::WARN),
-        Some(_) | None => ("?", pal::GRAY),
+    use nexus_galaxy::CarrierAccess;
+    match CarrierAccess::classify(access) {
+        CarrierAccess::Open => ("open", pal::GOOD),
+        CarrierAccess::OwnerOnly => ("owner only", pal::BAD),
+        CarrierAccess::Friends => ("friends", pal::WARN),
+        CarrierAccess::Squadron => ("squadron", pal::WARN),
+        CarrierAccess::SquadronFriends => ("squadron, friends", pal::WARN),
+        CarrierAccess::Unknown => ("unknown access", pal::GRAY),
     }
 }
 
@@ -2321,8 +2320,8 @@ fn pick_card(ui: &mut Ui, d: &PickDetail, (symbol, name): (&str, &str), origin: 
                     }
                     ui.add(egui::Label::new(RichText::new(facts.join(" · ")).color(pal::DIM)).wrap());
                     if st.is_carrier {
-                        let who = st.carrier_docking_access.as_deref().map(carrier_access).unwrap_or("unknown");
-                        ui.add(egui::Label::new(RichText::new(format!("Fleet carrier: its owner sets these prices. Docking: {who}.")).size(size::FOOTNOTE).color(pal::DIM)).wrap());
+                        let who = docking_description(st.carrier_docking_access.as_deref());
+                        ui.add(egui::Label::new(RichText::new(format!("Fleet carrier prices are set by the owner. {who}")).size(size::FOOTNOTE).color(pal::DIM)).wrap());
                     }
                     ui.add_space(6.0);
                     // A carrier's order: how long it has stood at this price, as far as the price history tells.
@@ -2464,7 +2463,7 @@ fn abnormal_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -
                 p.pad_auto = false;
             }
         });
-        bar.field("Include", "Fleet carriers' orders: their owners set the prices, and they move.", |ui| {
+        bar.field("Include", "Fleet carriers' orders: their owners set the prices and control docking access.", |ui| {
             crate::widgets::chip_toggle(ui, &mut p.abn_carriers, "Fleet carriers");
         });
         bar.field("", "", |ui| refresh = crate::widgets::icon_button(ui, icon::ARROW_CLOCKWISE, "Scan again with the latest prices").clicked());
@@ -2940,6 +2939,9 @@ fn plan_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi) -> Op
                     if nav_label(ui, RichText::new(name).font(display(size::HEADLINE)).color(pal::TEXT), "Click for the station's whole market") {
                         nav = Some(Nav::Station(s.place.market_id));
                     }
+                    if s.place.is_carrier {
+                        access_badge(ui, s.place.carrier_access.as_deref());
+                    }
                     if ui.link(&s.place.system).on_hover_text("Click to copy the system").clicked() {
                         ui.ctx().copy_text(s.place.system.clone());
                     }
@@ -3094,7 +3096,7 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
         bar.field("Prices no older than", "Leaves out sellers whose prices were reported longer ago than this, up to 30 days.", |ui| {
             crate::widgets::number(ui, &mut p.max_age_h, 1.0..=720.0, Steps::Through(HOURS), 0, " h");
         });
-        bar.field("Include", "Fleet carriers' markets (their owners set the prices and who may dock, and they move) and ports on planets' surfaces.", |ui| {
+        bar.field("Include", "Shopping trips include only carriers last reported open. Planetary includes ports on planets' surfaces.", |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 crate::widgets::chip_toggle(ui, &mut p.carriers, "Fleet carriers");
@@ -3225,6 +3227,9 @@ fn trip_tab(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi, marke
                     let name = if s.hit.is_carrier { format!("{} {}", icon::ANCHOR, s.hit.station) } else { s.hit.station.clone() };
                     if nav_label(ui, RichText::new(name).font(display(size::HEADLINE)).color(pal::TEXT), "Click for the station's whole market") {
                         nav = Some(Nav::Station(s.hit.market_id));
+                    }
+                    if s.hit.is_carrier {
+                        access_badge(ui, s.hit.carrier_access.as_deref());
                     }
                     if ui.link(&s.hit.system).on_hover_text("Click to copy the system").clicked() {
                         ui.ctx().copy_text(s.hit.system.clone());
@@ -3513,6 +3518,9 @@ fn results_routes(ui: &mut Ui, slot: &Slot<Res<TradeRoute>>, from: Option<&str>,
                         row.col(|ui| {
                             ui.vertical(|ui| {
                                 let (a, c) = age(end.market_updated_unix);
+                                if end.is_carrier {
+                                    access_badge(ui, end.carrier_access.as_deref());
+                                }
                                 if buy && here {
                                     ui.label(format!("{} Cr", nexus_data::names::group_digits(price)));
                                     ui.label(RichText::new(format!("{a} ago")).small().color(c));
@@ -3785,10 +3793,7 @@ fn list_row(ui: &mut Ui, name: &str, carrier: bool, access: Option<Option<&str>>
     let sense = if open_able { egui::Sense::click() } else { egui::Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 46.0), sense);
     let resp = match access {
-        Some(a) => resp.on_hover_text(match a {
-            Some(a) => format!("Docking: {}, as last reported with its market. Its owner can change that at any time.", carrier_access(a)),
-            None => "Who may dock was never reported for this carrier.".to_string(),
-        }),
+        Some(a) => resp.on_hover_text(docking_description(a)),
         None => resp,
     };
     let resp = if open_able { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
@@ -5071,6 +5076,7 @@ fn alert_reference(ui: &mut Ui, gs: &GameState, db: &GalaxyDb, st: &mut MarketUi
             max_age_hours: Some(72.0),
             min_quantity: w.min_qty.max(1),
             include_carriers: w.carriers,
+            open_carriers_only: true,
             include_planetary: true,
             limit: 1,
             sort: Sort::BestPrice,
@@ -5176,7 +5182,7 @@ fn alerts_tab(ui: &mut Ui, gs: &GameState, svc: &MarketService, db: &GalaxyDb, s
                     w.min_qty = i64::from(q);
                 }
             });
-            bar.field("Include", "Fleet carriers' orders: their owners set the prices, and they move.", |ui| {
+            bar.field("Include", "Price alerts include carriers last reported open to everyone.", |ui| {
                 crate::widgets::chip_toggle(ui, &mut w.carriers, "Fleet carriers");
             });
             bar.field("", "", |ui| {
@@ -5452,10 +5458,9 @@ mod tests {
         assert_eq!(word(Some("squadron")), "squadron");
         assert_eq!(word(Some("squadronfriends")), "squadron, friends");
         assert_eq!(word(Some("Squadron Friends")), "squadron, friends");
-        assert_eq!(word(None), "?", "never reported");
-        assert_eq!(word(Some("something new")), "?");
-        assert_eq!(carrier_access("Squadron Friends"), "squadron and friends");
-        assert_eq!(carrier_access("none"), "nobody but the owner");
+        assert_eq!(word(None), "unknown access", "never reported");
+        assert_eq!(word(Some("something new")), "unknown access");
+        assert!(docking_description(Some("something new")).contains("something new"));
     }
 
     /// How long an order stood, in words: up to the latest report, never to now, and per side (a buy order the report
@@ -5552,6 +5557,7 @@ mod tests {
             dist_ls: None,
             max_pad: Some('L'),
             is_carrier: false,
+            carrier_access: None,
             is_planetary: false,
             market_updated_unix: 0,
         };

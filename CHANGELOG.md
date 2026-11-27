@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Market and assistant quote results distinguish reported open, restricted and unknown carrier docking access. New trade-route destinations, shopping-trip stops and price alerts require carriers reported open to everyone.
+
 - Price alerts use the active commander's system and current watches. Changing commander, location or watch settings discards pending alerts, and overlapping watches share one notification for each commodity and trade direction in a market update.
 
 - Abnormal prices recalculates when the commander system, origin, ship capacity or search settings change. Superseded scans no longer show prices or offer row actions.

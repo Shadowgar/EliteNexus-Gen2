@@ -426,6 +426,45 @@ pub enum Sort {
     Freshest,
 }
 
+/// Docking access last reported for a fleet carrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CarrierAccess {
+    Open,
+    OwnerOnly,
+    Friends,
+    Squadron,
+    SquadronFriends,
+    Unknown,
+}
+
+impl CarrierAccess {
+    pub fn classify(raw: Option<&str>) -> Self {
+        let Some(raw) = raw else { return Self::Unknown };
+        let key: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        match key.to_ascii_lowercase().as_str() {
+            "all" => Self::Open,
+            "none" | "owner" => Self::OwnerOnly,
+            "friends" => Self::Friends,
+            "squadron" => Self::Squadron,
+            "squadronfriends" => Self::SquadronFriends,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn status(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Unknown => "unknown",
+            _ => "restricted",
+        }
+    }
+
+    /// Public docking requires explicit open access for a carrier.
+    pub fn allows_public_docking(is_carrier: bool, raw: Option<&str>) -> bool {
+        !is_carrier || Self::classify(raw) == Self::Open
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommodityQuery {
     /// Symbol (`gold`), journal name (`$gold_name;`) or display name (`Low Temperature Diamonds`).
@@ -439,6 +478,8 @@ pub struct CommodityQuery {
     /// Minimum stock (buy mode) or demand (sell mode); values below 1 are treated as 1.
     pub min_quantity: i64,
     pub include_carriers: bool,
+    /// When including carriers, require a report that docking is open to everyone.
+    pub open_carriers_only: bool,
     pub include_planetary: bool,
     pub limit: usize,
     pub sort: Sort,
@@ -455,6 +496,7 @@ impl Default for CommodityQuery {
             max_age_hours: None,
             min_quantity: 1,
             include_carriers: true,
+            open_carriers_only: false,
             include_planetary: true,
             limit: 50,
             sort: Sort::BestPrice,
@@ -913,6 +955,7 @@ pub struct TradeStation {
     pub dist_ls: Option<f64>,
     pub max_pad: Option<char>,
     pub is_carrier: bool,
+    pub carrier_access: Option<String>,
     pub is_planetary: bool,
     pub market_updated_unix: i64,
 }
@@ -1012,6 +1055,7 @@ pub struct MarketUpdate {
     pub commodities: usize,
     pub updated_unix: i64,
     pub is_carrier: bool,
+    pub carrier_access: Option<String>,
     pub source: Source,
     #[serde(skip)]
     pub(crate) revision: Arc<MarketRevision>,

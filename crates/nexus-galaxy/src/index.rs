@@ -8,7 +8,7 @@
 //! The writer thread refreshes the touched entries from the database after every commit, so the
 //! index only ever reflects committed data.
 
-use crate::error::Result;
+use crate::{CarrierAccess, error::Result};
 use rusqlite::Connection;
 use rustc_hash::FxHashMap;
 
@@ -28,6 +28,7 @@ pub(crate) struct StationLite {
     pub flags: u8,
     pub mat_trader: u8,
     pub tech_broker: u8,
+    pub carrier_access: CarrierAccess,
 }
 
 impl StationLite {
@@ -45,6 +46,7 @@ pub(crate) struct StationFilter {
     /// 0 = any.
     pub min_pad: u8,
     pub carriers: bool,
+    pub open_carriers_only: bool,
     pub planetary: bool,
     /// Negative = no limit.
     pub max_dist_ls: f64,
@@ -55,7 +57,7 @@ impl StationFilter {
         if self.min_pad > 0 && s.max_pad < self.min_pad {
             return false;
         }
-        if !self.carriers && s.is_carrier() {
+        if s.is_carrier() && (!self.carriers || (self.open_carriers_only && s.carrier_access != CarrierAccess::Open)) {
             return false;
         }
         if !self.planetary && s.is_planetary() {
@@ -72,7 +74,7 @@ impl StationFilter {
 }
 
 const COLS: &str = "market_id, x, y, z, services, market_updated, dist_ls, n_commodities, max_pad, is_carrier, \
-     is_planetary, is_odyssey_settlement, mat_trader, tech_broker";
+     is_planetary, is_odyssey_settlement, mat_trader, tech_broker, carrier_access";
 
 fn from_row(r: &rusqlite::Row) -> rusqlite::Result<(i64, StationLite)> {
     let pos = crate::query::opt_pos(r.get(1)?, r.get(2)?, r.get(3)?);
@@ -91,6 +93,7 @@ fn from_row(r: &rusqlite::Row) -> rusqlite::Result<(i64, StationLite)> {
             flags: flag(9, F_CARRIER)? | flag(10, F_PLANETARY)? | flag(11, F_SETTLEMENT)?,
             mat_trader: r.get::<_, i64>(12)?.clamp(0, 255) as u8,
             tech_broker: r.get::<_, i64>(13)?.clamp(0, 255) as u8,
+            carrier_access: CarrierAccess::classify(r.get::<_, Option<String>>(14)?.as_deref()),
         },
     ))
 }

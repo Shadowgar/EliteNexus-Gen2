@@ -69,6 +69,7 @@ pub fn sell_plan(db: &GalaxyDb, origin: [f64; 3], hold: &[Line], min_pad: Option
             min_pad,
             max_age_hours: Some(max_age_hours),
             min_quantity: 1,
+            open_carriers_only: true,
             sort: Sort::BestPrice,
             limit: 60,
             ..Default::default()
@@ -200,7 +201,7 @@ fn plan_trip(db: &GalaxyDb, origin: [f64; 3], goods: &[Line], f: &TripFilters, p
     let mut pools = Vec::with_capacity(lines.len());
     let mut wanted = 0u16;
     for (g, line) in lines.iter().enumerate() {
-        let pool: Vec<CommodityHit> = sellers(db, origin, line, f, per_good)?.into_iter().filter(|h| h.pos.is_some()).collect();
+        let pool: Vec<CommodityHit> = sellers(db, origin, line, f, per_good, true)?.into_iter().filter(|h| h.pos.is_some()).collect();
         if pool.is_empty() {
             missing.push(TripMissing { name: line.1.clone(), why: why_missing(db, origin, line, f)? });
         } else {
@@ -274,7 +275,7 @@ fn goods_in(set: u16) -> impl Iterator<Item = usize> {
 }
 
 /// A good's sellers nearest `at`, nearest first, that pass the filters and have the tonnes asked for in stock.
-fn sellers(db: &GalaxyDb, at: [f64; 3], (symbol, _, tonnes): &Line, f: &TripFilters, limit: usize) -> Result<Vec<CommodityHit>, String> {
+fn sellers(db: &GalaxyDb, at: [f64; 3], (symbol, _, tonnes): &Line, f: &TripFilters, limit: usize, open_carriers_only: bool) -> Result<Vec<CommodityHit>, String> {
     let q = CommodityQuery {
         commodity: symbol.clone(),
         mode: TradeMode::BuyFromStation,
@@ -283,6 +284,7 @@ fn sellers(db: &GalaxyDb, at: [f64; 3], (symbol, _, tonnes): &Line, f: &TripFilt
         max_age_hours: f.max_age_hours,
         min_quantity: (*tonnes).max(1),
         include_carriers: f.include_carriers,
+        open_carriers_only,
         include_planetary: f.include_planetary,
         sort: Sort::Nearest,
         limit,
@@ -296,7 +298,7 @@ fn sellers(db: &GalaxyDb, at: [f64; 3], (symbol, _, tonnes): &Line, f: &TripFilt
 /// the database can't place its sellers.
 fn why_missing(db: &GalaxyDb, origin: [f64; 3], (symbol, name, tonnes): &Line, f: &TripFilters) -> Result<String, String> {
     // Nearest first: a seller the database can place comes before one it can't.
-    let nearest = sellers(db, origin, &(symbol.clone(), name.clone(), 1), &TripFilters::default(), 1)?;
+    let nearest = sellers(db, origin, &(symbol.clone(), name.clone(), 1), &TripFilters::default(), 1, false)?;
     let Some(h) = nearest.first() else { return Ok("no market in the database sells it".into()) };
     let Some(pos) = h.pos else { return Ok("the database doesn't know where its sellers are".into()) };
     let mut fails = Vec::new();
@@ -322,6 +324,11 @@ fn why_missing(db: &GalaxyDb, origin: [f64; 3], (symbol, name, tonnes): &Line, f
     }
     if h.is_carrier && !f.include_carriers {
         fails.push("a fleet carrier, and they're left out".into());
+    } else if h.is_carrier {
+        let access = nexus_galaxy::CarrierAccess::classify(h.carrier_access.as_deref());
+        if access != nexus_galaxy::CarrierAccess::Open {
+            fails.push(format!("carrier docking access is {}", access.status()));
+        }
     }
     if h.is_planetary && !f.include_planetary {
         fails.push("planetary, and those are left out".into());
@@ -417,6 +424,9 @@ impl<'a> Candidates<'a> {
                 continue;
             }
             let Some(m) = db.station_market(market).map_err(|e| e.to_string())? else { continue };
+            if !nexus_galaxy::CarrierAccess::allows_public_docking(m.station.is_carrier, m.station.carrier_docking_access.as_deref()) {
+                continue;
+            }
             let Some(base) = (0..TRIP_GOODS).find_map(|g| self.offer(market, g)).cloned() else { continue };
             for g in goods_in(wanted & !goods) {
                 let Some((symbol, _, tonnes)) = lines.get(g) else { continue };

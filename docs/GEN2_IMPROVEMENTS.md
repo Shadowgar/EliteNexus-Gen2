@@ -342,3 +342,9 @@ The smallest standalone reviews are Windows credential protection failure handli
 [b-position]: https://github.com/Shadowgar/Praetorium/commit/920d775bb7742549a2dd275861ee960390acb601
 [b-log]: https://github.com/Shadowgar/Praetorium/commit/eb8845ccd4c6815485dc934c838970e2a7bce352
 [b-head]: https://github.com/Shadowgar/Praetorium/commit/ffa123193f0167cc062ab2c7454898351666d563
+
+### ENX-036 — Carrier docking qualification (G2-024D)
+
+- Market and Deals show access as last reported. Ask and MCP carry the qualification and source value in their results.
+- Public route discovery, commodity shopping and price alerts require an explicitly open carrier. A docked trade-route origin uses the commander's location as evidence. The pinned-order planner labels access on explicitly selected orders and requires open access for automatically discovered carrier markets.
+- Nine focused galaxy regressions passed on Rust 1.100.0 using `C:/PraetoriumBuild`. Application compilation and desktop, Ask and MCP runtime acceptance are deferred to 01D-W. Carrier movement authority remains G2-025.

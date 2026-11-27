@@ -49,6 +49,7 @@ pub struct Place {
     pub system: String,
     pub pos: Option<[f64; 3]>,
     pub is_carrier: bool,
+    pub carrier_access: Option<String>,
     pub max_pad: Option<char>,
     /// When its market was last reported (unix seconds).
     pub updated_unix: i64,
@@ -105,11 +106,11 @@ fn dist(a: Option<[f64; 3]>, b: Option<[f64; 3]>) -> Option<f64> {
 
 fn place_of(m: &StationMarket) -> Place {
     let s = &m.station;
-    Place { market_id: s.market_id, station: s.name.clone(), system: s.system.clone(), pos: s.pos, is_carrier: s.is_carrier, max_pad: s.max_pad, updated_unix: s.market_updated_unix }
+    Place { market_id: s.market_id, station: s.name.clone(), system: s.system.clone(), pos: s.pos, is_carrier: s.is_carrier, carrier_access: s.carrier_docking_access.clone(), max_pad: s.max_pad, updated_unix: s.market_updated_unix }
 }
 
 fn place_of_hit(h: &CommodityHit) -> Place {
-    Place { market_id: h.market_id, station: h.station.clone(), system: h.system.clone(), pos: h.pos, is_carrier: h.is_carrier, max_pad: h.max_pad, updated_unix: h.updated_unix }
+    Place { market_id: h.market_id, station: h.station.clone(), system: h.system.clone(), pos: h.pos, is_carrier: h.is_carrier, carrier_access: h.carrier_access.clone(), max_pad: h.max_pad, updated_unix: h.updated_unix }
 }
 
 /// A pinned order with today's price and quantity.
@@ -171,6 +172,7 @@ pub fn plan(db: &GalaxyDb, input: &PlanInput) -> Result<RunPlan, String> {
         max_age_hours: Some(input.max_age_h),
         min_quantity: 1,
         include_carriers: input.carriers,
+        open_carriers_only: true,
         include_planetary: true,
         limit: 40,
         sort: Sort::BestPrice,
@@ -395,7 +397,7 @@ mod tests {
     use serde_json::json;
 
     fn place(id: u64, x: f64) -> Place {
-        Place { market_id: id, station: format!("S{id}"), system: format!("Sys{id}"), pos: Some([x, 0.0, 0.0]), is_carrier: false, max_pad: Some('L'), updated_unix: 0 }
+        Place { market_id: id, station: format!("S{id}"), system: format!("Sys{id}"), pos: Some([x, 0.0, 0.0]), is_carrier: false, carrier_access: None, max_pad: Some('L'), updated_unix: 0 }
     }
 
     fn leg(from: Option<(u64, f64)>, to: (u64, f64)) -> Leg {
