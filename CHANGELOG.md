@@ -4,6 +4,8 @@ Independent semantic versions. Development milestones are not public releases. T
 
 ## Unreleased
 
+- Carrier bank transfers reconcile commander credits with the reported balance, including zero. Transfers without a reported balance continue to use the deposit or withdrawal amount.
+
 ## [0.1.0-alpha.1] - Development milestone (verification pending)
 
 First independent Praetorium version; based on the audited Elite Nexus 0.8.2 source lineage. No public release or production update is authorized.

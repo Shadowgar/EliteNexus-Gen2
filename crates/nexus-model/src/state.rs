@@ -1042,6 +1042,10 @@ impl GameState {
                     (true, false) => (LedgerCategory::Carrier, "Withdrew from the squadron carrier"),
                 };
                 self.money(ts, cat, amount, note);
+                if let Some(balance) = t.player_balance {
+                    self.cmdr.credits = balance;
+                    self.history.credit_sample(ts, balance);
+                }
             }
             Event::CarrierDepositFuel(d) => {
                 if let Some(c) = self.carrier_for(d.carrier_type.as_deref(), d.carrier_id) {
